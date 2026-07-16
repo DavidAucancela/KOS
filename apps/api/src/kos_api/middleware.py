@@ -1,0 +1,73 @@
+"""Middleware transversal de la API: trace_id, errores RFC 9457 y CORS (doc 10 §2)."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Awaitable, Callable
+from http import HTTPStatus
+
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def install(app: FastAPI) -> None:
+    """Registra middleware y manejadores globales de la aplicación."""
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.middleware("http")
+    async def trace_id_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        trace_id = str(uuid.uuid4())
+        request.state.trace_id = trace_id
+        response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        return response
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        """Errores esperados (4xx) en formato RFC 9457."""
+        trace_id: str | None = getattr(request.state, "trace_id", None)
+        headers = dict(exc.headers or {})
+        if trace_id:
+            headers["X-Trace-Id"] = trace_id
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "type": "about:blank",
+                "title": HTTPStatus(exc.status_code).phrase,
+                "status": exc.status_code,
+                "detail": exc.detail,
+                "trace_id": trace_id,
+            },
+            media_type="application/problem+json",
+            headers=headers,
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """500 en formato RFC 9457 (application/problem+json), sin detalles internos."""
+        trace_id: str | None = getattr(request.state, "trace_id", None)
+        headers = {"X-Trace-Id": trace_id} if trace_id else None
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 500,
+                "trace_id": trace_id,
+            },
+            media_type="application/problem+json",
+            headers=headers,
+        )

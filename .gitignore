@@ -1,0 +1,42 @@
+# --- Entorno ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv
+.venv/
+.venv.nosync/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# --- Node ---
+node_modules/
+.pnpm-store/
+.turbo/
+*.tsbuildinfo
+coverage/
+
+# --- Datos locales de servicios ---
+.data/
+*.dump
+
+# --- Claude Code (config local, no compartida) ---
+.claude/settings.local.json
+
+# --- IDE / SO ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Logs ---
+*.log
+logs/

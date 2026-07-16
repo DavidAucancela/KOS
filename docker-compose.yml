@@ -1,0 +1,118 @@
+name: kos
+
+# Los datos viven en volúmenes nombrados de Docker, NO en bind mounts bajo el
+# repo: ~/Documents está sincronizado con iCloud y su daemon provoca errores de
+# bloqueo/corrupción en Postgres/MinIO (EDEADLK) y flags "hidden" espurios.
+# Backup: ver docs/09 §8.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: kos-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kos}
+      POSTGRES_USER: ${POSTGRES_USER:-kos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kos_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kos} -d ${POSTGRES_DB:-kos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: kos-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-kos_dev_password}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    ports:
+      - "7474:7474"   # Browser
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: kos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: kos-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-kos}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-kos_dev_password}
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # En macOS, Docker no accede a la GPU: se usa el Ollama NATIVO del host
+  # (brew install ollama). Este servicio solo se levanta explícitamente en
+  # entornos sin Ollama nativo: docker compose --profile ollama-docker up
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kos-ollama
+    profiles: ["ollama-docker"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # --- Observabilidad (perfil opcional: docker compose --profile observability up) ---
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kos-prometheus
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kos-grafana
+    profiles: ["observability"]
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-kos_dev_password}
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  redis_data:
+  minio_data:
+  ollama_data:
+  prometheus_data:
+  grafana_data:

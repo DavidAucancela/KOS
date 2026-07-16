@@ -1,0 +1,63 @@
+[project]
+name = "kos"
+version = "0.1.0"
+description = "KOS — Knowledge Operating System (raíz del workspace uv)"
+requires-python = ">=3.12"
+dependencies = [
+    "kos-core",
+    "kos-connectors",
+    "kos-api",
+    "kos-workers",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/core", "packages/connectors", "apps/api", "apps/workers"]
+
+[tool.uv.sources]
+kos-core = { workspace = true }
+kos-connectors = { workspace = true }
+kos-api = { workspace = true }
+kos-workers = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12",
+    "mypy>=1.16",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kos_core", "kos_api", "kos_workers", "kos_connectors"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Patrón idiomático de FastAPI: Depends/Query en defaults de parámetros
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["packages", "apps"]
+markers = [
+    "integration: requiere la infraestructura local (make up) y Ollama nativo",
+]
+addopts = "-m 'not integration'"
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+exclude = ["alembic"]
+
+[[tool.mypy.overrides]]
+module = ["minio.*", "pgvector.*", "celery.*"]
+ignore_missing_imports = true

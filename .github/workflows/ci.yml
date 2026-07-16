@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docs:
+    name: Validar documentación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar enlaces internos de los docs
+        run: |
+          set -e
+          fail=0
+          # Extrae enlaces markdown relativos y verifica que el archivo destino existe
+          while IFS=: read -r file link; do
+            target="$(dirname "$file")/${link%%#*}"
+            if [ -n "${link%%#*}" ] && [ ! -e "$target" ]; then
+              echo "::error file=$file::enlace roto -> $link"
+              fail=1
+            fi
+          done < <(grep -RhoE --include='*.md' -H '\]\((\.\.?/[^)#]+|[^)/:#]+\.md)[^)]*\)' docs README.md \
+                   | sed -E 's/\]\(([^)]*)\)/:\1/' | sed -E 's/:(.*)#.*/:\1/')
+          exit $fail
+
+  python:
+    name: Python (ruff + mypy + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        run: uv sync --all-packages
+
+      - name: Ruff (lint + formato)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Mypy estricto en packages/core (doc 09 §3)
+        run: uv run mypy --strict packages/core/src/kos_core
+
+      - name: Tests unitarios
+        run: uv run pytest -q
+
+  web:
+    name: Web (eslint + tsc + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm --filter kos-web lint
+
+      - name: Build (incluye tsc)
+        run: pnpm --filter kos-web build
+
+      - name: Vitest
+        run: pnpm --filter kos-web test

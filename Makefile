@@ -1,0 +1,70 @@
+# KOS — atajos de desarrollo
+
+# El venv vive FUERA del repo: ~/Documents está sincronizado con iCloud Drive y su
+# daemon marca archivos con el flag "hidden", lo que rompe los .pth del venv
+# (Python ignora los .pth ocultos). Ver docs/09 §1.
+export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
+
+.PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-web \
+        migrate lint test test-integration demo help
+
+up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
+	docker compose up -d
+
+down: ## Detiene todos los servicios
+	docker compose down
+
+ps: ## Estado de los servicios
+	docker compose ps
+
+logs: ## Logs de todos los servicios (make logs s=postgres para uno)
+	docker compose logs -f $(s)
+
+obs-up: ## Levanta también Prometheus y Grafana
+	docker compose --profile observability up -d
+
+pull-models: ## Descarga los modelos (Ollama nativo; cae a Docker si no está)
+	ollama pull bge-m3 || docker exec kos-ollama ollama pull bge-m3
+	ollama pull llama3.2 || docker exec kos-ollama ollama pull llama3.2
+
+install: ## Instala las dependencias (workspace uv + pnpm)
+	uv sync --all-packages
+	pnpm install
+
+dev: ## API + workers + web en modo desarrollo (Ctrl-C para salir)
+	$(MAKE) -j3 dev-api dev-workers dev-web
+
+dev-api: ## Solo la API (http://localhost:8000)
+	uv run uvicorn kos_api.main:app --reload --port 8000
+
+dev-workers: ## Solo los workers Celery
+	uv run celery -A kos_workers.celery_app worker --loglevel=INFO
+
+dev-web: ## Solo la web (http://localhost:5173)
+	pnpm --filter kos-web dev
+
+migrate: ## Aplica las migraciones de Postgres (Alembic)
+	uv run alembic -c packages/core/alembic.ini upgrade head
+
+lint: ## Ruff + mypy (core estricto) + eslint web
+	uv run ruff check .
+	uv run ruff format --check .
+	uv run mypy --strict packages/core/src/kos_core
+	pnpm --filter kos-web lint
+
+test: ## Tests unitarios (Python + web)
+	uv run pytest
+	pnpm --filter kos-web test
+
+test-integration: ## Tests @integration (requieren make up + Ollama con modelos)
+	uv run pytest -m integration -o addopts=""
+
+demo: ## Demo del Sprint 1: embedding con bge-m3 guardado y consultado en pgvector
+	uv run python scripts/demo_sprint1.py
+
+clean: ## Detiene servicios y ELIMINA todos los datos locales (volúmenes Docker)
+	docker compose down -v
+	rm -rf .data
+
+help: ## Muestra esta ayuda
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-16s\033[0m %s\n", $$1, $$2}'

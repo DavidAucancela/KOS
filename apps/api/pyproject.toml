@@ -1,0 +1,22 @@
+[project]
+name = "kos-api"
+version = "0.1.0"
+description = "API pública de KOS — FastAPI (doc 06)"
+requires-python = ">=3.12"
+dependencies = [
+    "kos-core",
+    "fastapi>=0.116",
+    "uvicorn[standard]>=0.35",
+    # Cliente Celery para encolar jobs por nombre (la API no importa kos_workers)
+    "celery[redis]>=5.5",
+]
+
+[tool.uv.sources]
+kos-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kos_api"]
