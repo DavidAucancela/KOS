@@ -1,6 +1,6 @@
 # 08 — Plan de implementación por sprints
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-11
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-16
 
 Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan detalla v0.1 y v0.2; los sprints de versiones posteriores se planifican al cerrar la versión anterior, con lo aprendido.
 
@@ -67,6 +67,12 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 
 **Demo:** métricas del set de evaluación en búsqueda pura (recall@k).
 
+> **Set de evaluación construido y corrido el 2026-07-16** (más tarde de lo planeado, junto con el cierre de v0.2):
+> 38 preguntas sobre el vault real en `docs/eval/preguntas.md`, resultados en `docs/eval/resultados.md`.
+> **35/38 = 92.1%** con ≥1 cita correcta — supera el criterio de cierre de v0.2 (>90%) definido en el Sprint 4.
+> Los 3 fallos son de desambiguación léxica ("zero" en Zero Conditional vs. Zero Trust; "Supabase" genérico vs. nota
+> de Nunna; variantes de formulación casi idénticas con distinto resultado), no de contenido ausente.
+
 ### Sprint 4 (semanas 9–10) — "Responde con citas"
 
 **Objetivo:** el caso de uso canónico #1 completo.
@@ -77,6 +83,8 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 - UI: chat + visor de citas que abre el documento original
 
 **Demo:** preguntas reales sobre el vault respondidas con citas clicables. Medición contra el set de evaluación (>90% con ≥1 cita correcta → cierre de v0.2).
+
+> **Criterio de cierre de v0.2 cumplido el 2026-07-16**: 35/38 = 92.1% (ver nota en Sprint 3 y `docs/eval/`).
 
 ### Sprint 5 (semanas 11–12) — "Robustez y PDF/Git"
 
