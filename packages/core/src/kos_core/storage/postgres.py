@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -74,6 +75,7 @@ documents_table = Table(
     Column("created_at", DateTime(timezone=True)),
     Column("modified_at", DateTime(timezone=True)),
     Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("deleted_at", DateTime(timezone=True)),
     UniqueConstraint("connector", "source_id", name="uq_documents_connector_source"),
 )
 
@@ -172,3 +174,36 @@ async def upsert_parsed_document(
                 ],
             )
     return len(parsed.chunks)
+
+
+async def retire_documents(engine: AsyncEngine, *, connector: str, source_ids: set[str]) -> int:
+    """Marca tombstone (doc 05 §5) y retira los chunks de documentos ausentes en la fuente.
+
+    El blob original sigue en MinIO (inmutable); solo se retira la evidencia
+    consultable (chunks) y se registra `deleted_at`. Devuelve cuántos se marcaron.
+    """
+    if not source_ids:
+        return 0
+    async with engine.begin() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    select(documents_table.c.doc_id).where(
+                        documents_table.c.connector == connector,
+                        documents_table.c.source_id.in_(source_ids),
+                        documents_table.c.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return 0
+        await conn.execute(chunks_table.delete().where(chunks_table.c.doc_id.in_(rows)))
+        await conn.execute(
+            documents_table.update()
+            .where(documents_table.c.doc_id.in_(rows))
+            .values(deleted_at=func.now())
+        )
+        return len(rows)

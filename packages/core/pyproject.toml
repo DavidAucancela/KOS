@@ -14,6 +14,8 @@ dependencies = [
     "neo4j>=5.28",
     "redis>=6.2",
     "minio>=7.2",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
 ]
 
 [build-system]

@@ -6,7 +6,7 @@
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
 .PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-web \
-        migrate lint test test-integration demo help
+        migrate lint test test-integration demo reindex help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
 	docker compose up -d
@@ -61,6 +61,9 @@ test-integration: ## Tests @integration (requieren make up + Ollama con modelos)
 
 demo: ## Demo del Sprint 1: embedding con bge-m3 guardado y consultado en pgvector
 	uv run python scripts/demo_sprint1.py
+
+reindex: ## kos reindex: reconstruye los derivados desde MinIO + fuentes (doc 05 §5; s=nombre opcional)
+	uv run python scripts/kos_reindex.py $(if $(s),--source $(s),)
 
 clean: ## Detiene servicios y ELIMINA todos los datos locales (volúmenes Docker)
 	docker compose down -v

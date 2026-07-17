@@ -28,6 +28,10 @@ class RawDocument(BaseModel):
     mime_type: str = "text/markdown"
     source_metadata: dict[str, Any] = Field(default_factory=dict)
     fetched_at: datetime
+    raw_bytes: bytes | None = None
+    """Blob original cuando difiere de `content` (doc 05 §2: binarios como PDF,
+    cuyo `content` es el texto ya extraído que consume el pipeline). Si es
+    `None`, el blob subido a MinIO es `content` mismo."""
 
 
 class ChunkPosition(BaseModel):

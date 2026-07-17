@@ -11,7 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from kos_core.observability import bind_trace_id, get_tracer
+
 _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+_tracer = get_tracer("kos-api")
 
 
 def install(app: FastAPI) -> None:
@@ -31,7 +34,13 @@ def install(app: FastAPI) -> None:
     ) -> Response:
         trace_id = str(uuid.uuid4())
         request.state.trace_id = trace_id
-        response = await call_next(request)
+        bind_trace_id(trace_id)
+        with _tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
+            span.set_attribute("kos.trace_id", trace_id)
+            span.set_attribute("http.method", request.method)
+            span.set_attribute("http.route", request.url.path)
+            response = await call_next(request)
+            span.set_attribute("http.status_code", response.status_code)
         response.headers["X-Trace-Id"] = trace_id
         return response
 

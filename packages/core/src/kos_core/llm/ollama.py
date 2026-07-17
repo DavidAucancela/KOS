@@ -7,8 +7,10 @@ from collections.abc import Sequence
 import httpx
 
 from kos_core.config import Settings, get_settings
+from kos_core.observability import get_tracer
 
 _DEFAULT_TIMEOUT = 120.0
+_tracer = get_tracer("kos-llm")
 
 
 async def ping(settings: Settings | None = None, *, timeout: float = 3.0) -> None:
@@ -33,12 +35,15 @@ class OllamaEmbeddingClient:
         )
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        response = await self._client.post(
-            "/api/embed", json={"model": self.model, "input": list(texts)}
-        )
-        response.raise_for_status()
-        embeddings: list[list[float]] = response.json()["embeddings"]
-        return embeddings
+        with _tracer.start_as_current_span("ollama.embed") as span:
+            span.set_attribute("kos.llm.model", self.model)
+            span.set_attribute("kos.llm.input_count", len(texts))
+            response = await self._client.post(
+                "/api/embed", json={"model": self.model, "input": list(texts)}
+            )
+            response.raise_for_status()
+            embeddings: list[list[float]] = response.json()["embeddings"]
+            return embeddings
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -76,10 +81,18 @@ class OllamaLLMClient:
         }
         if system is not None:
             payload["system"] = system
-        response = await self._client.post("/api/generate", json=payload)
-        response.raise_for_status()
-        text: str = response.json()["response"]
-        return text
+        with _tracer.start_as_current_span("ollama.generate") as span:
+            span.set_attribute("kos.llm.model", self.model)
+            span.set_attribute("kos.llm.temperature", temperature)
+            response = await self._client.post("/api/generate", json=payload)
+            response.raise_for_status()
+            body = response.json()
+            if "prompt_eval_count" in body:
+                span.set_attribute("kos.llm.prompt_tokens", body["prompt_eval_count"])
+            if "eval_count" in body:
+                span.set_attribute("kos.llm.completion_tokens", body["eval_count"])
+            text: str = body["response"]
+            return text
 
     async def aclose(self) -> None:
         await self._client.aclose()

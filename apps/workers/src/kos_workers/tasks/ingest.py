@@ -24,6 +24,7 @@ from kos_core.storage import redis as redis_storage
 from kos_core.storage.postgres import (
     create_engine,
     documents_table,
+    retire_documents,
     sources_table,
     upsert_parsed_document,
 )
@@ -51,16 +52,30 @@ async def _load_source(source_uuid: uuid.UUID, settings: Settings) -> dict[str, 
 
 
 async def _known_hashes(connector_name: str, settings: Settings) -> dict[str, str]:
-    """content_hash registrado por source_id, para saltar documentos sin cambios."""
+    """content_hash registrado por source_id (no tombstone), para saltar sin cambios."""
     engine = create_engine(settings)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(
                 select(documents_table.c.source_id, documents_table.c.content_hash).where(
-                    documents_table.c.connector == connector_name
+                    documents_table.c.connector == connector_name,
+                    documents_table.c.deleted_at.is_(None),
                 )
             )
             return {row.source_id: row.content_hash for row in result if row.content_hash}
+    finally:
+        await engine.dispose()
+
+
+async def _retire_missing(connector_name: str, discovered_ids: set[str], settings: Settings) -> int:
+    """Tombstone de los documentos conocidos que ya no aparecen en discover() (doc 05 §5)."""
+    known = await _known_hashes(connector_name, settings)
+    missing = set(known) - discovered_ids
+    if not missing:
+        return 0
+    engine = create_engine(settings)
+    try:
+        return await retire_documents(engine, connector=connector_name, source_ids=missing)
     finally:
         await engine.dispose()
 
@@ -71,25 +86,38 @@ def _build_connector(source: dict[str, Any]) -> Connector:
 
 
 @app.task(name="kos.sync_source")
-def sync_source(source_uuid: str) -> dict[str, int]:
-    """Descubre la fuente y encola la ingesta de lo nuevo/cambiado."""
+def sync_source(source_uuid: str, force: bool = False) -> dict[str, int]:
+    """Descubre la fuente, encola lo nuevo/cambiado y retira lo borrado (doc 05 §5).
+
+    `force=True` (usado por `kos reindex`) ignora los hashes conocidos y
+    reencola todo lo descubierto, para reconstruir los derivados desde
+    MinIO + la fuente sin depender de que algo haya cambiado.
+    """
     settings = get_settings()
     source = asyncio.run(_load_source(uuid.UUID(source_uuid), settings))
     if source is None or not source["enabled"]:
-        return {"discovered": 0, "queued": 0, "skipped": 0}
+        return {"discovered": 0, "queued": 0, "skipped": 0, "retired": 0}
 
     connector = _build_connector(source)
-    known = asyncio.run(_known_hashes(connector.name, settings))
+    known = {} if force else asyncio.run(_known_hashes(connector.name, settings))
 
     discovered = 0
     queued = 0
+    discovered_ids: set[str] = set()
     for ref in connector.discover():
         discovered += 1
+        discovered_ids.add(ref.source_id)
         if known.get(ref.source_id) == ref.content_hash:
             continue
         ingest_document.delay(source_uuid, ref.model_dump(mode="json"))
         queued += 1
-    return {"discovered": discovered, "queued": queued, "skipped": discovered - queued}
+    retired = asyncio.run(_retire_missing(connector.name, discovered_ids, settings))
+    return {
+        "discovered": discovered,
+        "queued": queued,
+        "skipped": discovered - queued,
+        "retired": retired,
+    }
 
 
 @app.task(name="kos.ingest_document")
@@ -105,7 +133,10 @@ def ingest_document(source_uuid: str, ref_payload: dict[str, Any]) -> dict[str, 
     raw = connector.fetch(ref)
 
     doc_id = make_doc_id(raw.connector, raw.source_id)
-    blob = raw.content.encode("utf-8") if isinstance(raw.content, str) else raw.content
+    if raw.raw_bytes is not None:
+        blob = raw.raw_bytes
+    else:
+        blob = raw.content.encode("utf-8") if isinstance(raw.content, str) else raw.content
     minio_client = minio_storage.create_client(settings)
     minio_storage.put_blob(
         minio_client,

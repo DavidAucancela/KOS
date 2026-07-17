@@ -11,6 +11,7 @@ from kos_api import middleware
 from kos_api.routes import documents, health, query, search, sources
 from kos_core.config import get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
+from kos_core.observability import configure_logging, configure_tracing
 from kos_core.storage import minio as minio_storage
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
@@ -21,6 +22,8 @@ from kos_core.storage import redis as redis_storage
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Crea los clientes compartidos (perezosos: no conectan aquí) y los libera al apagar."""
     settings = get_settings()
+    configure_logging(level=settings.kos_log_level)
+    configure_tracing("kos-api")
     app.state.settings = settings
     app.state.postgres_engine = postgres_storage.create_engine(settings)
     app.state.neo4j_driver = neo4j_storage.create_driver(settings)

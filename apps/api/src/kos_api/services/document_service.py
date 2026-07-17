@@ -26,14 +26,24 @@ _DOC_COLUMNS = [
     documents_table.c.created_at,
     documents_table.c.modified_at,
     documents_table.c.fetched_at,
+    documents_table.c.deleted_at,
 ]
 
 
 async def list_documents(
     engine: AsyncEngine, *, cursor: str | None, limit: int
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Paginación por cursor opaco (= último doc_id, doc 06 §2)."""
-    query = select(*_DOC_COLUMNS).order_by(documents_table.c.doc_id).limit(limit)
+    """Paginación por cursor opaco (= último doc_id, doc 06 §2).
+
+    Los documentos con tombstone (borrados en la fuente, doc 05 §5) quedan
+    fuera del listado por defecto; siguen accesibles por `get_document`.
+    """
+    query = (
+        select(*_DOC_COLUMNS)
+        .where(documents_table.c.deleted_at.is_(None))
+        .order_by(documents_table.c.doc_id)
+        .limit(limit)
+    )
     if cursor is not None:
         query = query.where(documents_table.c.doc_id > uuid.UUID(cursor))
     async with engine.connect() as conn:

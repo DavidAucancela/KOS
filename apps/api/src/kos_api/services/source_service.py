@@ -57,9 +57,13 @@ async def create_source(
     return await get_source(engine, source_uuid)
 
 
-def enqueue_sync(settings: Settings, source_uuid: uuid.UUID) -> str:
-    """Encola la sincronización en los workers y devuelve el job_id de Celery."""
+def enqueue_sync(settings: Settings, source_uuid: uuid.UUID, *, force: bool = False) -> str:
+    """Encola la sincronización en los workers y devuelve el job_id de Celery.
+
+    `force=True` es `kos reindex` (doc 05 §5): ignora los content_hash conocidos
+    y reencola todo lo descubierto.
+    """
     result = _celery_client(settings.redis_url).send_task(
-        SYNC_TASK_NAME, args=[str(source_uuid)], queue="default"
+        SYNC_TASK_NAME, args=[str(source_uuid), force], queue="default"
     )
     return str(result.id)

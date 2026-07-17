@@ -31,10 +31,14 @@ def get_connector(name: str, **config: Any) -> Connector:
 
 
 def _register_builtin() -> None:
-    # Import local para evitar ciclos: obsidian importa base, nunca registry.
+    # Import local para evitar ciclos: los conectores importan base, nunca registry.
+    from kos_connectors.git.connector import GitConnector
     from kos_connectors.obsidian.connector import ObsidianConnector
+    from kos_connectors.pdf.connector import PdfConnector
 
     register("obsidian", ObsidianConnector)
+    register("pdf", PdfConnector)
+    register("git", GitConnector)
 
 
 _register_builtin()

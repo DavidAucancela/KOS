@@ -97,6 +97,12 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 
 **Demo:** las tres fuentes conviven; borrar/modificar una nota y re-sincronizar funciona.
 
+> **Sprint 5 cerrado 2026-07-17**: conectores PDF y Git, tombstone + detección de borrados en
+> `kos.sync_source`, `kos reindex` (`make reindex`), logs JSON + trazas OTel (API, workers,
+> llamadas a Ollama). 119 tests, lint y mypy --strict limpios. Deuda: métricas Prometheus,
+> los 3 fallos de desambiguación del set de evaluación, watchers en tiempo real. Retro completa
+> en `docs/sprints/sprint-05.md`. **v0.2 cerrado.**
+
 ## v0.3+ (esbozo, se detalla al cerrar v0.2)
 
 | Sprint | Tema probable |

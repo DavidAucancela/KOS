@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "kos-core",
     "pyyaml>=6.0",
+    "pypdf>=5.0",
 ]
 
 [tool.uv.sources]
