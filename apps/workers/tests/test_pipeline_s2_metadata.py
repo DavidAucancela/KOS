@@ -39,6 +39,27 @@ def test_titulo_conserva_el_del_archivo_sin_senales() -> None:
     assert extract_metadata(doc).title == "mi-nota"
 
 
+def test_titulo_del_encabezado_limpia_negrita_y_wikilinks() -> None:
+    doc = _doc("## **Proyecto** [[Zero Trust arquitectura]]\n\ntexto")
+    assert extract_metadata(doc).title == "Proyecto Zero Trust arquitectura"
+
+
+def test_titulo_del_encabezado_usa_alias_del_wikilink() -> None:
+    doc = _doc("## Notas de [[Zero Trust arquitectura|ZT]]\n\ntexto")
+    assert extract_metadata(doc).title == "Notas de ZT"
+
+
+def test_titulo_de_plantilla_sin_llenar_se_descarta() -> None:
+    """Doc 08, Sprint 6: heading larguísimo tipo plantilla no reemplaza el stem."""
+    doc = _doc(
+        "## **Título**: Desarrollo de un sistema transaccional utilizando la "
+        "[[Zero Trust arquitectura]] basados en los controles de la norma [[OWASP]] "
+        "para la mitigación de riesgos en un sistema web.\n\ntexto",
+        title="Abstract",
+    )
+    assert extract_metadata(doc).title == "Abstract"
+
+
 def test_autor_y_fechas_validas() -> None:
     doc = _doc(
         "texto",

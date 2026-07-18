@@ -34,6 +34,7 @@ def create_celery() -> Celery:
             "kos_workers.tasks.ingest",
             "kos_workers.tasks.embed",
             "kos_workers.tasks.enrich",
+            "kos_workers.tasks.graph_sync",
         ],
     )
     celery.conf.update(

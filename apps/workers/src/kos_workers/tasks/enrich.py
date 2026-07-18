@@ -22,6 +22,7 @@ from kos_core.storage.postgres import chunks_table, create_engine, documents_tab
 from kos_workers.celery_app import app
 from kos_workers.pipeline.s5_summary import SUMMARY_SYSTEM, build_summary_prompt
 from kos_workers.pipeline.s6_keywords import extract_keywords
+from kos_workers.tasks.graph_sync import graph_sync
 
 # Genera texto a partir de un prompt (LLM real o fake en tests).
 AsyncGenerate = Callable[[str], Awaitable[str]]
@@ -110,4 +111,7 @@ async def _enrich_document(doc_id: uuid.UUID) -> dict[str, Any]:
 @app.task(name="kos.enrich_document")
 def enrich_document(doc_id: str) -> dict[str, Any]:
     """Rellena resumen y keywords del documento con el LLM local (idempotente)."""
-    return asyncio.run(_enrich_document(uuid.UUID(doc_id)))
+    result = asyncio.run(_enrich_document(uuid.UUID(doc_id)))
+    # Etapa cara aparte (Sprint 6, doc 10 §3): entidades/relaciones → grafo.
+    graph_sync.delay(doc_id)
+    return result

@@ -108,13 +108,22 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > resueltos. Eval sube a **36/38 = 94.7%**. Detalle en el addendum de
 > `docs/sprints/sprint-05.md`.
 
-## v0.3+ (esbozo, se detalla al cerrar v0.2)
+## v0.3 — Knowledge Graph (Fase 2)
 
-| Sprint | Tema probable |
-|---|---|
-| 6–7 | Extracción de entidades/relaciones + entity resolution |
-| 8 | Neo4j + endpoints de grafo + correcciones manuales |
-| 9 | Visualización del grafo en la UI |
+| Sprint | Tema | Estado |
+|---|---|---|
+| 6 | Núcleo: ontología como código, extracción de entidades/relaciones (s7-s9), entity resolution, escritura real a Neo4j | ✅ Cerrado 2026-07-18 |
+| 7 | `/v1/graph/*` + correcciones manuales | Planeado, no iniciado |
+| 8 | Visualización del grafo en la UI | Planeado, no iniciado |
+
+> **Sprint 6 cerrado 2026-07-18**: `packages/core/src/kos_core/ontology/`, etapas
+> `s7_entities`/`s8_relations`/`s9_confidence`, entity resolution (doc 05 §4, 5 pasos) y
+> `kos.graph_sync` escribiendo a Neo4j real (idempotente por MERGE). Demo verificada sobre el
+> mini_vault de fixtures (9 nodos, 5 relaciones). De paso, fix de generación de títulos
+> (`s2_metadata.py`) que venía de la deuda del eval de Sprint 5. 160 tests, lint y
+> mypy --strict limpios. Deuda: API/UI de grafo (siguiente sprints), tombstone sin propagar al
+> grafo, vault real sin re-sincronizar con el grafo todavía. Retro completa en
+> `docs/sprints/sprint-06.md`.
 
 ## Gestión
 

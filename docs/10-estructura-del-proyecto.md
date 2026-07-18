@@ -84,7 +84,7 @@ apps/workers/
 │   ├── tasks/                    # UNA TASK POR EVENTO del bus (doc 06 §3)
 │   │   ├── ingest.py             #   document.ingested → parseo      Sprint 2
 │   │   ├── embed.py              #   lotes de embeddings             Sprint 3
-│   │   ├── graph_sync.py         #   document.parsed → grafo         Fase 2
+│   │   ├── graph_sync.py         #   document.parsed → grafo         Sprint 6
 │   │   ├── learning.py           #   pipeline de aprendizaje         Fase 3
 │   │   └── consolidate.py        #   consolidación de memoria        Fase 3
 │   └── pipeline/                 # LAS 9 ETAPAS DEL PARSER (doc 05 §3)
@@ -95,9 +95,9 @@ apps/workers/
 │       ├── s4_embeddings.py      #   Sprint 3
 │       ├── s5_summary.py         │  Sprint 4
 │       ├── s6_keywords.py        │
-│       ├── s7_entities.py        │  Fase 2
+│       ├── s7_entities.py        │  Sprint 6
 │       ├── s8_relations.py       │
-│       └── s9_confidence.py      #   Fase 2
+│       └── s9_confidence.py      #   Sprint 6
 └── tests/
 ```
 
@@ -138,7 +138,7 @@ packages/core/
 │   │   ├── memory.py             #   MemoryItem                     Fase 3
 │   │   ├── agents.py             #   AgentRequest/Response, EvidenceRef
 │   │   └── events.py             #   document.ingested, .parsed, …
-│   ├── ontology/                 # ONTOLOGÍA COMO CÓDIGO (doc 02 §3)
+│   ├── ontology/                 # ONTOLOGÍA COMO CÓDIGO (doc 02 §3)              Sprint 6
 │   │   ├── nodes.py              #   Person, Project, Technology, …
 │   │   └── relations.py          #   USES, RELATED_TO, PREREQUISITE_OF, …
 │   ├── llm/                      # Interfaz abstracta (ADR-0006)

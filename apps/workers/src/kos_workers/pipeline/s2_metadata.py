@@ -11,6 +11,21 @@ from kos_core.schemas import ParsedDocument
 _FIRST_HEADING_RE = re.compile(r"^#{1,3}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 _WORD_RE = re.compile(r"[a-záéíóúñü]+")
 
+# Un heading real de sección es corto; una plantilla sin llenar (ej. "## **Título**:
+# <frase larga de ejemplo>") no lo es. Por encima de esto, se descarta como título
+# (doc 08, Sprint 6 — causa raíz del falso positivo de ranking con notas plantilla).
+_MAX_HEADING_TITLE_LEN = 80
+_BOLD_ITALIC_RE = re.compile(r"\*\*(.+?)\*\*|\*(.+?)\*")
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+
+
+def _clean_heading_text(raw: str) -> str:
+    """Quita `**negrita**`/`*cursiva*` y `[[wikilinks]]` (con alias) de un heading."""
+    text = _WIKILINK_RE.sub(lambda m: m.group(2) or m.group(1), raw)
+    text = _BOLD_ITALIC_RE.sub(lambda m: m.group(1) or m.group(2) or "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 # Stopwords mínimas: bastan para distinguir es/en sin dependencias externas.
 _ES_STOPWORDS = frozenset(
     [
@@ -116,7 +131,9 @@ def extract_metadata(doc: ParsedDocument) -> ParsedDocument:
     else:
         heading = _FIRST_HEADING_RE.search(body)
         if heading:
-            title = heading.group(1).strip()
+            cleaned = _clean_heading_text(heading.group(1))
+            if cleaned and len(cleaned) <= _MAX_HEADING_TITLE_LEN:
+                title = cleaned
 
     author = doc.author
     fm_author = _first_key(frontmatter, ("author", "autor"))
