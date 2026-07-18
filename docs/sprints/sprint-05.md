@@ -23,3 +23,27 @@
 - **Docker Desktop se cae por completo bajo carga sostenida** de Ollama + Postgres + Neo4j + Redis + MinIO simultáneos en la máquina del usuario (visto dos veces: durante el set de evaluación el 2026-07-16 y de nuevo encontrado al arrancar este sprint el 2026-07-17). No son solo los contenedores — el daemon mismo deja de responder (`docker info` falla). Se resuelve con `open -a Docker` + `docker compose up -d`; anotado en memoria del proyecto para no perder tiempo diagnosticándolo de nuevo.
 - El contrato `RawDocument` necesitaba un único campo nuevo opcional (`raw_bytes`) para que un conector binario (PDF) pudiera separar "lo que sube a MinIO" de "lo que consume el pipeline de texto" sin tocar `bootstrap()` ni ningún otro conector — el patrón de contratos congelados + forks paralelos con fronteras de directorio (Sprint 1) sigue funcionando: los dos conectores se hicieron en paralelo sin conflicto, y el único ajuste de contrato compartido lo señaló el propio fork del PDF en su reporte en vez de tocarlo por su cuenta.
 - Elegir `SimpleSpanProcessor` (síncrono) en vez de `BatchSpanProcessor` para el exportador de consola evita una condición de carrera real: el procesador por lotes exporta desde un hilo de fondo que sobrevive al cierre de stdout al terminar los tests, y lanza `ValueError: I/O operation on closed file`.
+
+## Actualización 2026-07-18 — deuda de este sprint resuelta
+
+Dos de los tres puntos de deuda de arriba se atacaron en un follow-up inmediato (los otros dos,
+watchers y grafo, siguen correctamente en su fase futura):
+
+- **Métricas Prometheus**: `GET /metrics` en la API, `start_http_server` en los workers
+  (puerto `KOS_WORKER_METRICS_PORT`, 9808 por defecto), 5 métricas reales (documentos
+  ingeridos/retirados, duración de pipeline, tokens de LLM, duración de requests HTTP) en un
+  `CollectorRegistry` propio en `kos_core/observability.py`. Verificado con `make obs-up`: los
+  3 targets (`prometheus`, `kos-api`, `kos-workers`) quedan `UP`.
+- **Ranking híbrido**: se agregó `title_search` como tercera rama de RRF en
+  `packages/core/src/kos_core/storage/search.py`. El primer intento (título vía
+  `tsvector`/`to_tsquery`) no sirvió: la config `'simple'` sin stemming hace que "conditional"
+  (de la pregunta) y "conditionals" (del título) sean tokens distintos, y `websearch_to_tsquery`
+  exige TODAS las palabras de una pregunta natural. Se reemplazó por `word_similarity` de
+  `pg_trgm` (ya habilitado en `infra/postgres/init.sql`), que tolera plural/singular y errores de
+  tipeo por similitud de trigramas. Resultado contra el set de evaluación real
+  (`scripts/run_eval.py`, recreado — el de Sprint 5 era desechable): **36/38 = 94.7%**, sube
+  desde 35/38 (92.1%). Arregla el caso de `jonathan.sec`; los otros dos fallos
+  (`Zero Conditional`, `Nunna/Supabase`) resultaron ser más difíciles de lo esperado — títulos
+  verbosos autogenerados por el LLM (s2/resumen) producen falsos positivos de trigrama contra
+  documentos no relacionados, y se documentan como límite conocido de esta heurística en vez de
+  seguir persiguiéndolos (ver `docs/eval/resultados.md`).

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Aplicación
     kos_env: str = "development"
     kos_log_level: str = "INFO"
+    # Puerto donde el worker Celery expone /metrics (doc 09 §6): no tiene
+    # servidor HTTP propio, así que Prometheus scrapea este puerto directo.
+    kos_worker_metrics_port: int = 9808
 
     @property
     def postgres_dsn(self) -> str:

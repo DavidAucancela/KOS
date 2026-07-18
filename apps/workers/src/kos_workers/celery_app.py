@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 from celery import Celery
 from celery.signals import task_postrun, task_prerun, worker_process_init
 from opentelemetry.trace import Span
+from prometheus_client import start_http_server
 
 from kos_core.config import get_settings
-from kos_core.observability import bind_trace_id, configure_logging, configure_tracing, get_tracer
+from kos_core.observability import (
+    METRICS_REGISTRY,
+    bind_trace_id,
+    configure_logging,
+    configure_tracing,
+    get_tracer,
+)
 
 _tracer = get_tracer("kos-workers")
 _spans: dict[str, Span] = {}
@@ -47,6 +55,11 @@ def _init_observability(**_kwargs: object) -> None:
     settings = get_settings()
     configure_logging(level=settings.kos_log_level)
     configure_tracing("kos-workers")
+    # Celery no tiene servidor HTTP propio: Prometheus scrapea este puerto
+    # directo del proceso worker (doc 09 §6). Con pool prefork y concurrency>1,
+    # cada proceso hijo dispara este signal; solo el primero gana el puerto.
+    with contextlib.suppress(OSError):  # otro proceso hijo del mismo worker ya lo expone
+        start_http_server(settings.kos_worker_metrics_port, registry=METRICS_REGISTRY)
 
 
 @task_prerun.connect

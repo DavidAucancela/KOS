@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from kos_core.observability import bind_trace_id, get_tracer
+from kos_core.observability import bind_trace_id, get_tracer, http_request_duration_seconds
 
 _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _tracer = get_tracer("kos-api")
@@ -35,6 +36,7 @@ def install(app: FastAPI) -> None:
         trace_id = str(uuid.uuid4())
         request.state.trace_id = trace_id
         bind_trace_id(trace_id)
+        started = time.perf_counter()
         with _tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
             span.set_attribute("kos.trace_id", trace_id)
             span.set_attribute("http.method", request.method)
@@ -42,6 +44,14 @@ def install(app: FastAPI) -> None:
             response = await call_next(request)
             span.set_attribute("http.status_code", response.status_code)
         response.headers["X-Trace-Id"] = trace_id
+
+        # Plantilla de ruta (no la URL cruda) para no explotar la cardinalidad
+        # de Prometheus con ids dinámicos (p. ej. /v1/documents/{doc_id}).
+        route = request.scope.get("route")
+        route_path = route.path if route is not None else request.url.path
+        http_request_duration_seconds.labels(
+            method=request.method, route=route_path, status=str(response.status_code)
+        ).observe(time.perf_counter() - started)
         return response
 
     @app.exception_handler(StarletteHTTPException)

@@ -36,6 +36,18 @@ def test_rrf_listas_vacias() -> None:
     assert rrf_fuse([[], []]) == []
 
 
+def test_rrf_fusiona_tres_rankings() -> None:
+    """Sprint 5: hybrid_search fusiona léxica + vectorial + título (3 listas, no 2)."""
+    id_a, id_b, id_c = _ids(3)
+    # id_c solo aparece en la tercera rama (título): debe sumar su propio voto.
+    fused = rrf_fuse([[id_a, id_b], [id_b], [id_c]], k=60)
+    scores = dict(fused)
+    # id_b: rank 2 en la primera lista, rank 1 en la segunda.
+    assert abs(scores[id_b] - (1 / 62 + 1 / 61)) < 1e-12
+    assert abs(scores[id_c] - (1 / 61)) < 1e-12
+    assert set(scores) == {id_a, id_b, id_c}
+
+
 def test_rrf_ordena_descendente() -> None:
     ids = _ids(4)
     fused = rrf_fuse([ids, ids])

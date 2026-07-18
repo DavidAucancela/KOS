@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import httpx
 
 from kos_core.config import Settings, get_settings
-from kos_core.observability import get_tracer
+from kos_core.observability import get_tracer, llm_tokens_total
 
 _DEFAULT_TIMEOUT = 120.0
 _tracer = get_tracer("kos-llm")
@@ -89,8 +89,14 @@ class OllamaLLMClient:
             body = response.json()
             if "prompt_eval_count" in body:
                 span.set_attribute("kos.llm.prompt_tokens", body["prompt_eval_count"])
+                llm_tokens_total.labels(model=self.model, operation="generate", kind="prompt").inc(
+                    body["prompt_eval_count"]
+                )
             if "eval_count" in body:
                 span.set_attribute("kos.llm.completion_tokens", body["eval_count"])
+                llm_tokens_total.labels(
+                    model=self.model, operation="generate", kind="completion"
+                ).inc(body["eval_count"])
             text: str = body["response"]
             return text
 

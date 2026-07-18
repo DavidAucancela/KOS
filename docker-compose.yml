@@ -96,6 +96,11 @@ services:
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    extra_hosts:
+      # API/workers corren nativos en el host, no en este compose (doc 09).
+      # host.docker.internal es nativo en Docker Desktop (Mac/Windows); en
+      # Linux hace falta este mapeo explícito a la gateway del host.
+      - "host.docker.internal:host-gateway"
 
   grafana:
     image: grafana/grafana:latest

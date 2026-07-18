@@ -1,10 +1,12 @@
-"""Logs estructurados + trazas OTel en API, workers y llamadas a LLM (doc 09 §6).
+"""Logs, trazas y métricas de KOS (doc 09 §6): API, workers y llamadas a LLM.
 
-Dos primitivas, sin instrumentación automática de terceros (mantiene el core
+Tres primitivas, sin instrumentación automática de terceros (mantiene el core
 independiente de frameworks, ADR-0001 en espíritu): un logger stdlib que emite
-JSON con `trace_id` inyectado desde un `ContextVar`, y un `Tracer` de
+JSON con `trace_id` inyectado desde un `ContextVar`, un `Tracer` de
 OpenTelemetry con exportador de consola por defecto (no hay collector en el
-compose todavía; cambiar de exportador es un solo punto de extensión aquí).
+compose todavía; cambiar de exportador es un solo punto de extensión aquí), y
+un `CollectorRegistry` propio de `prometheus_client` (no el global: evita
+registros duplicados si el módulo se reimporta en tests).
 """
 
 from __future__ import annotations
@@ -26,9 +28,47 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
 )
 from opentelemetry.trace import Tracer
+from prometheus_client import CollectorRegistry, Counter, Histogram
 
 _trace_id_var: ContextVar[str | None] = ContextVar("kos_trace_id", default=None)
 _tracer_provider_configured = False
+
+METRICS_REGISTRY = CollectorRegistry()
+
+documents_ingested_total = Counter(
+    "kos_documents_ingested_total",
+    "Documentos ingeridos correctamente, por conector.",
+    ["connector"],
+    registry=METRICS_REGISTRY,
+)
+
+documents_retired_total = Counter(
+    "kos_documents_retired_total",
+    "Documentos marcados tombstone (borrados en la fuente), por conector.",
+    ["connector"],
+    registry=METRICS_REGISTRY,
+)
+
+pipeline_duration_seconds = Histogram(
+    "kos_pipeline_duration_seconds",
+    "Duración del pipeline de parseo (s1-s6), por conector.",
+    ["connector"],
+    registry=METRICS_REGISTRY,
+)
+
+llm_tokens_total = Counter(
+    "kos_llm_tokens_total",
+    "Tokens de LLM consumidos, por modelo/operación/tipo (prompt|completion).",
+    ["model", "operation", "kind"],
+    registry=METRICS_REGISTRY,
+)
+
+http_request_duration_seconds = Histogram(
+    "kos_http_request_duration_seconds",
+    "Duración de requests HTTP de la API, por método/ruta/status.",
+    ["method", "route", "status"],
+    registry=METRICS_REGISTRY,
+)
 
 
 def bind_trace_id(trace_id: str | None) -> None:

@@ -5,6 +5,7 @@ import logging
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from prometheus_client import generate_latest
 
 from kos_core import observability
 
@@ -48,3 +49,18 @@ def test_traced_span_propaga_trace_id_como_atributo() -> None:
     assert span.attributes is not None
     assert span.attributes["kos.trace_id"] == "xyz-789"
     assert span.attributes["foo"] == "bar"
+
+
+def test_metricas_incrementan_en_el_registro_propio() -> None:
+    """Doc 09 §6, Sprint 5: counters/histogramas reales, no el REGISTRY global."""
+    observability.documents_ingested_total.labels(connector="test-connector").inc()
+    observability.llm_tokens_total.labels(
+        model="test-model", operation="generate", kind="prompt"
+    ).inc(42)
+
+    exposed = generate_latest(observability.METRICS_REGISTRY).decode()
+    assert 'kos_documents_ingested_total{connector="test-connector"} 1.0' in exposed
+    assert (
+        'kos_llm_tokens_total{kind="prompt",model="test-model",operation="generate"} 42.0'
+        in exposed
+    )

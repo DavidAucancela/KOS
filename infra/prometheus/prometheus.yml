@@ -1,5 +1,8 @@
-# Configuración mínima de Prometheus para KOS.
-# Los targets de api/workers se añaden en el Sprint 1, cuando expongan /metrics.
+# Configuración de Prometheus para KOS (doc 09 §6, Sprint 5).
+#
+# Prometheus corre en Docker (`make obs-up`); la API y los workers corren
+# nativos en el host (doc 09), no en el compose — por eso los targets usan
+# `host.docker.internal`, no `localhost`, para que el contenedor los alcance.
 
 global:
   scrape_interval: 15s
@@ -8,3 +11,11 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name: kos-api
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+
+  - job_name: kos-workers
+    static_configs:
+      - targets: ["host.docker.internal:9808"]

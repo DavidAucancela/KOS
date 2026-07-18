@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kos_core.config import get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient
 from kos_core.storage.postgres import create_engine
-from kos_core.storage.search import hybrid_search, lexical_search, vector_search
+from kos_core.storage.search import hybrid_search, lexical_search, title_search, vector_search
 
 pytestmark = pytest.mark.integration
 
@@ -47,7 +47,26 @@ async def test_busqueda_lexica_vectorial_e_hibrida() -> None:
         hybrid = await hybrid_search(engine, "contenedores", query_embedding, limit=5)
         assert hybrid, "la búsqueda híbrida no devolvió resultados"
         assert all(hit.source == "hybrid" for hit in hybrid)
-        seen = {hit.chunk_id for hit in lexical} | {hit.chunk_id for hit in vector}
+        title = await title_search(engine, "contenedores", limit=5)
+        seen = (
+            {hit.chunk_id for hit in lexical}
+            | {hit.chunk_id for hit in vector}
+            | {hit.chunk_id for hit in title}
+        )
         assert {hit.chunk_id for hit in hybrid} <= seen
+    finally:
+        await engine.dispose()
+
+
+async def test_busqueda_por_titulo_desambigua() -> None:
+    """Doc 08, Sprint 5: el título entra como tercera rama de RRF (regresión #16 del eval)."""
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        if await _embedded_chunks(engine) == 0:
+            pytest.skip("no hay chunks con embedding: sincronizar el mini-vault primero")
+
+        hits = await title_search(engine, "contenedores", limit=5)
+        assert all(hit.source == "title" for hit in hits)
     finally:
         await engine.dispose()

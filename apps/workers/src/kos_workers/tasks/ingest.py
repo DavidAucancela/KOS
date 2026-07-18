@@ -9,6 +9,7 @@ el `ParsedDocument` en Postgres y emite los eventos del bus (doc 06 §3).
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from typing import Any
 
@@ -17,6 +18,11 @@ from sqlalchemy import select
 from kos_connectors.base import Connector, SourceRef
 from kos_connectors.registry import get_connector
 from kos_core.config import Settings, get_settings
+from kos_core.observability import (
+    documents_ingested_total,
+    documents_retired_total,
+    pipeline_duration_seconds,
+)
 from kos_core.schemas import make_doc_id
 from kos_core.schemas.events import DocumentIngested, DocumentParsed
 from kos_core.storage import minio as minio_storage
@@ -75,9 +81,12 @@ async def _retire_missing(connector_name: str, discovered_ids: set[str], setting
         return 0
     engine = create_engine(settings)
     try:
-        return await retire_documents(engine, connector=connector_name, source_ids=missing)
+        retired = await retire_documents(engine, connector=connector_name, source_ids=missing)
     finally:
         await engine.dispose()
+    if retired:
+        documents_retired_total.labels(connector=connector_name).inc(retired)
+    return retired
 
 
 def _build_connector(source: dict[str, Any]) -> Connector:
@@ -146,7 +155,11 @@ def ingest_document(source_uuid: str, ref_payload: dict[str, Any]) -> dict[str, 
         content_type=raw.mime_type,
     )
 
+    pipeline_started = time.perf_counter()
     parsed = run_pipeline(raw)
+    pipeline_duration_seconds.labels(connector=raw.connector).observe(
+        time.perf_counter() - pipeline_started
+    )
 
     async def _persist() -> int:
         engine = create_engine(settings)
@@ -186,4 +199,5 @@ def ingest_document(source_uuid: str, ref_payload: dict[str, Any]) -> dict[str, 
     # Etapa cara aparte (doc 05 §3): los embeddings van por lotes en su propia task.
     embed_document.delay(str(parsed.doc_id))
 
+    documents_ingested_total.labels(connector=raw.connector).inc()
     return {"doc_id": str(parsed.doc_id), "chunks": chunk_count}

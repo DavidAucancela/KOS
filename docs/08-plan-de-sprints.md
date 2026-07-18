@@ -102,6 +102,11 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > llamadas a Ollama). 119 tests, lint y mypy --strict limpios. Deuda: métricas Prometheus,
 > los 3 fallos de desambiguación del set de evaluación, watchers en tiempo real. Retro completa
 > en `docs/sprints/sprint-05.md`. **v0.2 cerrado.**
+>
+> **Actualización 2026-07-18**: métricas Prometheus (`/metrics` en API y workers, 5 métricas
+> reales) y fix de ranking (tercera rama de RRF por título vía `word_similarity`/pg_trgm)
+> resueltos. Eval sube a **36/38 = 94.7%**. Detalle en el addendum de
+> `docs/sprints/sprint-05.md`.
 
 ## v0.3+ (esbozo, se detalla al cerrar v0.2)
 
