@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Puerto donde el worker Celery expone /metrics (doc 09 §6): no tiene
     # servidor HTTP propio, así que Prometheus scrapea este puerto directo.
     kos_worker_metrics_port: int = 9808
+    # Apaga la etapa cara de grafo (Sprint 6) sin tocar código: útil para una
+    # reingesta masiva (`kos reindex`) donde no se quiere duplicar la carga de
+    # LLM por nota mientras solo se necesita recuperar la búsqueda.
+    kos_graph_sync_enabled: bool = True
 
     @property
     def postgres_dsn(self) -> str:

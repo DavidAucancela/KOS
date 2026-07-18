@@ -113,5 +113,7 @@ def enrich_document(doc_id: str) -> dict[str, Any]:
     """Rellena resumen y keywords del documento con el LLM local (idempotente)."""
     result = asyncio.run(_enrich_document(uuid.UUID(doc_id)))
     # Etapa cara aparte (Sprint 6, doc 10 §3): entidades/relaciones → grafo.
-    graph_sync.delay(doc_id)
+    # Apagable con KOS_GRAPH_SYNC_ENABLED=false (reingestas masivas, doc 09 §5).
+    if get_settings().kos_graph_sync_enabled:
+        graph_sync.delay(doc_id)
     return result

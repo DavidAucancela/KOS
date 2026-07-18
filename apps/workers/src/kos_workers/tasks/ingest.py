@@ -57,14 +57,24 @@ async def _load_source(source_uuid: uuid.UUID, settings: Settings) -> dict[str, 
         await engine.dispose()
 
 
-async def _known_hashes(connector_name: str, settings: Settings) -> dict[str, str]:
-    """content_hash registrado por source_id (no tombstone), para saltar sin cambios."""
+async def _known_hashes(
+    source_uuid: uuid.UUID, connector_name: str, settings: Settings
+) -> dict[str, str]:
+    """content_hash registrado por source_id (no tombstone), para saltar sin cambios.
+
+    Filtrado por `source_uuid` además de `connector` (doc 05 §5): dos fuentes
+    distintas pueden compartir conector (ej. dos vaults "obsidian"), y sin este
+    filtro los documentos de una fuente se confunden con los de otra —
+    `sync_source`/`kos reindex` sobre una fuente pequeña llegaría a marcar como
+    "borrados" (tombstone) los documentos de una fuente ajena más grande.
+    """
     engine = create_engine(settings)
     try:
         async with engine.connect() as conn:
             result = await conn.execute(
                 select(documents_table.c.source_id, documents_table.c.content_hash).where(
                     documents_table.c.connector == connector_name,
+                    documents_table.c.source_uuid == source_uuid,
                     documents_table.c.deleted_at.is_(None),
                 )
             )
@@ -73,15 +83,19 @@ async def _known_hashes(connector_name: str, settings: Settings) -> dict[str, st
         await engine.dispose()
 
 
-async def _retire_missing(connector_name: str, discovered_ids: set[str], settings: Settings) -> int:
+async def _retire_missing(
+    source_uuid: uuid.UUID, connector_name: str, discovered_ids: set[str], settings: Settings
+) -> int:
     """Tombstone de los documentos conocidos que ya no aparecen en discover() (doc 05 §5)."""
-    known = await _known_hashes(connector_name, settings)
+    known = await _known_hashes(source_uuid, connector_name, settings)
     missing = set(known) - discovered_ids
     if not missing:
         return 0
     engine = create_engine(settings)
     try:
-        retired = await retire_documents(engine, connector=connector_name, source_ids=missing)
+        retired = await retire_documents(
+            engine, source_uuid=source_uuid, connector=connector_name, source_ids=missing
+        )
     finally:
         await engine.dispose()
     if retired:
@@ -107,8 +121,9 @@ def sync_source(source_uuid: str, force: bool = False) -> dict[str, int]:
     if source is None or not source["enabled"]:
         return {"discovered": 0, "queued": 0, "skipped": 0, "retired": 0}
 
+    source_uuid_value = uuid.UUID(source_uuid)
     connector = _build_connector(source)
-    known = {} if force else asyncio.run(_known_hashes(connector.name, settings))
+    known = {} if force else asyncio.run(_known_hashes(source_uuid_value, connector.name, settings))
 
     discovered = 0
     queued = 0
@@ -120,7 +135,9 @@ def sync_source(source_uuid: str, force: bool = False) -> dict[str, int]:
             continue
         ingest_document.delay(source_uuid, ref.model_dump(mode="json"))
         queued += 1
-    retired = asyncio.run(_retire_missing(connector.name, discovered_ids, settings))
+    retired = asyncio.run(
+        _retire_missing(source_uuid_value, connector.name, discovered_ids, settings)
+    )
     return {
         "discovered": discovered,
         "queued": queued,

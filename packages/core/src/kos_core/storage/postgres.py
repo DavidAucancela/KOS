@@ -176,9 +176,14 @@ async def upsert_parsed_document(
     return len(parsed.chunks)
 
 
-async def retire_documents(engine: AsyncEngine, *, connector: str, source_ids: set[str]) -> int:
+async def retire_documents(
+    engine: AsyncEngine, *, source_uuid: uuid_lib.UUID, connector: str, source_ids: set[str]
+) -> int:
     """Marca tombstone (doc 05 §5) y retira los chunks de documentos ausentes en la fuente.
 
+    Filtrado por `source_uuid` además de `connector`: dos fuentes distintas pueden
+    compartir conector (ej. dos vaults "obsidian"), y sin este filtro se
+    retirarían por error documentos de una fuente ajena que comparte conector.
     El blob original sigue en MinIO (inmutable); solo se retira la evidencia
     consultable (chunks) y se registra `deleted_at`. Devuelve cuántos se marcaron.
     """
@@ -190,6 +195,7 @@ async def retire_documents(engine: AsyncEngine, *, connector: str, source_ids: s
                 await conn.execute(
                     select(documents_table.c.doc_id).where(
                         documents_table.c.connector == connector,
+                        documents_table.c.source_uuid == source_uuid,
                         documents_table.c.source_id.in_(source_ids),
                         documents_table.c.deleted_at.is_(None),
                     )
