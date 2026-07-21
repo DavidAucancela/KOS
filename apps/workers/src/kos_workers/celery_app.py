@@ -44,6 +44,14 @@ def create_celery() -> Celery:
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        beat_schedule={
+            # Polling programado (doc 05 §2): sin esto, una nota nueva/editada
+            # solo entra al sistema si alguien llama /v1/sources/{id}/sync a mano.
+            "sync-all-sources": {
+                "task": "kos.sync_all_sources",
+                "schedule": settings.kos_sync_poll_seconds,
+            },
+        },
     )
     return celery
 

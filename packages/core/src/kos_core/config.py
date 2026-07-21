@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # reingesta masiva (`kos reindex`) donde no se quiere duplicar la carga de
     # LLM por nota mientras solo se necesita recuperar la búsqueda.
     kos_graph_sync_enabled: bool = True
+    # Cada cuánto Celery beat dispara kos.sync_all_sources (doc 05 §2: "las
+    # fuentes sin notificaciones se cubren con polling programado").
+    kos_sync_poll_seconds: int = 300
+    # Fuente por defecto donde `notes_service` crea notas nuevas desde el chat.
+    kos_default_vault_source: str = "vault-real"
 
     @property
     def postgres_dsn(self) -> str:

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from kos_api import middleware
-from kos_api.routes import documents, health, metrics, query, search, sources
+from kos_api.routes import documents, health, metrics, notes, query, search, sources
 from kos_core.config import get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
 from kos_core.observability import configure_logging, configure_tracing
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(metrics.router)
     app.include_router(sources.router)
+    app.include_router(notes.router)
     app.include_router(documents.router)
     app.include_router(search.router)
     app.include_router(query.router)

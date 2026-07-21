@@ -218,3 +218,29 @@ def ingest_document(source_uuid: str, ref_payload: dict[str, Any]) -> dict[str, 
 
     documents_ingested_total.labels(connector=raw.connector).inc()
     return {"doc_id": str(parsed.doc_id), "chunks": chunk_count}
+
+
+async def _enabled_source_uuids(settings: Settings) -> list[uuid.UUID]:
+    engine = create_engine(settings)
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                select(sources_table.c.source_uuid).where(sources_table.c.enabled.is_(True))
+            )
+            return [row.source_uuid for row in result]
+    finally:
+        await engine.dispose()
+
+
+@app.task(name="kos.sync_all_sources")
+def sync_all_sources() -> dict[str, int]:
+    """Polling programado (doc 05 §2, Celery beat): sincroniza toda fuente habilitada.
+
+    Barato si nada cambió: `sync_source` compara por `content_hash` y solo
+    reencola lo distinto (doc 05 §5).
+    """
+    settings = get_settings()
+    source_uuids = asyncio.run(_enabled_source_uuids(settings))
+    for source_uuid in source_uuids:
+        sync_source.delay(str(source_uuid))
+    return {"sources": len(source_uuids)}

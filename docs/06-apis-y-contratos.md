@@ -110,6 +110,16 @@ Toda capacidad con efectos u acceso a datos se expone como herramienta MCP ([ADR
 
 Reglas: las herramientas de escritura requieren aprobación del usuario por defecto; toda invocación se registra con `trace_id` del plan que la causó.
 
+> **Desviación documentada (2026-07-20)**: se implementó una versión mínima de
+> `obsidian.create_note` **directamente en la API** (`POST /v1/notes` +
+> comando `/nueva-maquina <nombre>` en el chat, ver
+> `apps/api/src/kos_api/services/notes_service.py`), no como herramienta MCP.
+> La regla de "aprobación del usuario" se satisface porque es el propio
+> usuario quien teclea el comando explícito — no hay ningún agente/LLM
+> decidiendo escribir de forma autónoma. La implementación completa vía MCP +
+> `permissions.py` sigue pendiente para la Fase 3 real; cuando llegue, esta
+> ruta se migra o convive con ella.
+
 ## 5. Qué congela este documento
 
 Lo estable (cambiar requiere PR sobre este doc + posible ADR): los principios de la sección 1, los contratos de agentes, la lista y semántica de eventos, y la regla de evidencia obligatoria. Lo flexible (evoluciona en el código con revisión normal): campos concretos de los esquemas y rutas adicionales de la API.

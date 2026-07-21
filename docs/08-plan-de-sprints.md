@@ -113,8 +113,9 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 | Sprint | Tema | Estado |
 |---|---|---|
 | 6 | Núcleo: ontología como código, extracción de entidades/relaciones (s7-s9), entity resolution, escritura real a Neo4j | ✅ Cerrado 2026-07-18 |
-| 7 | `/v1/graph/*` + correcciones manuales | Planeado, no iniciado |
-| 8 | Visualización del grafo en la UI | Planeado, no iniciado |
+| 7 | Fuera de plan (pedido directo del usuario): sincronización automática (polling) + crear notas desde el chat | ✅ Cerrado 2026-07-20 |
+| 8 | `/v1/graph/*` + correcciones manuales | Planeado, no iniciado |
+| 9 | Visualización del grafo en la UI | Planeado, no iniciado |
 
 > **Sprint 6 cerrado 2026-07-18**: `packages/core/src/kos_core/ontology/`, etapas
 > `s7_entities`/`s8_relations`/`s9_confidence`, entity resolution (doc 05 §4, 5 pasos) y
@@ -124,6 +125,15 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > mypy --strict limpios. Deuda: API/UI de grafo (siguiente sprints), tombstone sin propagar al
 > grafo, vault real sin re-sincronizar con el grafo todavía. Retro completa en
 > `docs/sprints/sprint-06.md`.
+
+> **Sprint 7 cerrado 2026-07-20**: `kos.sync_all_sources` + Celery beat (polling cada
+> `KOS_SYNC_POLL_SECONDS`, doc 05 §2) y `POST /v1/notes` + comando `/nueva-maquina <nombre>` en
+> el chat para crear notas desde una plantilla real de `_Templates/` (nueva plantilla
+> `MaquinaHTB.md` agregada al vault). Versión mínima de `obsidian.create_note` directamente en
+> la API, no como herramienta MCP — desviación documentada en doc 06 §4. También se corrigió
+> **un bug crítico** de Sprint 5 (tombstone cruzaba fuentes que comparten conector, rompió
+> temporalmente la búsqueda del vault real; recuperado con `kos reindex`). 173 tests, lint y
+> mypy --strict limpios. Retro completa en `docs/sprints/sprint-07.md`.
 
 ## Gestión
 

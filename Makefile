@@ -5,7 +5,7 @@
 # (Python ignora los .pth ocultos). Ver docs/09 §1.
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
-.PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-web \
+.PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-beat dev-web \
         migrate lint test test-integration demo reindex help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
@@ -31,14 +31,17 @@ install: ## Instala las dependencias (workspace uv + pnpm)
 	uv sync --all-packages
 	pnpm install
 
-dev: ## API + workers + web en modo desarrollo (Ctrl-C para salir)
-	$(MAKE) -j3 dev-api dev-workers dev-web
+dev: ## API + workers + beat + web en modo desarrollo (Ctrl-C para salir)
+	$(MAKE) -j4 dev-api dev-workers dev-beat dev-web
 
 dev-api: ## Solo la API (http://localhost:8000)
 	uv run uvicorn kos_api.main:app --reload --port 8000
 
 dev-workers: ## Solo los workers Celery
 	uv run celery -A kos_workers.celery_app worker --loglevel=INFO
+
+dev-beat: ## Solo el scheduler de Celery (sincronización automática, doc 05 §2)
+	uv run celery -A kos_workers.celery_app beat --loglevel=INFO
 
 dev-web: ## Solo la web (http://localhost:5173)
 	pnpm --filter kos-web dev

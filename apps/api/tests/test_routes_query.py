@@ -2,12 +2,14 @@
 
 import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from kos_api.main import create_app
+from kos_api.services import notes_service
 from kos_core.storage import search as search_storage
 from kos_core.storage.search import SearchHit
 
@@ -159,3 +161,65 @@ def test_query_vacia_es_422() -> None:
     with TestClient(create_app()) as client:
         response = client.post("/v1/query", json={"query": ""})
     assert response.status_code == 422
+
+
+def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_vault_path(engine: Any, source_name: str) -> Path:
+        return Path("/vault-falso")
+
+    creadas: list[dict[str, Any]] = []
+
+    def fake_create_note(vault_path: Path, **kwargs: Any) -> Path:
+        creadas.append(kwargs)
+        return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
+
+    monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+
+    llm = _EchoLLM()
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = llm
+        response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "Fawn.md" in body["answer"]
+    assert body["evidence"] == []
+    assert body["plan"] == [
+        {
+            "id": "s0",
+            "agent": "notes",
+            "task": "crear nota desde plantilla",
+            "depends_on": [],
+            "evidence_count": None,
+        }
+    ]
+    assert llm.calls == 0, "el comando no debe pasar por retrieval/síntesis"
+    assert creadas == [
+        {"template_name": "MaquinaHTB", "folder": "Security/HackTheBox/Máquinas", "title": "Fawn"}
+    ]
+
+
+def test_comando_nueva_maquina_nota_existente_responde_conflicto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_vault_path(engine: Any, source_name: str) -> Path:
+        return Path("/vault-falso")
+
+    def fake_create_note(vault_path: Path, **kwargs: Any) -> Path:
+        raise notes_service.NoteAlreadyExistsError("Ya existe una nota en: /vault-falso/x/Fawn.md")
+
+    monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = _EchoLLM()
+        response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "Ya existe" in body["answer"]

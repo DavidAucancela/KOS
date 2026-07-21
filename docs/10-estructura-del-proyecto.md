@@ -61,6 +61,8 @@ apps/api/
 │   │   ├── documents.py          #   /v1/documents*                 Sprint 2
 │   │   ├── search.py             #   POST /v1/search                Sprint 3
 │   │   ├── query.py              #   POST /v1/query                 Sprint 4
+│   │   ├── metrics.py            #   GET /metrics                   Sprint 5
+│   │   ├── notes.py              #   POST /v1/notes (crear desde plantilla, doc 06 §4) Sprint 7
 │   │   ├── graph.py              #   /v1/graph/*                    Fase 2
 │   │   ├── memory.py             #   /v1/memory*                    Fase 3
 │   │   ├── plans.py              #   /v1/plans/*                    Fase 4
@@ -68,7 +70,8 @@ apps/api/
 │   └── services/                 # Orquestación por caso de uso
 │       ├── query_service.py      #   pipeline fijo → planner (Fase 4)
 │       ├── document_service.py   #   listado/detalle/chunks     Sprint 2
-│       └── source_service.py
+│       ├── source_service.py
+│       └── notes_service.py      #   crear notas desde plantilla    Sprint 7
 └── tests/                        # Espejo de src/: test_routes_health.py, …
 ```
 
@@ -83,6 +86,7 @@ apps/workers/
 │   ├── celery_app.py             # Configuración Celery + colas
 │   ├── tasks/                    # UNA TASK POR EVENTO del bus (doc 06 §3)
 │   │   ├── ingest.py             #   document.ingested → parseo      Sprint 2
+│   │   │   └── kos.sync_all_sources #  polling automático (doc 05 §2)   Sprint 7
 │   │   ├── embed.py              #   lotes de embeddings             Sprint 3
 │   │   ├── graph_sync.py         #   document.parsed → grafo         Sprint 6
 │   │   ├── learning.py           #   pipeline de aprendizaje         Fase 3
@@ -148,7 +152,8 @@ packages/core/
 │   │   ├── postgres.py · neo4j.py · minio.py · redis.py
 │   │   └── search.py             #   búsqueda híbrida + fusión RRF   Sprint 3
 │   ├── alembic/                  # Migraciones de Postgres (core es dueño del esquema)
-│   └── observability.py          # Logs estructurados + OTel
+│   ├── observability.py          # Logs estructurados + OTel
+│   └── templater.py              # Renderizado mínimo de plantillas Templater (doc 06 §4) Sprint 7
 └── tests/
 ```
 
