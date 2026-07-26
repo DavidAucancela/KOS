@@ -21,7 +21,8 @@ RelationType = Literal[
 
 RELATION_TYPES: Final[frozenset[str]] = frozenset(get_args(RelationType))
 
-# Propiedades comunes a toda relación (doc 02 §3.2).
+# Propiedades comunes a toda relación (doc 02 §3.2). `rejected` es Sprint 9: soft
+# delete de una corrección manual (el sync no la recrea).
 COMMON_RELATION_PROPERTIES: Final[tuple[str, ...]] = (
     "confidence",
     "sources",
@@ -29,6 +30,7 @@ COMMON_RELATION_PROPERTIES: Final[tuple[str, ...]] = (
     "extracted_by",
     "valid_from",
     "valid_to",
+    "rejected",
 )
 
 

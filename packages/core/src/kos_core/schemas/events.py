@@ -52,3 +52,13 @@ class DocumentDeleted(EventBase):
     name: ClassVar[str] = "document.deleted"
 
     doc_id: uuid.UUID
+
+
+class GraphUpdated(EventBase):
+    """Emitido por `kos.graph_sync` y por correcciones manuales (Sprint 9, doc 06 §3);
+    sin consumidor todavía — Aprendizaje/Recomendador son Fase 3/4."""
+
+    name: ClassVar[str] = "graph.updated"
+
+    node_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(default_factory=list)

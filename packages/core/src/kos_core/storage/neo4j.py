@@ -29,9 +29,26 @@ async def ping(driver: AsyncDriver) -> None:
     await driver.verify_connectivity()
 
 
+def _normalize_temporals(value: Any) -> Any:
+    """El driver de Neo4j expone sus propios tipos temporales (`neo4j.time.DateTime`),
+    no `datetime.datetime` nativo — Pydantic (schemas/graph.py) rechaza el primero.
+    Recursivo porque `find_path` devuelve listas de mapas con fechas anidadas."""
+    to_native = getattr(value, "to_native", None)
+    if callable(to_native):
+        return to_native()
+    if isinstance(value, dict):
+        return {key: _normalize_temporals(v) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_temporals(v) for v in value]
+    return value
+
+
 class NodeRecord(dict[str, Any]):
     """Fila de nodo tal cual la devuelve Neo4j (id, canonical_name, name, aliases,
     confidence, sources)."""
+
+    def __init__(self, record: Any) -> None:
+        super().__init__(_normalize_temporals(dict(record)))
 
 
 async def fetch_nodes_by_type(driver: AsyncDriver, node_type: str) -> list[NodeRecord]:
@@ -62,26 +79,51 @@ async def merge_node(
 
     Los valores (`aliases`/`sources`/`confidence`) ya vienen fusionados por quien
     llama — entity resolution decide qué fusionar, esto solo persiste el resultado.
+    Si el nodo está `locked` (corrección manual, Sprint 9, doc 02 §4 regla 5), el
+    sync sigue sumando `sources` como evidencia pero no pisa `name`/`aliases`/
+    `confidence` — la protección vive acá, no en quien llama, para que aplique
+    sin importar qué compute el caller.
+
+    Un `PATCH` que corrige el tipo cambia la label real (`update_node`, vía APOC):
+    el nodo corregido deja de coincidir con el patrón `MERGE (n:{node_type} ...)`
+    de acá si el pipeline vuelve a proponer el tipo viejo — sin este chequeo previo
+    por `canonical_name` sin importar la label, esa desincronización crearía un
+    duplicado en vez de respetar la corrección (bug real encontrado en Sprint 9
+    probando contra el vault real, no por los tests mockeados). Solo aplica a
+    nodos `locked`: el resto conserva el comportamiento de Sprint 6 (nodos con el
+    mismo `canonical_name` pero tipos distintos pueden coexistir — polisemia).
     """
     if not is_valid_node_type(node_type):
         raise ValueError(f"Tipo de nodo desconocido: {node_type!r}")
-    query = (
-        f"MERGE (n:{node_type} {{canonical_name: $canonical_name}}) "
-        "ON CREATE SET n.id = $id, n.created_at = datetime(), n.version = 1 "
-        "ON MATCH SET n.version = n.version + 1 "
-        "SET n.name = $name, n.aliases = $aliases, n.confidence = $confidence, "
-        "n.sources = $sources, n.updated_at = datetime() "
-        "RETURN n.id AS id"
-    )
-    params = {
-        "canonical_name": canonical_name,
-        "id": str(uuid.uuid4()),
-        "name": name,
-        "aliases": aliases,
-        "confidence": confidence,
-        "sources": sources,
-    }
     async with driver.session() as session:
+        locked_result = await session.run(
+            "MATCH (n {canonical_name: $canonical_name}) WHERE coalesce(n.locked, false) "
+            "SET n.sources = apoc.coll.toSet(coalesce(n.sources, []) + $sources), "
+            "n.updated_at = datetime() "
+            "RETURN n.id AS id",
+            {"canonical_name": canonical_name, "sources": sources},
+        )
+        locked_record = await locked_result.single()
+        if locked_record is not None:
+            return str(locked_record["id"])
+
+        query = (
+            f"MERGE (n:{node_type} {{canonical_name: $canonical_name}}) "
+            "ON CREATE SET n.id = $id, n.created_at = datetime(), n.version = 1, "
+            "n.locked = false, n.extracted_by = 'parser@v1' "
+            "ON MATCH SET n.version = n.version + 1 "
+            "SET n.name = $name, n.aliases = $aliases, n.confidence = $confidence, "
+            "n.sources = $sources, n.updated_at = datetime() "
+            "RETURN n.id AS id"
+        )
+        params = {
+            "canonical_name": canonical_name,
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "aliases": aliases,
+            "confidence": confidence,
+            "sources": sources,
+        }
         result = await session.run(query, params)
         record = await result.single()
         assert record is not None  # MERGE siempre devuelve una fila
@@ -98,14 +140,26 @@ async def merge_relation(
     sources: list[str],
     extracted_by: str = "parser@v1",
 ) -> None:
-    """Crea o actualiza la relación entre dos nodos ya resueltos (por `id`)."""
+    """Crea o actualiza la relación entre dos nodos ya resueltos (por `id`).
+
+    Si la relación fue rechazada a mano (`rejected`, Sprint 9), el MERGE la sigue
+    matcheando (mismo patrón: mismo tipo entre los mismos nodos) pero el `WHERE`
+    posterior descarta el `SET` — no se resucita ni se le pisa `confidence`. Si
+    está `locked` (corrección manual de tipo/confianza), tampoco se pisa la
+    confianza; `extracted_by` ya estaba protegido de por sí (solo se fija
+    `ON CREATE`, nunca se reescribe en un re-sync).
+    """
     if not is_valid_relation_type(relation_type):
         raise ValueError(f"Tipo de relación desconocido: {relation_type!r}")
     query = (
         "MATCH (a {id: $source_id}), (b {id: $target_id}) "
         f"MERGE (a)-[r:{relation_type}]->(b) "
-        "ON CREATE SET r.extracted_by = $extracted_by, r.extracted_at = datetime() "
-        "SET r.confidence = $confidence, r.sources = $sources"
+        "ON CREATE SET r.id = randomUUID(), r.extracted_by = $extracted_by, "
+        "r.extracted_at = datetime(), r.rejected = false, r.locked = false "
+        "WITH r WHERE NOT coalesce(r.rejected, false) "
+        "SET r.confidence = CASE WHEN coalesce(r.locked, false) "
+        "THEN r.confidence ELSE $confidence END, "
+        "r.sources = $sources"
     )
     params = {
         "source_id": source_id,
@@ -116,3 +170,250 @@ async def merge_relation(
     }
     async with driver.session() as session:
         await session.run(query, params)
+
+
+_NODE_FIELDS = (
+    "n.id AS id, labels(n)[0] AS node_type, n.canonical_name AS canonical_name, "
+    "n.name AS name, n.aliases AS aliases, n.confidence AS confidence, "
+    "n.sources AS sources, coalesce(n.extracted_by, 'parser@v1') AS extracted_by, "
+    "coalesce(n.locked, false) AS locked, n.created_at AS created_at, "
+    "n.updated_at AS updated_at"
+)
+
+
+async def get_node(driver: AsyncDriver, node_id: str) -> NodeRecord | None:
+    """Nodo por id, para `GET /v1/graph/nodes/{id}` (doc 06 §2)."""
+    query = f"MATCH (n {{id: $node_id}}) RETURN {_NODE_FIELDS}"
+    async with driver.session() as session:
+        result = await session.run(query, {"node_id": node_id})
+        record = await result.single()
+        return NodeRecord(record) if record is not None else None
+
+
+class RelationRecord(dict[str, Any]):
+    """Fila de relación (id, relation_type, source_id/target_id, confidence, sources,
+    extracted_by, extracted_at, rejected)."""
+
+    def __init__(self, record: Any) -> None:
+        super().__init__(_normalize_temporals(dict(record)))
+
+
+class NeighborRecord(dict[str, Any]):
+    """Fila de vecindario: la relación + el nodo vecino + la dirección."""
+
+    def __init__(self, record: Any) -> None:
+        super().__init__(_normalize_temporals(dict(record)))
+
+
+async def get_neighborhood(
+    driver: AsyncDriver, node_id: str, *, limit: int = 50
+) -> list[NeighborRecord]:
+    """Relaciones entrantes y salientes de un nodo (vecindario inmediato, doc 06 §2),
+    sin las rechazadas a mano (`rejected`)."""
+    query = (
+        "MATCH (n {id: $node_id}) "
+        "CALL { "
+        "  WITH n MATCH (n)-[r]->(m) WHERE NOT coalesce(r.rejected, false) "
+        "  RETURN r AS rel, m AS neighbor, 'outgoing' AS direction "
+        "  UNION "
+        "  WITH n MATCH (n)<-[r]-(m) WHERE NOT coalesce(r.rejected, false) "
+        "  RETURN r AS rel, m AS neighbor, 'incoming' AS direction "
+        "} "
+        "RETURN rel.id AS rel_id, type(rel) AS relation_type, "
+        "rel.confidence AS rel_confidence, rel.sources AS rel_sources, "
+        "coalesce(rel.extracted_by, 'parser@v1') AS rel_extracted_by, "
+        "rel.extracted_at AS rel_extracted_at, "
+        "coalesce(rel.rejected, false) AS rel_rejected, "
+        "neighbor.id AS neighbor_id, labels(neighbor)[0] AS neighbor_type, "
+        "neighbor.canonical_name AS neighbor_canonical_name, "
+        "neighbor.name AS neighbor_name, neighbor.aliases AS neighbor_aliases, "
+        "neighbor.confidence AS neighbor_confidence, neighbor.sources AS neighbor_sources, "
+        "coalesce(neighbor.extracted_by, 'parser@v1') AS neighbor_extracted_by, "
+        "coalesce(neighbor.locked, false) AS neighbor_locked, direction "
+        "LIMIT $limit"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"node_id": node_id, "limit": limit})
+        return [NeighborRecord(record) async for record in result]
+
+
+async def find_path(
+    driver: AsyncDriver, from_id: str, to_id: str, *, max_hops: int = 4
+) -> tuple[list[NodeRecord], list[RelationRecord]] | None:
+    """Camino más corto entre dos nodos (doc 06 §2), o None si no hay.
+
+    `max_hops` se interpola (no se parametriza): Cypher no acepta parámetros en
+    los límites de un patrón de longitud variable `[*..N]`, igual que
+    `node_type`/`relation_type` en el resto del módulo. Se acota en Python antes
+    de interpolar, nunca viene de texto libre.
+    """
+    bounded_hops = min(max(max_hops, 1), 6)
+    query = (
+        "MATCH (a {id: $from_id}), (b {id: $to_id}) "
+        f"MATCH p = shortestPath((a)-[*..{bounded_hops}]-(b)) "
+        f"RETURN [n IN nodes(p) | {{"
+        "id: n.id, node_type: labels(n)[0], canonical_name: n.canonical_name, "
+        "name: n.name, aliases: n.aliases, confidence: n.confidence, "
+        "sources: n.sources, extracted_by: coalesce(n.extracted_by, 'parser@v1'), "
+        "locked: coalesce(n.locked, false), created_at: n.created_at, "
+        "updated_at: n.updated_at}] AS path_nodes, "
+        "[r IN relationships(p) | {"
+        "id: r.id, relation_type: type(r), source_id: startNode(r).id, "
+        "target_id: endNode(r).id, confidence: r.confidence, sources: r.sources, "
+        "extracted_by: coalesce(r.extracted_by, 'parser@v1'), extracted_at: r.extracted_at, "
+        "rejected: coalesce(r.rejected, false)}] AS path_relations"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"from_id": from_id, "to_id": to_id})
+        record = await result.single()
+        if record is None or record["path_nodes"] is None:
+            return None
+        nodes = [NodeRecord(n) for n in record["path_nodes"]]
+        relations = [RelationRecord(r) for r in record["path_relations"]]
+        return nodes, relations
+
+
+async def list_nodes_by_type(
+    driver: AsyncDriver, node_type: str, *, cursor: str | None = None, limit: int = 20
+) -> tuple[list[NodeRecord], str | None]:
+    """Listado paginado por tipo (a diferencia de `fetch_nodes_by_type`, que trae
+    todo sin paginar porque la usa entity resolution internamente)."""
+    if not is_valid_node_type(node_type):
+        raise ValueError(f"Tipo de nodo desconocido: {node_type!r}")
+    query = (
+        f"MATCH (n:{node_type}) "
+        "WHERE $cursor IS NULL OR n.id > $cursor "
+        f"RETURN {_NODE_FIELDS} "
+        "ORDER BY n.id LIMIT $limit"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"cursor": cursor, "limit": limit})
+        rows = [NodeRecord(record) async for record in result]
+    next_cursor = rows[-1]["id"] if len(rows) == limit else None
+    return rows, next_cursor
+
+
+async def count_relations(driver: AsyncDriver, node_id: str) -> int:
+    """Grado del nodo (relaciones no rechazadas), para priorizar qué revisar."""
+    query = (
+        "MATCH (n {id: $node_id})-[r]-() WHERE NOT coalesce(r.rejected, false) "
+        "RETURN count(r) AS total"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"node_id": node_id})
+        record = await result.single()
+        assert record is not None  # count() siempre devuelve una fila
+        return int(record["total"])
+
+
+async def most_connected_nodes(
+    driver: AsyncDriver, *, node_type: str | None = None, limit: int = 10
+) -> list[NodeRecord]:
+    """Nodos con más relaciones activas, para priorizar correcciones manuales."""
+    if node_type is not None and not is_valid_node_type(node_type):
+        raise ValueError(f"Tipo de nodo desconocido: {node_type!r}")
+    label = f":{node_type}" if node_type is not None else ""
+    query = (
+        f"MATCH (n{label}) "
+        "OPTIONAL MATCH (n)-[r]-() WHERE NOT coalesce(r.rejected, false) "
+        f"WITH n, count(r) AS degree "
+        f"RETURN {_NODE_FIELDS}, degree "
+        "ORDER BY degree DESC LIMIT $limit"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"limit": limit})
+        return [NodeRecord(record) async for record in result]
+
+
+async def update_node(
+    driver: AsyncDriver,
+    node_id: str,
+    *,
+    canonical_name: str | None = None,
+    node_type: str | None = None,
+    aliases: list[str] | None = None,
+) -> NodeRecord | None:
+    """Corrección manual (doc 02 §4 regla 5, doc 06 §2 `PATCH /v1/graph/nodes/{id}`):
+    fija `locked`/`extracted_by="user"`/`confidence=1.0`. `None` si el nodo no
+    existe. El cambio de tipo mueve la label real vía APOC (`apoc.create.setLabels`,
+    ya habilitado en el compose) — Cypher no acepta labels por parámetro.
+    """
+    if node_type is not None and not is_valid_node_type(node_type):
+        raise ValueError(f"Tipo de nodo desconocido: {node_type!r}")
+    async with driver.session() as session:
+        if node_type is not None:
+            await session.run(
+                "MATCH (n {id: $node_id}) "
+                "CALL apoc.create.setLabels(n, [$node_type]) YIELD node "
+                "RETURN node",
+                {"node_id": node_id, "node_type": node_type},
+            )
+        result = await session.run(
+            "MATCH (n {id: $node_id}) "
+            "SET n.canonical_name = coalesce($canonical_name, n.canonical_name), "
+            "n.aliases = coalesce($aliases, n.aliases), "
+            "n.confidence = 1.0, n.extracted_by = 'user', n.locked = true, "
+            "n.updated_at = datetime() "
+            f"RETURN {_NODE_FIELDS}",
+            {"node_id": node_id, "canonical_name": canonical_name, "aliases": aliases},
+        )
+        record = await result.single()
+        return NodeRecord(record) if record is not None else None
+
+
+_RELATION_FIELDS = (
+    "r.id AS id, type(r) AS relation_type, startNode(r).id AS source_id, "
+    "endNode(r).id AS target_id, r.confidence AS confidence, r.sources AS sources, "
+    "coalesce(r.extracted_by, 'parser@v1') AS extracted_by, r.extracted_at AS extracted_at, "
+    "coalesce(r.rejected, false) AS rejected"
+)
+
+
+async def update_relation(
+    driver: AsyncDriver,
+    relation_id: str,
+    *,
+    relation_type: str | None = None,
+    confidence: float | None = None,
+) -> RelationRecord | None:
+    """Corrección manual de una relación (doc 06 §2 `PATCH /v1/graph/relations/{id}`).
+
+    Neo4j no permite cambiar el tipo de una relación existente: si `relation_type`
+    cambia, se borra y se recrea entre los mismos nodos preservando `id` y
+    propiedades (`properties(r)`), y recién ahí se aplica la corrección.
+    """
+    if relation_type is not None and not is_valid_relation_type(relation_type):
+        raise ValueError(f"Tipo de relación desconocido: {relation_type!r}")
+    async with driver.session() as session:
+        if relation_type is not None:
+            recreated = await session.run(
+                "MATCH (a)-[r {id: $relation_id}]->(b) "
+                "WITH a, b, r, properties(r) AS props "
+                "DELETE r "
+                f"CREATE (a)-[r2:{relation_type}]->(b) "
+                "SET r2 = props "
+                "RETURN r2.id AS id",
+                {"relation_id": relation_id},
+            )
+            if await recreated.single() is None:
+                return None
+        result = await session.run(
+            "MATCH ()-[r {id: $relation_id}]->() "
+            "SET r.confidence = coalesce($confidence, 1.0), "
+            "r.extracted_by = 'user', r.locked = true "
+            f"RETURN {_RELATION_FIELDS}",
+            {"relation_id": relation_id, "confidence": confidence},
+        )
+        record = await result.single()
+        return RelationRecord(record) if record is not None else None
+
+
+async def reject_relation(driver: AsyncDriver, relation_id: str) -> bool:
+    """Rechazo manual (soft delete, doc 06 §2 `DELETE /v1/graph/relations/{id}`):
+    no se borra, se marca `rejected` para que el sync no la recree. `False` si
+    la relación no existe."""
+    query = "MATCH ()-[r {id: $relation_id}]->() SET r.rejected = true RETURN r.id AS id"
+    async with driver.session() as session:
+        result = await session.run(query, {"relation_id": relation_id})
+        record = await result.single()
+        return record is not None

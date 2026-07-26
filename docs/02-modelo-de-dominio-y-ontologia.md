@@ -1,6 +1,6 @@
 # 02 — Modelo de dominio y ontología del grafo
 
-**Estado:** 🟢 Aprobado (2026-07-13) · **Última actualización:** 2026-07-11
+**Estado:** 🟢 Aprobado (2026-07-13) · **Última actualización:** 2026-07-25
 
 ## 1. Principio
 
@@ -71,6 +71,9 @@ created_at / updated_at
 confidence      # 0–1: cuánta evidencia sostiene la existencia del nodo
 sources[]       # doc_ids que lo mencionan
 version         # versionado optimista
+extracted_by    # "parser@vX" | "user" (Sprint 9, mismo campo que ya tenía la relación)
+locked          # true si extracted_by="user" (ver regla 5): el sync puede seguir sumando
+                # sources[] pero no vuelve a pisar canonical_name/node_type/aliases/confidence
 ```
 
 ### 3.2 Tipos de relación
@@ -96,6 +99,8 @@ sources[]       # evidencia: doc_ids + chunk_ids que la sostienen
 extracted_at
 extracted_by    # "parser@vX" | "user" | "recommender"
 valid_from / valid_to   # vigencia temporal (opcional)
+rejected        # true si el usuario la rechazó a mano (Sprint 9): soft delete, el sync
+                # no la vuelve a crear aunque el LLM la siga extrayendo
 ```
 
 ### 3.3 Ejemplo canónico
@@ -115,7 +120,7 @@ valid_from / valid_to   # vigencia temporal (opcional)
 2. **Deduplicación por `canonical_name` + tipo.** El parser propone; un paso de *entity resolution* fusiona (normalización + similitud de embeddings + veredicto del LLM en casos dudosos).
 3. **Nada sin evidencia.** Todo nodo/relación referencia los documentos que lo sostienen. Si la evidencia desaparece (documento borrado), la confianza decae y el elemento puede podarse.
 4. **La confianza se acumula.** Cada nueva mención sube `confidence`; las contradicciones la bajan. Los umbrales de visualización/poda se configuran (defaults: mostrar ≥0.5, podar <0.2).
-5. **El usuario siempre gana.** Una corrección manual fija `extracted_by: "user"` y `confidence: 1.0`, y el parser no puede sobreescribirla.
+5. **El usuario siempre gana.** Una corrección manual fija `extracted_by: "user"` y `confidence: 1.0`, y el parser no puede sobreescribirla (`locked`, Sprint 9: el sync sigue sumando `sources[]` como traza de evidencia, pero no vuelve a tocar los campos corregidos). El rechazo de una relación (`rejected: true`) es la misma regla aplicada a "esto no debería existir": el sync no la recrea.
 
 ## 5. Sincronización pgvector ↔ Neo4j
 

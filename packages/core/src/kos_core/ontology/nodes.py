@@ -20,7 +20,7 @@ NodeType = Literal[
 NODE_TYPES: Final[frozenset[str]] = frozenset(get_args(NodeType))
 
 # Propiedades comunes a todo nodo (doc 02 §3.1): id, canonical_name, aliases,
-# created_at/updated_at, confidence, sources, version.
+# created_at/updated_at, confidence, sources, version, extracted_by, locked (Sprint 9).
 COMMON_NODE_PROPERTIES: Final[tuple[str, ...]] = (
     "id",
     "canonical_name",
@@ -30,6 +30,8 @@ COMMON_NODE_PROPERTIES: Final[tuple[str, ...]] = (
     "confidence",
     "sources",
     "version",
+    "extracted_by",
+    "locked",
 )
 
 

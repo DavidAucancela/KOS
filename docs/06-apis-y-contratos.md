@@ -1,6 +1,6 @@
 # 06 — Especificación de APIs y contratos entre servicios
 
-**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-14
+**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-25
 
 ## 1. Principios
 
@@ -30,6 +30,14 @@ Solo se especifica aquí la superficie; el detalle de cada esquema se genera com
 | `POST` | `/v1/graph/query` | Consulta estructurada (plantillas seguras sobre Cypher) | 2 |
 | `GET` | `/v1/graph/path?from=&to=` | Camino entre dos entidades | 2 |
 | `PATCH` | `/v1/graph/nodes/{id}` | Corrección manual (fija `extracted_by: user`) | 2 |
+| `PATCH` | `/v1/graph/relations/{id}` | Corrección manual de una relación (Sprint 9, mismo mecanismo de `locked` que un nodo) | 2 |
+| `DELETE` | `/v1/graph/relations/{id}` | Rechaza una relación (Sprint 9): soft delete vía `rejected: true`, el sync no la recrea | 2 |
+
+`POST /v1/graph/query` no acepta Cypher libre: el body es `{template, params}` sobre un set cerrado
+de plantillas (Sprint 9): `nodes_by_type` (listado paginado por tipo), `neighbors_by_type`
+(vecinos de un nodo, opcionalmente filtrados por tipo de relación/nodo vecino), `most_connected`
+(nodos con más relaciones, para priorizar qué revisar a mano). Ampliar el set de plantillas es un
+cambio de código revisado en PR, no una superficie abierta a query arbitraria.
 
 ### Ingesta
 

@@ -59,6 +59,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Note */
+        post: operations["create_note_v1_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents": {
         parameters: {
             query?: never;
@@ -142,6 +159,76 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/graph/nodes/{node_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Node */
+        get: operations["get_node_v1_graph_nodes__node_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Node */
+        patch: operations["patch_node_v1_graph_nodes__node_id__patch"];
+        trace?: never;
+    };
+    "/v1/graph/path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Path */
+        get: operations["get_path_v1_graph_path_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graph/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Query */
+        post: operations["query_v1_graph_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/graph/relations/{relation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Relation */
+        delete: operations["delete_relation_v1_graph_relations__relation_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Relation */
+        patch: operations["patch_relation_v1_graph_relations__relation_id__patch"];
         trace?: never;
     };
 }
@@ -295,6 +382,116 @@ export interface components {
             connector?: string | null;
             /** Score */
             score?: number | null;
+            /** Doc Type */
+            doc_type?: string | null;
+        };
+        /** GraphNeighbor */
+        GraphNeighbor: {
+            relation: components["schemas"]["GraphRelation"];
+            node: components["schemas"]["GraphNode"];
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "outgoing" | "incoming";
+        };
+        /** GraphNode */
+        GraphNode: {
+            /** Id */
+            id: string;
+            /**
+             * Node Type
+             * @enum {string}
+             */
+            node_type: "Person" | "Project" | "Technology" | "Concept" | "Document" | "Task" | "Organization" | "Event" | "Skill";
+            /** Canonical Name */
+            canonical_name: string;
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string[];
+            /** Confidence */
+            confidence: number;
+            /** Sources */
+            sources?: string[];
+            /** Extracted By */
+            extracted_by: string;
+            /**
+             * Locked
+             * @default false
+             */
+            locked: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** GraphPathOut */
+        GraphPathOut: {
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Relations */
+            relations: components["schemas"]["GraphRelation"][];
+        };
+        /** GraphQueryRequest */
+        GraphQueryRequest: {
+            /**
+             * Template
+             * @enum {string}
+             */
+            template: "nodes_by_type" | "neighbors_by_type" | "most_connected";
+            /** Node Type */
+            node_type?: string | null;
+            /** Node Id */
+            node_id?: string | null;
+            /** Cursor */
+            cursor?: string | null;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /** GraphQueryResponse */
+        GraphQueryResponse: {
+            /**
+             * Template
+             * @enum {string}
+             */
+            template: "nodes_by_type" | "neighbors_by_type" | "most_connected";
+            /** Nodes */
+            nodes?: components["schemas"]["GraphNode"][] | null;
+            /** Neighbors */
+            neighbors?: components["schemas"]["GraphNeighbor"][] | null;
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** GraphRelation */
+        GraphRelation: {
+            /** Id */
+            id: string;
+            /**
+             * Relation Type
+             * @enum {string}
+             */
+            relation_type: "USES" | "RELATED_TO" | "AUTHORED_BY" | "PART_OF" | "DEPENDS_ON" | "PREREQUISITE_OF" | "MENTIONS" | "KNOWS" | "CONTRADICTS" | "SUPERSEDES";
+            /** Source Id */
+            source_id: string;
+            /** Target Id */
+            target_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Sources */
+            sources?: string[];
+            /** Extracted By */
+            extracted_by: string;
+            /** Extracted At */
+            extracted_at?: string | null;
+            /**
+             * Rejected
+             * @default false
+             */
+            rejected: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -312,6 +509,51 @@ export interface components {
             services: {
                 [key: string]: components["schemas"]["ServiceStatus"];
             };
+        };
+        /** NodeWithNeighborhood */
+        NodeWithNeighborhood: {
+            node: components["schemas"]["GraphNode"];
+            /** Neighbors */
+            neighbors: components["schemas"]["GraphNeighbor"][];
+        };
+        /** NoteIn */
+        NoteIn: {
+            /**
+             * Template
+             * @example MaquinaHTB
+             */
+            template: string;
+            /**
+             * Folder
+             * @example Security/HackTheBox/Máquinas
+             */
+            folder: string;
+            /**
+             * Title
+             * @example Fawn
+             */
+            title: string;
+        };
+        /** NoteOut */
+        NoteOut: {
+            /** Path */
+            path: string;
+        };
+        /** PatchNodeRequest */
+        PatchNodeRequest: {
+            /** Canonical Name */
+            canonical_name?: string | null;
+            /** Node Type */
+            node_type?: string | null;
+            /** Aliases */
+            aliases?: string[] | null;
+        };
+        /** PatchRelationRequest */
+        PatchRelationRequest: {
+            /** Relation Type */
+            relation_type?: string | null;
+            /** Confidence */
+            confidence?: number | null;
         };
         /**
          * PlanStep
@@ -613,6 +855,39 @@ export interface operations {
             };
         };
     };
+    create_note_v1_notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_documents_v1_documents_get: {
         parameters: {
             query?: {
@@ -763,6 +1038,202 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_node_v1_graph_nodes__node_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeWithNeighborhood"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_node_v1_graph_nodes__node_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchNodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphNode"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_path_v1_graph_path_get: {
+        parameters: {
+            query: {
+                from_id: string;
+                to_id: string;
+                max_hops?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphPathOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_v1_graph_query_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphQueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_relation_v1_graph_relations__relation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_relation_v1_graph_relations__relation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchRelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphRelation"];
                 };
             };
             /** @description Validation Error */

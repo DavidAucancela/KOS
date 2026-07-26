@@ -1,6 +1,6 @@
 # 08 — Plan de implementación por sprints
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-16
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-26
 
 Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan detalla v0.1 y v0.2; los sprints de versiones posteriores se planifican al cerrar la versión anterior, con lo aprendido.
 
@@ -115,7 +115,7 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 | 6 | Núcleo: ontología como código, extracción de entidades/relaciones (s7-s9), entity resolution, escritura real a Neo4j | ✅ Cerrado 2026-07-18 |
 | 7 | Fuera de plan (pedido directo del usuario): sincronización automática (polling) + crear notas desde el chat | ✅ Cerrado 2026-07-20 |
 | 8 | Fuera de plan (pedido directo del usuario): `doc_type`, detección de intención de plantilla y comando genérico `/crear-nota` — evitar que `/v1/query` fabrique plantillas inexistentes | ✅ Cerrado 2026-07-25 |
-| 9 | `/v1/graph/*` + correcciones manuales | 🟡 En progreso (iniciado 2026-07-25) |
+| 9 | `/v1/graph/*` + correcciones manuales | ✅ Cerrado 2026-07-26 |
 | 10 | Visualización del grafo en la UI | Planeado, no iniciado |
 
 > **Sprint 6 cerrado 2026-07-18**: `packages/core/src/kos_core/ontology/`, etapas
@@ -145,6 +145,15 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > más: intención de plantilla no cubría órdenes imperativas ("crea una planilla...") y un bug
 > preexistente de título con sintaxis de plantilla sin resolver. Backfill de `doc_type` sobre
 > `vault-real` completado (698 documentos). Retro completa en `docs/sprints/sprint-08.md`.
+
+> **Sprint 9 cerrado 2026-07-26**: lectura del grafo (`GET /v1/graph/nodes/{id}`, `GET
+> /v1/graph/path`, `POST /v1/graph/query` con 3 plantillas seguras) y corrección manual de nodos
+> y relaciones (`PATCH`/`DELETE`, protegidas de re-sync vía `locked`/`rejected`, doc 02 regla 5).
+> Pantalla mínima de corrección en `apps/web` (tercera vista, junto a Chat/Estado). Bug crítico
+> encontrado probando contra el vault real (no por los 217 tests mockeados): corregir el *tipo*
+> de un nodo cambia su label real en Neo4j, y un sync posterior que propusiera el tipo viejo creaba
+> un duplicado en vez de respetar la corrección — arreglado con un chequeo por `canonical_name`
+> sin importar la label, solo para nodos bloqueados. Retro completa en `docs/sprints/sprint-09.md`.
 
 ## Gestión
 
