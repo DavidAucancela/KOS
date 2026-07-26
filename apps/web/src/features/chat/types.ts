@@ -19,6 +19,7 @@ export interface Evidence {
   source_id: string | null;
   connector: string | null;
   score: number | null;
+  doc_type: string | null;
 }
 
 export interface PlanStep {

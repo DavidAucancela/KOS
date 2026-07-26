@@ -203,6 +203,100 @@ def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
     ]
 
 
+def test_comando_crear_nota_generico_crea_nota_sin_llamar_al_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get_vault_path(engine: Any, source_name: str) -> Path:
+        return Path("/vault-falso")
+
+    creadas: list[dict[str, Any]] = []
+
+    def fake_create_note(vault_path: Path, **kwargs: Any) -> Path:
+        creadas.append(kwargs)
+        return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
+
+    monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+
+    llm = _EchoLLM()
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = llm
+        response = client.post(
+            "/v1/query", json={"query": "/crear-nota Proyecto | Proyectos | Tuti"}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "Tuti.md" in body["answer"]
+    assert body["evidence"] == []
+    assert llm.calls == 0, "el comando no debe pasar por retrieval/síntesis"
+    assert creadas == [{"template_name": "Proyecto", "folder": "Proyectos", "title": "Tuti"}]
+
+
+def test_comando_crear_nota_mal_formado_cae_al_pipeline_normal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_hybrid(
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+    ) -> list[SearchHit]:
+        return []
+
+    monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = _EchoLLM()
+        response = client.post("/v1/query", json={"query": "/crear-nota Proyecto | Proyectos"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "no encontré" in body["answer"].lower()
+
+
+def test_pregunta_por_plantilla_no_fabrica_responde_sin_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hit = _hit(
+        source_id="_Templates/Proyecto.md",
+        title="<% tp.file.title %>",
+        doc_type="template",
+        score=2.0 / (search_storage.RRF_K + 1) * 0.9,
+    )
+
+    async def fake_hybrid(*args: Any, **kwargs: Any) -> list[SearchHit]:
+        assert kwargs.get("doc_type") == "template"
+        return [hit]
+
+    monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    llm = _EchoLLM()
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = llm
+        response = client.post(
+            "/v1/query",
+            json={
+                "query": "quiero crear información para describir un proyecto, "
+                "¿qué plantilla me sirve?"
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert llm.calls == 0, "la rama s0 no debe pasar por síntesis LLM"
+    assert body["plan"] == [
+        {
+            "id": "s0",
+            "agent": "intent",
+            "task": "detectar intención de creación de nota",
+            "depends_on": [],
+            "evidence_count": None,
+        }
+    ]
+    [ev] = body["evidence"]
+    assert ev["source_id"] == "_Templates/Proyecto.md"
+    assert "/crear-nota Proyecto" in body["answer"]
+
+
 def test_comando_nueva_maquina_nota_existente_responde_conflicto(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

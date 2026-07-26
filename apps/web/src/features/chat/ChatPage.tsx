@@ -69,6 +69,11 @@ function CitationCard({
       <div className="flex items-center gap-2 text-xs">
         <Badge variant="outline">[{index + 1}]</Badge>
         <span className="font-medium">{evidence.title ?? evidence.source_id ?? "Documento"}</span>
+        {evidence.doc_type === "template" && (
+          <Badge variant="outline" className="border-primary/40 text-primary">
+            Plantilla
+          </Badge>
+        )}
         {typeof evidence.score === "number" && (
           <span className="text-muted-foreground ml-auto">{evidence.score.toFixed(3)}</span>
         )}
@@ -127,7 +132,23 @@ function AssistantTurn({
           ))}
         </div>
       )}
-      <p className="text-muted-foreground text-xs">Confianza: {(confidence * 100).toFixed(0)}%</p>
+      {confidence < 0.4 ? (
+        <p
+          className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400"
+          title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
+        >
+          <AlertTriangle className="size-4" aria-hidden />
+          Confianza baja ({(confidence * 100).toFixed(0)}%): revisa las citas antes de confiar en
+          esta respuesta.
+        </p>
+      ) : (
+        <p
+          className="text-muted-foreground text-xs"
+          title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
+        >
+          Confianza: {(confidence * 100).toFixed(0)}%
+        </p>
+      )}
     </div>
   );
 }

@@ -52,7 +52,7 @@ Solo se especifica aquí la superficie; el detalle de cada esquema se genera com
 
 - Errores: RFC 9457 (`application/problem+json`).
 - Paginación por cursor (`?cursor=&limit=`).
-- Respuestas de consulta siempre incluyen `evidence[]`: lista de `{doc_id, chunk_id, quote}` — **una respuesta sin evidencia es un bug**, no una respuesta.
+- Respuestas de consulta siempre incluyen `evidence[]`: lista de `{doc_id, chunk_id, quote, doc_type}` — **una respuesta sin evidencia es un bug**, no una respuesta. `doc_type` (`"content" | "template"`, ver doc 02 §2) permite a la UI y al propio prompt del LLM distinguir una plantilla real de una nota de contenido, evitando que se combinen como si fueran la misma cosa.
 - Auth: token local simple en v0.x; OAuth/workspaces en Fase 6.
 
 ## 3. Contratos internos (packages/core)
@@ -77,6 +77,8 @@ class AgentResponse(BaseModel):
     cost: Cost                        # tokens, ms
     trace_id: str
 ```
+
+`EvidenceRef` incluye `doc_type: str | None` (propagado desde `ParsedDocument.doc_type`, doc 02 §2) para que cualquier consumidor sepa si la evidencia citada es una plantilla o una nota de contenido.
 
 Estos contratos se usan desde la Fase 1 (aunque el "planner" sea un pipeline fijo), para que la extracción a agentes reales en Fase 4 sea un refactor y no una reescritura.
 
@@ -119,6 +121,25 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > decidiendo escribir de forma autónoma. La implementación completa vía MCP +
 > `permissions.py` sigue pendiente para la Fase 3 real; cuando llegue, esta
 > ruta se migra o convive con ella.
+>
+> **Actualización (Sprint 8)**: el comando se generaliza de `/nueva-maquina <nombre>`
+> (template y carpeta fijos en código) a `/crear-nota <template>|<folder>|<título>`,
+> que acepta cualquier plantilla existente en `_Templates/` sin tocar código.
+> `/nueva-maquina` se mantiene como alias de compatibilidad (reescribe internamente
+> a los mismos parámetros fijos de HTB). Se mantiene la misma regla de aprobación:
+> el usuario teclea el comando exacto, típicamente copiado de una respuesta previa
+> del sistema (ver "detección de intención de plantilla" más abajo).
+>
+> Además, `POST /v1/query` gana un paso `s0` (dentro del pipeline fijo, no un
+> planner nuevo — ver regla 3 de CLAUDE.md) que detecta con una heurística
+> determinista (palabras clave, sin LLM) cuando la pregunta del usuario implica
+> "quiero crear algo, ¿qué plantilla uso?". En ese caso el pipeline normal de
+> retrieval→síntesis LLM se salta por completo: si existe una plantilla clara en
+> `doc_type="template"`, se responde con una cita real y el comando `/crear-nota`
+> ya armado; si es ambiguo, se responde con una pregunta de aclaración fija
+> (lista de plantillas existentes) en vez de dejar que el LLM sintetice una
+> plantilla combinando fragmentos de documentos distintos y no relacionados —
+> el motivo original de este cambio (ver retro `docs/sprints/sprint-08.md`).
 
 ## 5. Qué congela este documento
 

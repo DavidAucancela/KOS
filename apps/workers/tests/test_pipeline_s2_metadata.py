@@ -60,6 +60,22 @@ def test_titulo_de_plantilla_sin_llenar_se_descarta() -> None:
     assert extract_metadata(doc).title == "Abstract"
 
 
+def test_titulo_placeholder_de_frontmatter_se_descarta() -> None:
+    """Sprint 8: `title: "<% tp.file.title %>"` (Templater sin instanciar) no es un
+    título real; debe conservarse el stem del archivo, no el marcador literal."""
+    doc = _doc(
+        "<%* /* comentario Templater */ %>",
+        frontmatter={"title": "<% tp.file.title %>"},
+        title="Proyecto",
+    )
+    assert extract_metadata(doc).title == "Proyecto"
+
+
+def test_titulo_placeholder_en_encabezado_tambien_se_descarta() -> None:
+    doc = _doc("## {{ titulo }}\n\ntexto", title="mi-nota")
+    assert extract_metadata(doc).title == "mi-nota"
+
+
 def test_autor_y_fechas_validas() -> None:
     doc = _doc(
         "texto",

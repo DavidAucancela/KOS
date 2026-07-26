@@ -32,6 +32,7 @@ def bootstrap(raw: RawDocument) -> ParsedDocument:
     links = [str(link) for link in source_metadata.get("links", [])]
     keywords = [str(tag) for tag in source_metadata.get("tags", [])]
     stem = PurePosixPath(raw.source_id).stem
+    doc_type = source_metadata.get("doc_type", "content")
     return ParsedDocument(
         doc_id=make_doc_id(raw.connector, raw.source_id),
         title=stem or raw.source_id,
@@ -39,6 +40,7 @@ def bootstrap(raw: RawDocument) -> ParsedDocument:
         source_metadata=source_metadata,
         links=links,
         keywords=keywords,
+        doc_type=doc_type if doc_type in ("content", "template") else "content",
     )
 
 

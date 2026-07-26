@@ -18,6 +18,15 @@ _MAX_HEADING_TITLE_LEN = 80
 _BOLD_ITALIC_RE = re.compile(r"\*\*(.+?)\*\*|\*(.+?)\*")
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 
+# Marcadores de placeholder de motores de plantillas sin resolver (Templater
+# `<% %>`, Jinja/Handlebars `{{ }}`, …): un título que los contiene no es un
+# título real, es sintaxis de plantilla sin instanciar (ver docs/sprints/sprint-08.md).
+_PLACEHOLDER_RE = re.compile(r"<%|%>|\{\{|\}\}")
+
+
+def _looks_like_placeholder(text: str) -> bool:
+    return bool(_PLACEHOLDER_RE.search(text))
+
 
 def _clean_heading_text(raw: str) -> str:
     """Quita `**negrita**`/`*cursiva*` y `[[wikilinks]]` (con alias) de un heading."""
@@ -126,13 +135,17 @@ def extract_metadata(doc: ParsedDocument) -> ParsedDocument:
 
     title = doc.title
     fm_title = frontmatter.get("title")
-    if isinstance(fm_title, str) and fm_title.strip():
+    if isinstance(fm_title, str) and fm_title.strip() and not _looks_like_placeholder(fm_title):
         title = fm_title.strip()
     else:
         heading = _FIRST_HEADING_RE.search(body)
         if heading:
             cleaned = _clean_heading_text(heading.group(1))
-            if cleaned and len(cleaned) <= _MAX_HEADING_TITLE_LEN:
+            if (
+                cleaned
+                and len(cleaned) <= _MAX_HEADING_TITLE_LEN
+                and not _looks_like_placeholder(cleaned)
+            ):
                 title = cleaned
 
     author = doc.author

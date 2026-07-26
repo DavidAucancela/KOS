@@ -25,6 +25,7 @@ class EvidenceRef(BaseModel):
     source_id: str | None = None
     connector: str | None = None
     score: float | None = None
+    doc_type: str | None = None
 
 
 class Constraints(BaseModel):

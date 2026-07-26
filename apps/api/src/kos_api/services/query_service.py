@@ -32,7 +32,17 @@ _SYSTEM_PROMPT = (
     "explícitamente qué falta — nunca te niegues a responder cuando hay evidencia "
     "relacionada disponible.\n"
     "5. No uses conocimiento externo a la evidencia: no inventes hechos que no estén en "
-    "ella, pero sí puedes conectar/resumir lo que varios fragmentos dicen en conjunto."
+    "ella, pero sí puedes conectar/resumir lo que varios fragmentos dicen en conjunto.\n"
+    "6. Si la pregunta pide una plantilla o estructura para crear algo: si algún fragmento "
+    "de evidencia está marcado como (plantilla), cítalo tal cual existe — no lo combines "
+    "con fragmentos marcados como (nota) para 'completarlo' o inventar secciones que no "
+    "están en él. Si ningún fragmento es una plantilla, dilo explícitamente ('no encontré "
+    "una plantilla existente para esto') en vez de construir una a partir de fragmentos "
+    "sueltos.\n"
+    "7. Nunca presentes como una sola entidad coherente (una plantilla, un proceso, una "
+    "definición) contenido que proviene de documentos distintos y no relacionados entre "
+    "sí: cada fragmento se cita por separado, con su propia fuente; no fusiones "
+    "estructuras de fuentes distintas."
 )
 
 _NO_EVIDENCE_ANSWER = (
@@ -64,7 +74,7 @@ class QueryResult(BaseModel):
     cost: Cost = Field(default_factory=Cost)
 
 
-def _evidence_from_hit(hit: SearchHit) -> EvidenceRef:
+def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
     return EvidenceRef(
         doc_id=hit.doc_id,
         chunk_id=hit.chunk_id,
@@ -73,6 +83,7 @@ def _evidence_from_hit(hit: SearchHit) -> EvidenceRef:
         source_id=hit.source_id,
         connector=hit.connector,
         score=hit.score,
+        doc_type=hit.doc_type,
     )
 
 
@@ -128,7 +139,7 @@ async def _retrieve(
                     engine, query, query_embedding, limit=limit
                 )
 
-    evidence = [_evidence_from_hit(hit) for hit in hits]
+    evidence = [evidence_from_hit(hit) for hit in hits]
     # Confianza: heurística honesta a partir del mejor hit, normalizada al modo
     # efectivo de retrieval (no el solicitado, si hubo degradación a léxica).
     confidence = _confidence_from_hits(hits, effective_mode)
@@ -145,7 +156,8 @@ def _build_context(evidence: list[EvidenceRef]) -> str:
     bloques = []
     for index, ref in enumerate(evidence, start=1):
         titulo = ref.title or ref.source_id or "sin título"
-        bloques.append(f"[{index}] ({titulo}) {ref.quote}")
+        tipo = "plantilla" if ref.doc_type == "template" else "nota"
+        bloques.append(f"[{index}] ({titulo} · {tipo}) {ref.quote}")
     return "\n\n".join(bloques)
 
 

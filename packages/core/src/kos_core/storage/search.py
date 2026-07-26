@@ -39,16 +39,18 @@ class SearchHit(BaseModel):
     connector: str | None = None
     source_id: str | None = None
     heading: str | None = None
+    doc_type: str | None = None
 
 
 _LEXICAL_SQL = sql_text(
     """
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
-           d.title, d.connector, d.source_id,
+           d.title, d.connector, d.source_id, d.doc_type,
            ts_rank_cd(c.text_search, websearch_to_tsquery('simple', :query)) AS score
     FROM chunks AS c
     JOIN documents AS d ON d.doc_id = c.doc_id
     WHERE c.text_search @@ websearch_to_tsquery('simple', :query)
+      AND (CAST(:doc_type AS text) IS NULL OR d.doc_type = CAST(:doc_type AS text))
     ORDER BY score DESC, c.chunk_id
     LIMIT :limit
     """
@@ -70,12 +72,13 @@ _TITLE_SQL = sql_text(
         HAVING MAX(word_similarity(t.term, d.title)) > :threshold
     )
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
-           d.title, d.connector, d.source_id, ds.score
+           d.title, d.connector, d.source_id, d.doc_type, ds.score
     FROM doc_scores AS ds
     JOIN documents AS d ON d.doc_id = ds.doc_id
     JOIN LATERAL (
         SELECT * FROM chunks AS c WHERE c.doc_id = d.doc_id ORDER BY c.position ASC LIMIT 1
     ) AS c ON true
+    WHERE (CAST(:doc_type AS text) IS NULL OR d.doc_type = CAST(:doc_type AS text))
     ORDER BY ds.score DESC, c.chunk_id
     LIMIT :limit
     """
@@ -207,11 +210,12 @@ def _pg_text_array(values: Sequence[str]) -> str:
 _VECTOR_SQL = sql_text(
     """
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
-           d.title, d.connector, d.source_id,
+           d.title, d.connector, d.source_id, d.doc_type,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS score
     FROM chunks AS c
     JOIN documents AS d ON d.doc_id = c.doc_id
     WHERE c.embedding IS NOT NULL
+      AND (CAST(:doc_type AS text) IS NULL OR d.doc_type = CAST(:doc_type AS text))
     ORDER BY c.embedding <=> CAST(:qvec AS vector), c.chunk_id
     LIMIT :limit
     """
@@ -236,18 +240,29 @@ def _hit_from_row(row: Mapping[Any, Any], *, score: float, source: SearchSource)
         connector=row.get("connector"),
         source_id=row.get("source_id"),
         heading=heading if isinstance(heading, str) else None,
+        doc_type=row.get("doc_type"),
     )
 
 
-async def lexical_search(engine: AsyncEngine, query: str, *, limit: int = 20) -> list[SearchHit]:
-    """Búsqueda de texto completo con websearch_to_tsquery + ts_rank_cd."""
+async def lexical_search(
+    engine: AsyncEngine, query: str, *, limit: int = 20, doc_type: str | None = None
+) -> list[SearchHit]:
+    """Búsqueda de texto completo con websearch_to_tsquery + ts_rank_cd.
+
+    `doc_type` filtra por `"content"`/`"template"` (doc 02 §2) cuando se pasa;
+    `None` no filtra.
+    """
     async with engine.connect() as conn:
-        result = await conn.execute(_LEXICAL_SQL, {"query": query, "limit": limit})
+        result = await conn.execute(
+            _LEXICAL_SQL, {"query": query, "limit": limit, "doc_type": doc_type}
+        )
         rows = result.mappings().all()
     return [_hit_from_row(row, score=float(row["score"]), source="lexical") for row in rows]
 
 
-async def title_search(engine: AsyncEngine, query: str, *, limit: int = 20) -> list[SearchHit]:
+async def title_search(
+    engine: AsyncEngine, query: str, *, limit: int = 20, doc_type: str | None = None
+) -> list[SearchHit]:
     """Documentos cuyo título coincide con la query; un chunk representativo por doc.
 
     Señal de desambiguación (doc 08, Sprint 5): un match léxico genérico en el
@@ -268,6 +283,7 @@ async def title_search(engine: AsyncEngine, query: str, *, limit: int = 20) -> l
         "terms": _pg_text_array(terms),
         "threshold": _TITLE_SIMILARITY_THRESHOLD,
         "limit": limit,
+        "doc_type": doc_type,
     }
     async with engine.connect() as conn:
         result = await conn.execute(_TITLE_SQL, params)
@@ -276,10 +292,14 @@ async def title_search(engine: AsyncEngine, query: str, *, limit: int = 20) -> l
 
 
 async def vector_search(
-    engine: AsyncEngine, query_embedding: Sequence[float], *, limit: int = 20
+    engine: AsyncEngine,
+    query_embedding: Sequence[float],
+    *,
+    limit: int = 20,
+    doc_type: str | None = None,
 ) -> list[SearchHit]:
     """Vecinos por distancia coseno sobre chunks con embedding; score = 1 - distancia."""
-    params = {"qvec": _format_vector(query_embedding), "limit": limit}
+    params = {"qvec": _format_vector(query_embedding), "limit": limit, "doc_type": doc_type}
     async with engine.connect() as conn:
         result = await conn.execute(_VECTOR_SQL, params)
         rows = result.mappings().all()
@@ -307,12 +327,13 @@ async def hybrid_search(
     query_embedding: Sequence[float],
     *,
     limit: int = 10,
+    doc_type: str | None = None,
 ) -> list[SearchHit]:
     """Léxica, vectorial y por título en paralelo (limit*2 cada una) fusionadas con RRF."""
     lexical, vector, title = await asyncio.gather(
-        lexical_search(engine, query, limit=limit * 2),
-        vector_search(engine, query_embedding, limit=limit * 2),
-        title_search(engine, query, limit=limit * 2),
+        lexical_search(engine, query, limit=limit * 2, doc_type=doc_type),
+        vector_search(engine, query_embedding, limit=limit * 2, doc_type=doc_type),
+        title_search(engine, query, limit=limit * 2, doc_type=doc_type),
     )
     by_id: dict[uuid.UUID, SearchHit] = {}
     for hit in [*lexical, *vector, *title]:

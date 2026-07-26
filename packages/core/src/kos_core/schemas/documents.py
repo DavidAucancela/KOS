@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +68,9 @@ class ParsedDocument(BaseModel):
     created_at: datetime | None = None
     modified_at: datetime | None = None
     language: str | None = None
+    doc_type: Literal["content", "template"] = "content"
+    """Origen: el conector la decide (fuente-específica) y el bootstrap del
+    pipeline la promueve a campo genérico (doc 02 §2, ADR-0001)."""
     chunks: list[Chunk] = Field(default_factory=list)
     entities: list[EntityCandidate] = Field(default_factory=list)
     relations: list[RelationCandidate] = Field(default_factory=list)

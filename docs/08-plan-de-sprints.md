@@ -114,8 +114,9 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 |---|---|---|
 | 6 | Núcleo: ontología como código, extracción de entidades/relaciones (s7-s9), entity resolution, escritura real a Neo4j | ✅ Cerrado 2026-07-18 |
 | 7 | Fuera de plan (pedido directo del usuario): sincronización automática (polling) + crear notas desde el chat | ✅ Cerrado 2026-07-20 |
-| 8 | `/v1/graph/*` + correcciones manuales | Planeado, no iniciado |
-| 9 | Visualización del grafo en la UI | Planeado, no iniciado |
+| 8 | Fuera de plan (pedido directo del usuario): `doc_type`, detección de intención de plantilla y comando genérico `/crear-nota` — evitar que `/v1/query` fabrique plantillas inexistentes | ✅ Cerrado 2026-07-25 |
+| 9 | `/v1/graph/*` + correcciones manuales | 🟡 En progreso (iniciado 2026-07-25) |
+| 10 | Visualización del grafo en la UI | Planeado, no iniciado |
 
 > **Sprint 6 cerrado 2026-07-18**: `packages/core/src/kos_core/ontology/`, etapas
 > `s7_entities`/`s8_relations`/`s9_confidence`, entity resolution (doc 05 §4, 5 pasos) y
@@ -134,6 +135,16 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > **un bug crítico** de Sprint 5 (tombstone cruzaba fuentes que comparten conector, rompió
 > temporalmente la búsqueda del vault real; recuperado con `kos reindex`). 173 tests, lint y
 > mypy --strict limpios. Retro completa en `docs/sprints/sprint-07.md`.
+
+> **Sprint 8 cerrado 2026-07-25**: campo `doc_type` (`"content" | "template"`) en el modelo de
+> documento, propagado hasta `/v1/query`; detección de intención de plantilla (`s0`, heurística
+> sin LLM) para no fabricar plantillas inexistentes; comando genérico `/crear-nota
+> <template>|<folder>|<título>`. Bug real de tipos en SQL textual (`AmbiguousParameter`)
+> atrapado solo por prueba manual, no por los 188 tests mockeados — arreglado con `CAST`
+> explícito. Ronda de pruebas manuales del usuario (2026-07-25) encontró y corrigió dos huecos
+> más: intención de plantilla no cubría órdenes imperativas ("crea una planilla...") y un bug
+> preexistente de título con sintaxis de plantilla sin resolver. Backfill de `doc_type` sobre
+> `vault-real` completado (698 documentos). Retro completa en `docs/sprints/sprint-08.md`.
 
 ## Gestión
 

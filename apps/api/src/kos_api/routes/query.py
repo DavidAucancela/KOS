@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.deps import postgres_engine, settings_dep
-from kos_api.services import notes_service, query_service
+from kos_api.services import notes_service, query_service, template_intent_service
+from kos_api.services.intent_service import detect_template_intent
 from kos_core.config import Settings
 from kos_core.schemas import EvidenceRef
 
@@ -22,8 +23,9 @@ router = APIRouter(prefix="/v1/query", tags=["query"])
 
 QueryMode = Literal["hybrid", "lexical", "vector"]
 
-# Comando explícito de creación de notas (doc 06 §4, versión directa en la API):
+# Comandos explícitos de creación de notas (doc 06 §4, versión directa en la API):
 # el usuario tecleándolo él mismo ya es la aprobación que pide esa regla.
+_CREAR_NOTA_PREFIX = "/crear-nota "
 _NUEVA_MAQUINA_PREFIX = "/nueva-maquina "
 _HTB_TEMPLATE = "MaquinaHTB"
 _HTB_FOLDER = "Security/HackTheBox/Máquinas"
@@ -45,14 +47,22 @@ class QueryResponse(BaseModel):
     trace_id: str
 
 
-async def _handle_nueva_maquina(
-    name: str, *, engine: AsyncEngine, settings: Settings, trace_id: str
+async def _handle_crear_nota(
+    *,
+    template_name: str,
+    folder: str,
+    title: str,
+    original_query: str,
+    engine: AsyncEngine,
+    settings: Settings,
+    trace_id: str,
 ) -> QueryResponse:
-    """Comando `/nueva-maquina <nombre>`: crea la nota sin pasar por retrieval/síntesis."""
+    """Comando `/crear-nota <template>|<folder>|<título>`: crea la nota sin pasar
+    por retrieval/síntesis. Generalización de `/nueva-maquina` (Sprint 7 → 8)."""
     try:
         vault_path = await notes_service.get_vault_path(engine, settings.kos_default_vault_source)
         note_path = notes_service.create_note(
-            vault_path, template_name=_HTB_TEMPLATE, folder=_HTB_FOLDER, title=name
+            vault_path, template_name=template_name, folder=folder, title=title
         )
     except notes_service.NoteAlreadyExistsError as exc:
         answer = f"⚠️ {exc}"
@@ -61,7 +71,7 @@ async def _handle_nueva_maquina(
     else:
         answer = f"✅ Nota creada: {note_path}"
     return QueryResponse(
-        query=f"{_NUEVA_MAQUINA_PREFIX}{name}",
+        query=original_query,
         answer=answer,
         evidence=[],
         confidence=1.0,
@@ -71,6 +81,15 @@ async def _handle_nueva_maquina(
         degraded=False,
         trace_id=trace_id,
     )
+
+
+def _parse_crear_nota_args(raw: str) -> tuple[str, str, str] | None:
+    """Parsea `<template>|<folder>|<título>`; None si falta algún segmento."""
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) != 3 or not all(parts):
+        return None
+    template_name, folder, title = parts
+    return template_name, folder, title
 
 
 @router.post("", response_model=QueryResponse)
@@ -86,9 +105,45 @@ async def query(
     if stripped.startswith(_NUEVA_MAQUINA_PREFIX):
         name = stripped[len(_NUEVA_MAQUINA_PREFIX) :].strip()
         if name:
-            return await _handle_nueva_maquina(
-                name, engine=engine, settings=settings, trace_id=trace_id
+            return await _handle_crear_nota(
+                template_name=_HTB_TEMPLATE,
+                folder=_HTB_FOLDER,
+                title=name,
+                original_query=body.query,
+                engine=engine,
+                settings=settings,
+                trace_id=trace_id,
             )
+    if stripped.startswith(_CREAR_NOTA_PREFIX):
+        args = _parse_crear_nota_args(stripped[len(_CREAR_NOTA_PREFIX) :])
+        if args is not None:
+            template_name, folder, title = args
+            return await _handle_crear_nota(
+                template_name=template_name,
+                folder=folder,
+                title=title,
+                original_query=body.query,
+                engine=engine,
+                settings=settings,
+                trace_id=trace_id,
+            )
+
+    if detect_template_intent(body.query):
+        result = await template_intent_service.resolve_template_intent(
+            engine,
+            request.app.state.embedding_client,
+            query=body.query,
+            trace_id=trace_id,
+        )
+        return QueryResponse(
+            query=body.query,
+            answer=result.answer,
+            evidence=result.evidence,
+            confidence=result.confidence,
+            plan=result.plan,
+            degraded=result.degraded,
+            trace_id=trace_id,
+        )
 
     try:
         result = await query_service.answer_query(

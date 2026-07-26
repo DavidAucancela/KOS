@@ -29,6 +29,18 @@ def _frontmatter_tags(frontmatter: dict[str, object]) -> list[str]:
     return [str(raw)]
 
 
+def _doc_type(source_id: str, frontmatter: dict[str, object], tags: list[str]) -> str:
+    """Devuelve content o template: carpeta `_Templates/` (misma convención que
+    `notes_service.create_note`) o frontmatter/tag `plantilla` como señal adicional."""
+    if source_id.startswith("_Templates/"):
+        return "template"
+    if str(frontmatter.get("tipo", "")).strip().lower() == "plantilla":
+        return "template"
+    if any(tag.strip().lower() == "plantilla" for tag in tags):
+        return "template"
+    return "content"
+
+
 class ObsidianConnector:
     """Lee notas markdown de un vault. No parsea ni toca bases de datos."""
 
@@ -84,6 +96,7 @@ class ObsidianConnector:
                 "links": extract_wikilinks(body),
                 "path": ref.source_id,
                 "content_hash": _sha256(text),
+                "doc_type": _doc_type(ref.source_id, frontmatter, tags),
             },
             fetched_at=datetime.now(UTC),
         )

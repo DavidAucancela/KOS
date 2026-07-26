@@ -9,13 +9,14 @@ decidiendo escribir de forma autónoma.
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from kos_core.storage.postgres import sources_table
+from kos_core.storage.postgres import documents_table, sources_table
 from kos_core.templater import render_template
 
 
@@ -31,6 +32,15 @@ class NoteAlreadyExistsError(Exception):
     """Ya existe una nota en la ruta destino; nunca se sobreescribe."""
 
 
+class TemplateInfo(BaseModel):
+    """Una plantilla real existente en `_Templates/` (Sprint 8)."""
+
+    template_name: str
+    """Nombre a pasar como `template_name` a `create_note()` (stem del archivo)."""
+    title: str | None
+    source_id: str
+
+
 async def get_vault_path(engine: AsyncEngine, source_name: str) -> Path:
     async with engine.connect() as conn:
         result = await conn.execute(
@@ -44,6 +54,30 @@ async def get_vault_path(engine: AsyncEngine, source_name: str) -> Path:
     if not vault_path:
         raise VaultSourceNotFoundError(f"La fuente {source_name!r} no tiene vault_path configurado")
     return Path(vault_path)
+
+
+async def list_templates(engine: AsyncEngine) -> list[TemplateInfo]:
+    """Plantillas reales indexadas (`doc_type='template'`, ver doc 02 §2), no borradas.
+
+    Query directa (no similaridad): usada para la pregunta de aclaración cuando
+    la intención de plantilla es ambigua (Sprint 8).
+    """
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(documents_table.c.title, documents_table.c.source_id).where(
+                documents_table.c.doc_type == "template",
+                documents_table.c.deleted_at.is_(None),
+            )
+        )
+        rows = result.mappings().all()
+    return [
+        TemplateInfo(
+            template_name=PurePosixPath(row["source_id"]).stem,
+            title=row["title"],
+            source_id=row["source_id"],
+        )
+        for row in rows
+    ]
 
 
 def create_note(vault_path: Path, *, template_name: str, folder: str, title: str) -> Path:

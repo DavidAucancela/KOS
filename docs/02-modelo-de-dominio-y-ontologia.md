@@ -26,6 +26,9 @@ ParsedDocument         # lo que produce el parser
 ├── author
 ├── created_at / modified_at
 ├── language
+├── doc_type           # "content" | "template" — decidido por el conector
+│                      #   (fuente-específico) y promovido a campo genérico
+│                      #   en el bootstrap del pipeline (ver doc 06 §3)
 ├── chunks[]           # ver abajo
 ├── entities[]         # menciones detectadas (candidatas al grafo)
 ├── relations[]        # relaciones detectadas (candidatas al grafo)

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "../src/features/chat/ChatPage";
 import type { Evidence, QueryResponse } from "../src/features/chat/types";
 
-function evidence(n: number): Evidence {
+function evidence(n: number, overrides: Partial<Evidence> = {}): Evidence {
   return {
     doc_id: `doc-${n}`,
     chunk_id: `chunk-${n}`,
@@ -13,6 +13,8 @@ function evidence(n: number): Evidence {
     source_id: `Nota${n}.md`,
     connector: "obsidian",
     score: 0.5 - n * 0.1,
+    doc_type: "content",
+    ...overrides,
   };
 }
 
@@ -80,6 +82,36 @@ describe("ChatPage", () => {
     await askQuestion();
 
     expect(await screen.findByText(/Respuesta degradada/)).toBeInTheDocument();
+  });
+
+  it("marca como Plantilla una cita con doc_type=template", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          queryResponse({
+            evidence: [evidence(1, { doc_type: "template", title: "Proyecto" })],
+          }),
+        ),
+      ),
+    );
+
+    render(<ChatPage />);
+    await askQuestion();
+
+    expect(await screen.findByText("Plantilla")).toBeInTheDocument();
+  });
+
+  it("avisa cuando la confianza es baja", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(queryResponse({ confidence: 0.2 }))),
+    );
+
+    render(<ChatPage />);
+    await askQuestion();
+
+    expect(await screen.findByText(/Confianza baja \(20%\)/)).toBeInTheDocument();
   });
 
   it("muestra un mensaje de error si el modelo no está disponible (503)", async () => {
