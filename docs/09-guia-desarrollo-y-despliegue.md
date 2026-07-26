@@ -1,6 +1,6 @@
 # 09 — Guías de desarrollo y despliegue
 
-**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-14
+**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-25
 
 ## 1. Entorno local
 
@@ -99,7 +99,51 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
 | v1.0 | Imágenes versionadas + compose de producción para self-hosting single-node |
 | Post-v1.0 | Kubernetes/Temporal solo cuando haya una razón medida (ver ADRs futuros) |
 
-## 8. Datos y backups (local)
+## 8. Ahorro de recursos: apagado/encendido de la infra por inactividad
+
+`apps/api/src/kos_api/ops/docker_guardian.py` apaga Postgres/Neo4j/Redis/MinIO
+cuando no se usan y los enciende bajo demanda al llegar una consulta real.
+Ollama queda fuera (corre nativo, no en este compose, y ya descarga sus
+modelos de la GPU solo vía su propio `keep_alive`).
+
+Dos mitades, en procesos separados porque ninguna puede depender de que la
+otra siga viva:
+
+- **Encendido bajo demanda**: middleware en `kos_api.middleware` (antes del
+  `trace_id_middleware`). En cada request que no sea `/health` ni `/metrics`,
+  llama a `ensure_stack_up`: si el compose ya está sano, solo registra
+  actividad; si no, hace `docker compose up -d` y espera los healthchecks
+  (hasta `kos_guardian_start_timeout_seconds`, default 45s) antes de dejar
+  pasar la request. Si no llega a tiempo, responde `503` con `Retry-After`.
+- **Apagado por inactividad**: `make guardian-watch` corre un vigía aparte
+  (`python -m kos_api.ops.docker_guardian watch`) que revisa cada minuto si
+  pasaron `kos_idle_stop_minutes` (default 20) desde la última actividad
+  registrada, y si es así hace `docker compose stop` (no `down`: conserva
+  los contenedores para un arranque rápido). Si nunca hubo actividad
+  registrada, no apaga nada — evita interferir con un `docker compose up`
+  manual sin pasar por la API.
+
+Apagado por `docker compose stop`: no borra volúmenes, coherente con la
+sección 8.
+
+Desactivado por defecto (`kos_guardian_enabled: bool = False`) para no
+sorprender a tests ni a quien no tenga `docker compose` a mano. `make dev`
+siempre arranca el vigía junto al resto (`guardian-watch`), pero si está
+deshabilitado sale de inmediato sin sondear Docker. Para activarlo, en
+`.env`:
+
+```bash
+KOS_GUARDIAN_ENABLED=true
+KOS_IDLE_STOP_MINUTES=20   # opcional, default 20
+```
+
+y `make dev` (o `make dev-api` + `make guardian-watch` en paralelo si no
+querés levantar workers/web) ya lo aplica.
+
+Coste conocido: la primera request tras estar dormido paga el arranque de
+Neo4j (~10-15s); Postgres/Redis/MinIO son casi inmediatos.
+
+## 9. Datos y backups (local)
 
 - Los datos viven en **volúmenes nombrados de Docker** (`kos_postgres_data`, `kos_minio_data`, …), no en bind mounts bajo el repo: en macOS, `~/Documents` sincronizado con iCloud corrompe los datos de Postgres/MinIO (errores EDEADLK) y castiga el rendimiento.
 - Backup = `docker run --rm -v kos_minio_data:/data -v "$PWD":/backup alpine tar czf /backup/minio-backup.tgz /data` (con los servicios parados); igual para el resto de volúmenes.

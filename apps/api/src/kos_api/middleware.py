@@ -12,10 +12,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from kos_api.ops import docker_guardian
+from kos_core.config import get_settings
 from kos_core.observability import bind_trace_id, get_tracer, http_request_duration_seconds
 
 _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _tracer = get_tracer("kos-api")
+
+# /health y /metrics no deben despertar la infra ni contar como actividad:
+# son sondeos, no uso real (doc 09 §9).
+_GUARDIAN_EXEMPT_PATHS = {"/health", "/metrics"}
 
 
 def install(app: FastAPI) -> None:
@@ -28,6 +34,36 @@ def install(app: FastAPI) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def docker_guardian_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        settings = get_settings()
+        if (
+            not settings.kos_guardian_enabled
+            or request.method == "OPTIONS"
+            or request.url.path in _GUARDIAN_EXEMPT_PATHS
+        ):
+            return await call_next(request)
+
+        ready = await docker_guardian.ensure_stack_up(settings)
+        if not ready:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "type": "about:blank",
+                    "title": "Service Unavailable",
+                    "status": 503,
+                    "detail": (
+                        "La infraestructura local (Docker) está arrancando; "
+                        "reintenta en unos segundos."
+                    ),
+                },
+                media_type="application/problem+json",
+                headers={"Retry-After": "5"},
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def trace_id_middleware(

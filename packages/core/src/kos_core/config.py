@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # Fuente por defecto donde `notes_service` crea notas nuevas desde el chat.
     kos_default_vault_source: str = "vault-real"
 
+    # Ahorro de recursos (doc 09 §8): apaga la infra Docker sin uso y la
+    # enciende bajo demanda. Off por defecto: no debe activarse solo por
+    # correr la API en tests o en un entorno sin `docker compose` a mano.
+    kos_guardian_enabled: bool = False
+    kos_compose_file: str = "docker-compose.yml"
+    kos_activity_file: str = "/tmp/kos-guardian-activity"
+    kos_idle_stop_minutes: int = 20
+    kos_guardian_start_timeout_seconds: float = 45.0
+
     @property
     def postgres_dsn(self) -> str:
         return (

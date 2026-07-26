@@ -3,7 +3,7 @@ name: kos
 # Los datos viven en volúmenes nombrados de Docker, NO en bind mounts bajo el
 # repo: ~/Documents está sincronizado con iCloud y su daemon provoca errores de
 # bloqueo/corrupción en Postgres/MinIO (EDEADLK) y flags "hidden" espurios.
-# Backup: ver docs/09 §8.
+# Backup: ver docs/09 §9.
 
 services:
   postgres:

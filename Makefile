@@ -6,7 +6,7 @@
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
 .PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-beat dev-web \
-        migrate lint test test-integration demo reindex help
+        migrate lint test test-integration demo reindex guardian-watch help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
 	docker compose up -d
@@ -31,8 +31,8 @@ install: ## Instala las dependencias (workspace uv + pnpm)
 	uv sync --all-packages
 	pnpm install
 
-dev: ## API + workers + beat + web en modo desarrollo (Ctrl-C para salir)
-	$(MAKE) -j4 dev-api dev-workers dev-beat dev-web
+dev: ## API + workers + beat + web + vigía de ahorro de recursos (Ctrl-C para salir; doc 09 §8)
+	$(MAKE) -j5 dev-api dev-workers dev-beat dev-web guardian-watch
 
 dev-api: ## Solo la API (http://localhost:8000)
 	uv run uvicorn kos_api.main:app --reload --port 8000
@@ -67,6 +67,9 @@ demo: ## Demo del Sprint 1: embedding con bge-m3 guardado y consultado en pgvect
 
 reindex: ## kos reindex: reconstruye los derivados desde MinIO + fuentes (doc 05 §5; s=nombre opcional)
 	uv run python scripts/kos_reindex.py $(if $(s),--source $(s),)
+
+guardian-watch: ## Vigía de ahorro de recursos: apaga la infra Docker sin uso (doc 09 §9; requiere KOS_GUARDIAN_ENABLED=true)
+	uv run python -m kos_api.ops.docker_guardian watch
 
 clean: ## Detiene servicios y ELIMINA todos los datos locales (volúmenes Docker)
 	docker compose down -v
