@@ -439,7 +439,7 @@ export interface components {
              * Template
              * @enum {string}
              */
-            template: "nodes_by_type" | "neighbors_by_type" | "most_connected";
+            template: "nodes_by_type" | "neighbors_by_type" | "most_connected" | "subgraph";
             /** Node Type */
             node_type?: string | null;
             /** Node Id */
@@ -458,11 +458,13 @@ export interface components {
              * Template
              * @enum {string}
              */
-            template: "nodes_by_type" | "neighbors_by_type" | "most_connected";
+            template: "nodes_by_type" | "neighbors_by_type" | "most_connected" | "subgraph";
             /** Nodes */
             nodes?: components["schemas"]["GraphNode"][] | null;
             /** Neighbors */
             neighbors?: components["schemas"]["GraphNeighbor"][] | null;
+            /** Relations */
+            relations?: components["schemas"]["GraphRelation"][] | null;
             /** Next Cursor */
             next_cursor?: string | null;
         };

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.deps import postgres_engine, settings_dep
-from kos_api.services import notes_service, query_service, template_intent_service
+from kos_api.services import memory_service, notes_service, query_service, template_intent_service
 from kos_api.services.intent_service import detect_template_intent
 from kos_core.config import Settings
 from kos_core.schemas import EvidenceRef
@@ -158,6 +158,18 @@ async def query(
     except query_service.SynthesisError as exc:
         # Solo el fallo de síntesis es 503; un error de retrieval/BD sube a 500 (RFC 9457).
         raise HTTPException(status_code=503, detail="Síntesis no disponible (Ollama)") from exc
+
+    # Memoria episódica (doc 04 §3 paso 1, Sprint 12): encolada sin bloquear la
+    # respuesta ("la UI nunca espera al aprendizaje"). Solo el pipeline de
+    # pregunta/respuesta — los comandos (/crear-nota, /nueva-maquina) no pasan
+    # por acá, son acciones, no preguntas.
+    memory_service.enqueue_learn(
+        settings,
+        query=body.query,
+        answer=result.answer,
+        sources=sorted({str(ev.doc_id) for ev in result.evidence}),
+        confidence=result.confidence,
+    )
 
     return QueryResponse(
         query=body.query,

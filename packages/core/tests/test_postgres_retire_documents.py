@@ -66,7 +66,7 @@ async def test_retire_documents_no_cruza_fuentes_con_mismo_conector() -> None:
             connector=_CONNECTOR,
             source_ids={"note-a.md", "note-b.md"},
         )
-        assert retired == 1
+        assert retired == [doc_b]
 
         async with engine.connect() as conn:
             rows = (

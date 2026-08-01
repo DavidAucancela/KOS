@@ -325,6 +325,73 @@ async def most_connected_nodes(
         return [NodeRecord(record) async for record in result]
 
 
+async def subgraph_relations(driver: AsyncDriver, node_ids: list[str]) -> list[RelationRecord]:
+    """Relaciones activas *entre* los nodos dados (subgrafo inducido, doc 06 §2
+    `subgraph`, Sprint 10): a diferencia de `get_neighborhood`, no trae vecinos
+    fuera del conjunto — es lo que necesita dibujar el grafo sin que aparezcan
+    nodos sueltos que no están en la lista mostrada."""
+    if not node_ids:
+        return []
+    query = (
+        "MATCH (a)-[r]->(b) "
+        "WHERE a.id IN $node_ids AND b.id IN $node_ids "
+        "AND NOT coalesce(r.rejected, false) "
+        f"RETURN DISTINCT {_RELATION_FIELDS}"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"node_ids": node_ids})
+        return [RelationRecord(record) async for record in result]
+
+
+async def _retire_document_relations(driver: AsyncDriver, doc_id: str) -> int:
+    """Saca `doc_id` de `sources[]` de toda relación que lo mencione; borra las que
+    quedan sin ninguna fuente, salvo `locked` (corrección manual sobrevive con
+    `sources` vacío — el usuario ya la validó, no depende de un documento)."""
+    query = (
+        "MATCH ()-[r]->() WHERE $doc_id IN coalesce(r.sources, []) "
+        "SET r.sources = [s IN r.sources WHERE s <> $doc_id] "
+        "WITH r WHERE size(r.sources) = 0 AND NOT coalesce(r.locked, false) "
+        "DELETE r RETURN count(*) AS deleted"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"doc_id": doc_id})
+        record = await result.single()
+        assert record is not None  # count() siempre devuelve una fila
+        return int(record["deleted"])
+
+
+async def _retire_document_nodes(driver: AsyncDriver, doc_id: str) -> int:
+    """Misma lógica que `_retire_document_relations`, para nodos: `DETACH DELETE`
+    también se lleva cualquier relación que quedara apuntando al nodo borrado,
+    aunque esa relación tuviera otras fuentes propias — un nodo sin evidencia no
+    puede quedar con relaciones colgando (caso límite no visto en la práctica,
+    documentado acá en vez de resuelto)."""
+    query = (
+        "MATCH (n) WHERE $doc_id IN coalesce(n.sources, []) "
+        "SET n.sources = [s IN n.sources WHERE s <> $doc_id] "
+        "WITH n WHERE size(n.sources) = 0 AND NOT coalesce(n.locked, false) "
+        "DETACH DELETE n RETURN count(*) AS deleted"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"doc_id": doc_id})
+        record = await result.single()
+        assert record is not None  # count() siempre devuelve una fila
+        return int(record["deleted"])
+
+
+async def retire_document(driver: AsyncDriver, doc_id: str) -> dict[str, int]:
+    """Propaga el tombstone de un documento al grafo (doc 05 §5, doc 06 §3
+    `document.deleted`, deuda de Sprint 6 resuelta en Sprint 11): retira `doc_id`
+    de `sources[]` en nodos y relaciones, y borra los que quedan sin ninguna
+    fuente. Relaciones primero — ver `_retire_document_nodes` para el porqué del
+    orden. No recalcula `confidence` de lo que sobrevive con otra fuente (doc 04
+    §5 lo pide, pero no hay todavía una fórmula definida de cuánto baja por
+    perder una fuente entre varias) — deuda visible, no silenciosa."""
+    relations_deleted = await _retire_document_relations(driver, doc_id)
+    nodes_deleted = await _retire_document_nodes(driver, doc_id)
+    return {"relations_deleted": relations_deleted, "nodes_deleted": nodes_deleted}
+
+
 async def update_node(
     driver: AsyncDriver,
     node_id: str,

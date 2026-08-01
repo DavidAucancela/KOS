@@ -12,6 +12,20 @@ export type GraphQueryResponse = components["schemas"]["GraphQueryResponse"];
 export type NodeType = GraphNode["node_type"];
 export type RelationType = GraphRelation["relation_type"];
 
+// Colores por tipo de nodo (Sprint 10, visualización): mismo orden que
+// NODE_TYPES para que el color sea estable si la ontología crece.
+export const NODE_TYPE_COLORS: Record<NodeType, string> = {
+  Person: "#f472b6",
+  Project: "#60a5fa",
+  Technology: "#34d399",
+  Concept: "#a78bfa",
+  Document: "#fbbf24",
+  Task: "#fb923c",
+  Organization: "#22d3ee",
+  Event: "#f87171",
+  Skill: "#a3e635",
+};
+
 // Los 9 tipos de nodo de la ontología cerrada (doc 02 §3.1). No se puede
 // extraer en runtime desde el tipo `NodeType` (se borra al compilar) — si la
 // ontología cambia, un tipo nuevo requiere ADR (doc 02 §4 regla 1) y también

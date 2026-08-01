@@ -197,6 +197,32 @@ def test_query_most_connected(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["template"] == "most_connected"
 
 
+def test_query_subgraph_devuelve_nodos_y_relaciones_inducidas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_most_connected(driver: Any, *, node_type: str | None, limit: int) -> list[Any]:
+        return [_node(id="node-1"), _node(id="node-2", canonical_name="proyecto-kos")]
+
+    captured_ids: list[str] = []
+
+    async def fake_subgraph_relations(driver: Any, node_ids: list[str]) -> list[Any]:
+        captured_ids.extend(node_ids)
+        return [_relation()]
+
+    monkeypatch.setattr(neo4j_storage, "most_connected_nodes", fake_most_connected)
+    monkeypatch.setattr(neo4j_storage, "subgraph_relations", fake_subgraph_relations)
+
+    with TestClient(create_app()) as client:
+        response = client.post("/v1/graph/query", json={"template": "subgraph"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["template"] == "subgraph"
+    assert [n["id"] for n in body["nodes"]] == ["node-1", "node-2"]
+    assert len(body["relations"]) == 1
+    assert captured_ids == ["node-1", "node-2"]
+
+
 def test_patch_node_corrige_y_publica_evento(
     monkeypatch: pytest.MonkeyPatch, _no_real_redis_publish: list[GraphUpdated]
 ) -> None:

@@ -3,14 +3,18 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GraphCanvas } from "./GraphCanvas";
 import { useGraph } from "./useGraph";
-import { NODE_TYPES, RELATION_TYPES, type NodeType, type RelationType } from "./types";
+import { NODE_TYPE_COLORS, NODE_TYPES, RELATION_TYPES, type NodeType, type RelationType } from "./types";
 
-// Pantalla mínima de corrección del grafo (doc 06 §2, Sprint 9): tabla de
-// nodos + vecindario + formularios inline. La visualización real (canvas)
-// es el Sprint 10 — esto es deliberadamente una tabla, no un grafo dibujado.
+type ViewMode = "graph" | "table";
+
+// Pantalla de corrección del grafo (doc 06 §2, Sprint 9: vecindario +
+// formularios inline; Sprint 10: visualización de fuerzas sobre el mismo
+// conjunto de nodos, con la tabla como alternativa para revisar en detalle).
 export function GraphPage() {
   const graph = useGraph();
+  const [viewMode, setViewMode] = useState<ViewMode>("graph");
   const [typeFilter, setTypeFilter] = useState<NodeType | "">("");
   const [nameDraft, setNameDraft] = useState("");
   const [typeDraft, setTypeDraft] = useState<NodeType | "">("");
@@ -57,7 +61,38 @@ export function GraphPage() {
         <span className="text-muted-foreground text-xs">
           Ordenado por cantidad de relaciones (para priorizar qué revisar).
         </span>
+        <div className="ml-auto flex gap-1">
+          <Button
+            size="sm"
+            variant={viewMode === "graph" ? "default" : "outline"}
+            onClick={() => setViewMode("graph")}
+          >
+            Grafo
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "table" ? "default" : "outline"}
+            onClick={() => setViewMode("table")}
+          >
+            Tabla
+          </Button>
+        </div>
       </section>
+
+      {viewMode === "graph" && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {NODE_TYPES.map((type) => (
+            <span key={type} className="text-muted-foreground flex items-center gap-1.5 text-xs">
+              <span
+                className="inline-block size-2.5 rounded-full"
+                style={{ backgroundColor: NODE_TYPE_COLORS[type] }}
+                aria-hidden
+              />
+              {type}
+            </span>
+          ))}
+        </div>
+      )}
 
       {graph.nodesError && (
         <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -68,46 +103,55 @@ export function GraphPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Nodos</CardTitle>
+            <CardTitle className="text-sm">{viewMode === "graph" ? "Grafo" : "Nodos"}</CardTitle>
           </CardHeader>
           <CardContent>
-            <table className="w-full text-sm">
-              <thead className="text-muted-foreground text-left text-xs">
-                <tr>
-                  <th className="pb-2">Nombre</th>
-                  <th className="pb-2">Tipo</th>
-                  <th className="pb-2">Confianza</th>
-                </tr>
-              </thead>
-              <tbody>
-                {graph.nodes.map((node) => (
-                  <tr
-                    key={node.id}
-                    onClick={() => void graph.selectNode(node.id)}
-                    className="hover:bg-muted cursor-pointer border-t border-border"
-                    aria-selected={graph.selected?.node.id === node.id}
-                  >
-                    <td className="py-2 pr-2">
-                      {node.canonical_name}
-                      {node.locked && (
-                        <Badge variant="outline" className="ml-2">
-                          corregido
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="py-2 pr-2">{node.node_type}</td>
-                    <td className="py-2">{node.confidence.toFixed(2)}</td>
-                  </tr>
-                ))}
-                {graph.nodes.length === 0 && !graph.nodesLoading && (
+            {viewMode === "graph" ? (
+              <GraphCanvas
+                nodes={graph.nodes}
+                relations={graph.relations}
+                selectedId={graph.selected?.node.id ?? null}
+                onSelect={(nodeId) => void graph.selectNode(nodeId)}
+              />
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-muted-foreground text-left text-xs">
                   <tr>
-                    <td colSpan={3} className="text-muted-foreground py-4 text-center">
-                      Sin resultados.
-                    </td>
+                    <th className="pb-2">Nombre</th>
+                    <th className="pb-2">Tipo</th>
+                    <th className="pb-2">Confianza</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {graph.nodes.map((node) => (
+                    <tr
+                      key={node.id}
+                      onClick={() => void graph.selectNode(node.id)}
+                      className="hover:bg-muted cursor-pointer border-t border-border"
+                      aria-selected={graph.selected?.node.id === node.id}
+                    >
+                      <td className="py-2 pr-2">
+                        {node.canonical_name}
+                        {node.locked && (
+                          <Badge variant="outline" className="ml-2">
+                            corregido
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-2 pr-2">{node.node_type}</td>
+                      <td className="py-2">{node.confidence.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                  {graph.nodes.length === 0 && !graph.nodesLoading && (
+                    <tr>
+                      <td colSpan={3} className="text-muted-foreground py-4 text-center">
+                        Sin resultados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
           </CardContent>
         </Card>
 

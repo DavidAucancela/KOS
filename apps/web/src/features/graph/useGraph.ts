@@ -1,6 +1,12 @@
 import { useCallback, useState } from "react";
 
-import type { GraphNode, NodeType, NodeWithNeighborhood, RelationType } from "./types";
+import type {
+  GraphNode,
+  GraphRelation,
+  NodeType,
+  NodeWithNeighborhood,
+  RelationType,
+} from "./types";
 
 async function errorMessage(response: Response): Promise<string> {
   try {
@@ -14,6 +20,7 @@ async function errorMessage(response: Response): Promise<string> {
 
 export interface UseGraphResult {
   nodes: GraphNode[];
+  relations: GraphRelation[];
   nodesLoading: boolean;
   nodesError: string | null;
   search: (nodeType: NodeType | null) => Promise<void>;
@@ -37,10 +44,12 @@ export interface UseGraphResult {
 }
 
 // Pantalla de corrección del grafo (doc 06 §2, Sprint 9) contra /v1/graph/*
-// (proxy de Vite → apps/api). No dibuja el grafo (eso es el Sprint 10) — es
-// una tabla de búsqueda + vecindario + formularios de corrección.
+// (proxy de Vite → apps/api): tabla de búsqueda + vecindario + formularios de
+// corrección, más la visualización (Sprint 10) sobre el mismo `nodes`/
+// `relations` — el template `subgraph` trae ambos en una sola llamada.
 export function useGraph(): UseGraphResult {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [relations, setRelations] = useState<GraphRelation[]>([]);
   const [nodesLoading, setNodesLoading] = useState(false);
   const [nodesError, setNodesError] = useState<string | null>(null);
 
@@ -59,7 +68,7 @@ export function useGraph(): UseGraphResult {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template: "most_connected",
+          template: "subgraph",
           node_type: nodeType,
           limit: 20,
         }),
@@ -68,8 +77,12 @@ export function useGraph(): UseGraphResult {
         setNodesError(await errorMessage(response));
         return;
       }
-      const body = (await response.json()) as { nodes?: GraphNode[] | null };
+      const body = (await response.json()) as {
+        nodes?: GraphNode[] | null;
+        relations?: GraphRelation[] | null;
+      };
       setNodes(body.nodes ?? []);
+      setRelations(body.relations ?? []);
     } catch (cause) {
       setNodesError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -170,6 +183,7 @@ export function useGraph(): UseGraphResult {
 
   return {
     nodes,
+    relations,
     nodesLoading,
     nodesError,
     search,

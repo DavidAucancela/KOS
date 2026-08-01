@@ -1,10 +1,29 @@
 # 04 — Modelo de memoria y aprendizaje continuo
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-11 · **Habilita:** Fase 3
+**Estado:** 🔵 En revisión · **Última actualización:** 2026-07-31 · **Habilita:** Fase 3
 
 ## 1. Principio
 
 Los documentos son lo que el usuario escribió; la **memoria** es lo que el sistema sabe. La memoria persiste entre sesiones, se consolida con el tiempo y decae cuando pierde vigencia — igual que la humana, pero auditable.
+
+### 1.1 Alcance de v0.4 vs Fase 4/5 (agregado en revisión, 2026-07-31)
+
+Este documento nombra un "Learning Agent" y un "Memory Agent" en varios lados — son los nombres
+de dominio de doc 03 (Arquitectura de agentes), que es **Fase 4** y todavía no tiene código
+(sigue 🟡 Borrador). v0.4 (esta fase, Fase 3) empieza antes que Fase 4, así que no puede depender
+de agentes reales que no existen. Se resuelve con el mismo mecanismo que ya usa `/v1/query` desde
+Sprint 4 (doc 06 §3: *"Estos contratos se usan desde la Fase 1 (aunque el 'planner' sea un
+pipeline fijo), para que la extracción a agentes reales en Fase 4 sea un refactor y no una
+reescritura"*):
+
+- **v0.4 implementa "Learning"/"Memory" como tasks de Celery encadenadas directamente** (mismo
+  patrón que `kos.ingest_document` → `kos.embed_document` → `kos.enrich_document` →
+  `kos.graph_sync` → `kos.graph_retire_document`), no como agentes orquestados por un planner.
+  Donde este doc dice "el Learning Agent destila..." o "el Memory Agent busca...", leer "la task
+  `kos.memory_learn`/`kos.memory_recall` hace...".
+- **En v0.5 (Fase 4)** estos mismos pasos se exponen como agentes reales sobre el mismo contrato
+  (`MemoryItem`, herramientas MCP `memory.recall`/`memory.store` ya listadas en doc 06 §4) — un
+  refactor de orquestación, no una reescritura del modelo de datos ni de las reglas de este doc.
 
 ## 2. Los cinco tipos de memoria
 
@@ -46,28 +65,32 @@ flowchart LR
     C --> S[Supersede<br/>versionado]
 ```
 
-1. **Escritura** — el Learning Agent destila cada interacción: qué se preguntó, qué se decidió, qué funcionó. Nunca se guardan transcripciones crudas como memoria.
-2. **Consolidación** (job periódico) — agrupa memorias episódicas repetidas en semánticas ("3 veces preguntó por X" → "le interesa X"), detecta duplicados y contradicciones.
-3. **Recuperación** — el Memory Agent busca por similitud + entidades del grafo + recencia, ponderado por `salience` y `confidence`.
-4. **Decaimiento y poda** — `salience` decae exponencialmente; memorias temporales expiran solas; nada se borra sin pasar por estado archivado.
+1. **Escritura** — la task `kos.memory_learn` (§1.1) destila cada interacción: qué se preguntó, qué se decidió, qué funcionó. Nunca se guardan transcripciones crudas como memoria.
+2. **Consolidación** — job periódico vía Celery beat, `kos.memory_consolidate`, cada `KOS_MEMORY_CONSOLIDATION_HOURS` (default 24h; mismo patrón que `KOS_SYNC_POLL_SECONDS`, doc 05 §2). Agrupa memorias episódicas repetidas en semánticas ("3 veces preguntó por X" → "le interesa X"), detecta duplicados y contradicciones.
+3. **Recuperación** — la task/endpoint de recuperación busca por similitud + entidades del grafo + recencia, ponderado por `salience` y `confidence`.
+4. **Decaimiento y poda** — `salience` decae exponencialmente: `salience(t) = salience_0 · 0.5^(t / half_life)`, con `half_life` configurable por tipo vía `KOS_MEMORY_SALIENCE_HALF_LIFE_DAYS` (default 30 días; episódica/semántica/procedimental/preferencias decaen así). La memoria **temporal** no decae por fórmula: expira directo al salir de su ventana deslizante (ya es effímera por diseño, §2). Nada se borra sin pasar por estado archivado.
 5. **Versionado** — una memoria que contradice otra más antigua la marca `superseded_by`; la historia queda auditable.
 
 ## 4. Aprendizaje continuo (dominio 8)
 
-El aprendizaje es el pipeline que mantiene todo el sistema consistente ante cada cambio:
+El aprendizaje es el pipeline que mantiene todo el sistema consistente ante cada cambio. **v0.4
+(Fase 3) construye los primeros tres pasos** — ya tienen dueño concreto (ingesta/grafo existentes
++ la memoria nueva de este doc). Los últimos dos son **Fase 5 (Recomendador, doc 07)**: dependen
+de que exista el propio Recomendador, así que quedan fuera de v0.4 aunque el diagrama los muestre
+para no perder la foto completa del dominio 8.
 
 ```
 Evento (nueva nota / nota modificada / conversación terminada)
   ↓
-Actualizar embeddings       (re-chunk + re-embed solo lo cambiado)
+Actualizar embeddings       (re-chunk + re-embed solo lo cambiado)                  [v0.2, ya existe]
   ↓
-Actualizar grafo            (nuevas entidades/relaciones; confianza ±)
+Actualizar grafo            (nuevas entidades/relaciones; confianza ±)              [v0.3, ya existe]
   ↓
-Actualizar memoria          (temporal siempre; episódica si hubo interacción)
+Actualizar memoria          (temporal siempre; episódica si hubo interacción)       [v0.4 — este doc]
   ↓
-Actualizar roadmap          (si cambió el mapa de skills)
+Actualizar roadmap          (si cambió el mapa de skills)                           [Fase 5, fuera de v0.4]
   ↓
-Actualizar conocimiento     (recalcular lagunas, contradicciones, sugerencias)
+Actualizar conocimiento     (recalcular lagunas, contradicciones, sugerencias)      [Fase 5, fuera de v0.4]
 ```
 
 Propiedades del pipeline:
@@ -89,9 +112,17 @@ La confianza es transversal (documentos, grafo, memoria) y sigue reglas únicas:
 | Fuente eliminada | recálculo con la evidencia restante |
 | Antigüedad sin refuerzo | decaimiento lento (configurable por tipo) |
 
+> **Nota de alcance (revisión 2026-07-31):** "Fuente eliminada → recálculo con la evidencia
+> restante" todavía no tiene una fórmula concreta ni en el grafo ni en memoria — Sprint 11
+> implementó el tombstone hacia el grafo (retira la fuente, borra lo que queda sin ninguna) pero
+> sin recalcular `confidence` de lo que sobrevive con menos evidencia (deuda visible, ver
+> `docs/sprints/sprint-11.md`). v0.4 hereda la misma deuda para memoria hasta que se defina una
+> fórmula — no bloquea el resto de este documento porque el caso principal (memoria sin ninguna
+> fuente se archiva) sí queda cubierto por el ciclo de vida de §3.
+
 ## 6. Detección de duplicados y reorganización
 
-- **Duplicados**: candidatos por similitud de embeddings (>0.92) confirmados por LLM; se propone fusión, el usuario decide (en Fase 3; autonomía configurable en Fase 5).
+- **Duplicados**: candidatos por similitud de embeddings (>0.92) confirmados por LLM; se propone fusión, el usuario decide (en Fase 3; autonomía configurable en Fase 5). Umbral fijo en código (constante, no variable de entorno) — mismo criterio que `SIMILARITY_THRESHOLD` en entity resolution del grafo (Sprint 6, `apps/workers/src/kos_workers/tasks/graph_sync.py`): son parámetros de un algoritmo, no configuración de despliegue.
 - **Reorganización de notas**: el sistema propone mover/renombrar/etiquetar notas de Obsidian según clusters del grafo. Siempre como propuesta aplicable vía herramienta MCP — nunca toca el vault sin aprobación.
 
 ## 7. Meta de la Fase 3

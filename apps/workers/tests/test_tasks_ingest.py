@@ -65,5 +65,60 @@ def test_sync_all_sources_encola_por_cada_fuente_habilitada(
     assert encoladas == [str(i) for i in ids]
 
 
+def test_sync_source_propaga_tombstone_al_grafo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sprint 11 (doc 05 §5, doc 06 §3 `document.deleted`): cada documento
+    retirado publica el evento y encola `kos.graph_retire_document` — mismo
+    patrón de encadenado directo que `embed_document.delay`/`graph_sync.delay`."""
+    source_uuid = uuid.uuid4()
+    retired_id = uuid.uuid4()
+
+    class _FakeConnector:
+        name = "obsidian"
+
+        def discover(self) -> list[object]:
+            return []
+
+    async def fake_load_source(source_uuid_arg: uuid.UUID, settings: object) -> dict[str, object]:
+        return {"enabled": True, "connector": "obsidian", "config": {}}
+
+    async def fake_known_hashes(*args: object, **kwargs: object) -> dict[str, str]:
+        return {}
+
+    async def fake_retire_missing(*args: object, **kwargs: object) -> list[uuid.UUID]:
+        return [retired_id]
+
+    published: list[object] = []
+    delayed: list[str] = []
+
+    class _FakeRedisClient:
+        def close(self) -> None:
+            return None
+
+    class _FakeGraphRetire:
+        def delay(self, doc_id: str) -> None:
+            delayed.append(doc_id)
+
+    monkeypatch.setattr(ingest_module, "_load_source", fake_load_source)
+    monkeypatch.setattr(ingest_module, "_build_connector", lambda source: _FakeConnector())
+    monkeypatch.setattr(ingest_module, "_known_hashes", fake_known_hashes)
+    monkeypatch.setattr(ingest_module, "_retire_missing", fake_retire_missing)
+    monkeypatch.setattr(ingest_module, "graph_retire_document", _FakeGraphRetire())
+    monkeypatch.setattr(
+        ingest_module.redis_storage, "create_sync_client", lambda settings: _FakeRedisClient()
+    )
+    monkeypatch.setattr(
+        ingest_module.redis_storage,
+        "publish_event_sync",
+        lambda client, event: published.append(event),
+    )
+
+    result = ingest_module.sync_source(str(source_uuid))
+
+    assert result == {"discovered": 0, "queued": 0, "skipped": 0, "retired": 1}
+    assert [event.doc_id for event in published] == [retired_id]
+    assert delayed == [str(retired_id)]
+
+
 def test_la_task_esta_registrada_con_nombre_de_evento() -> None:
     assert "kos.sync_all_sources" in app.tasks
+    assert "kos.graph_retire_document" in app.tasks

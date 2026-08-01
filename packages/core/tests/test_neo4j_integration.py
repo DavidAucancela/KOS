@@ -449,6 +449,90 @@ async def test_list_nodes_by_type_paginado_y_most_connected() -> None:
         )
         top = next(row for row in most_connected if row["id"] == ids[0])
         assert top["canonical_name"] == canonicals[0]
+
+        # Subgrafo inducido (Sprint 10): solo la relación entre ids[0] e ids[1]
+        # está "dentro" del conjunto — la de ids[0]->ids[2] queda afuera si
+        # ids[2] no se incluye, aunque ids[2] exista en el grafo.
+        induced = await neo4j_storage.subgraph_relations(driver, [ids[0], ids[1]])
+        assert {r["source_id"] for r in induced} == {ids[0]}
+        assert {r["target_id"] for r in induced} == {ids[1]}
+
+        full = await neo4j_storage.subgraph_relations(driver, ids)
+        assert len(full) == 2
+
+        assert await neo4j_storage.subgraph_relations(driver, []) == []
+    finally:
+        await _cleanup(driver, canonicals)
+        await driver.close()
+
+
+async def test_retire_document_borra_huerfanos_y_protege_lo_locked() -> None:
+    """Sprint 11 (doc 05 §5, doc 06 §3 `document.deleted`): al tumbar un
+    documento, lo que se queda sin ninguna fuente se borra — salvo lo `locked`,
+    que sobrevive porque el usuario ya lo validó."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    orphan_canonical = f"test-retire-orphan-{uuid.uuid4().hex[:8]}"
+    survivor_canonical = f"test-retire-survivor-{uuid.uuid4().hex[:8]}"
+    locked_canonical = f"test-retire-locked-{uuid.uuid4().hex[:8]}"
+    canonicals = [orphan_canonical, survivor_canonical, locked_canonical]
+    try:
+        orphan_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=orphan_canonical,
+            name=orphan_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+        survivor_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=survivor_canonical,
+            name=survivor_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x", "doc-y"],
+        )
+        locked_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=locked_canonical,
+            name=locked_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+        await neo4j_storage.update_node(driver, locked_id, canonical_name=locked_canonical)
+        assert (await neo4j_storage.get_node(driver, locked_id))["locked"] is True
+
+        # Relación solo respaldada por doc-x entre orphan y survivor: debe
+        # desaparecer aunque uno de sus extremos (survivor) sobreviva.
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=orphan_id,
+            relation_type="RELATED_TO",
+            target_id=survivor_id,
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+
+        result = await neo4j_storage.retire_document(driver, "doc-x")
+        assert result == {"relations_deleted": 1, "nodes_deleted": 1}
+
+        assert await neo4j_storage.get_node(driver, orphan_id) is None
+        survivor = await neo4j_storage.get_node(driver, survivor_id)
+        assert survivor is not None
+        assert survivor["sources"] == ["doc-y"]
+        assert survivor["id"] == survivor_id  # sigue existiendo
+
+        locked = await neo4j_storage.get_node(driver, locked_id)
+        assert locked is not None
+        assert locked["sources"] == []  # sin fuentes, pero protegido por locked
+
+        neighborhood = await neo4j_storage.get_neighborhood(driver, survivor_id)
+        assert neighborhood == []  # la relación huérfana no sobrevive
     finally:
         await _cleanup(driver, canonicals)
         await driver.close()

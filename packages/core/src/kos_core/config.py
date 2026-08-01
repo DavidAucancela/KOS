@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # Fuente por defecto donde `notes_service` crea notas nuevas desde el chat.
     kos_default_vault_source: str = "vault-real"
 
+    # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
+    # repetida → semántica) y la media vida del decaimiento de `salience`.
+    kos_memory_consolidation_hours: int = 24
+    kos_memory_salience_half_life_days: float = 30.0
+
     # Ahorro de recursos (doc 09 §8): apaga la infra Docker sin uso y la
     # enciende bajo demanda. Off por defecto: no debe activarse solo por
     # correr la API en tests o en un entorno sin `docker compose` a mano.
