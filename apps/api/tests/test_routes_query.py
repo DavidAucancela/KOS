@@ -9,9 +9,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kos_api.main import create_app
-from kos_api.services import notes_service
+from kos_api.services import memory_service, notes_service
 from kos_core.storage import search as search_storage
 from kos_core.storage.search import SearchHit
+
+
+@pytest.fixture(autouse=True)
+def _no_real_memory_enqueue(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """`enqueue_learn` intentaría una conexión real a Redis (Sprint 12); se
+    captura en una lista en vez de mockear un cliente Celery completo."""
+    calls: list[dict[str, Any]] = []
+
+    def fake_enqueue(settings: Any, **kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(memory_service, "enqueue_learn", fake_enqueue)
+    return calls
 
 
 def _hit(**overrides: Any) -> SearchHit:
@@ -102,6 +115,50 @@ def test_con_hits_devuelve_respuesta_evidencia_y_plan(monkeypatch: pytest.Monkey
     assert [step["id"] for step in body["plan"]] == ["s1", "s2"]
     assert body["plan"][0]["evidence_count"] == 1
     assert body["trace_id"]
+
+
+def test_respuesta_exitosa_encola_memoria_episodica(
+    monkeypatch: pytest.MonkeyPatch, _no_real_memory_enqueue: list[dict[str, Any]]
+) -> None:
+    hit = _hit()
+
+    async def fake_hybrid(
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+    ) -> list[SearchHit]:
+        return [hit]
+
+    monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = _EchoLLM()
+        response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
+
+    assert response.status_code == 200
+    [call] = _no_real_memory_enqueue
+    assert call["query"] == "¿qué es KOS?"
+    assert call["sources"] == [str(hit.doc_id)]
+    assert call["confidence"] == response.json()["confidence"]
+
+
+def test_comando_no_encola_memoria(
+    monkeypatch: pytest.MonkeyPatch, _no_real_memory_enqueue: list[dict[str, Any]]
+) -> None:
+    """Un comando (`/nueva-maquina`) es una acción, no una pregunta — no genera
+    memoria episódica (doc 04 §3 paso 1 habla de interacciones de consulta)."""
+
+    async def fake_get_vault_path(engine: Any, source_name: str) -> Path:
+        return Path("/vault-falso")
+
+    monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    monkeypatch.setattr(notes_service, "create_note", lambda vault_path, **kwargs: Path("x.md"))
+
+    with TestClient(create_app()) as client:
+        client.app.state.embedding_client = _FakeEmbedder()
+        client.app.state.llm_client = _EchoLLM()
+        response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
+
+    assert response.status_code == 200
+    assert _no_real_memory_enqueue == []
 
 
 def test_sin_hits_no_alucina(monkeypatch: pytest.MonkeyPatch) -> None:

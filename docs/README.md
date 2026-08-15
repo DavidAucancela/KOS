@@ -10,7 +10,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 01 | [Arquitectura general](01-arquitectura-general.md) | Todas | 🟢 Aprobado |
 | 02 | [Modelo de dominio y ontología](02-modelo-de-dominio-y-ontologia.md) | Fase 1–2 | 🟢 Aprobado |
 | 03 | [Arquitectura de agentes](03-arquitectura-de-agentes.md) | Fase 4 | 🟡 Borrador |
-| 04 | [Memoria y aprendizaje](04-memoria-y-aprendizaje.md) | Fase 3 | 🟡 Borrador |
+| 04 | [Memoria y aprendizaje](04-memoria-y-aprendizaje.md) | Fase 3 | 🔵 En revisión |
 | 05 | [Ingesta y actualización](05-ingesta-y-actualizacion.md) | Fase 1 | 🟢 Aprobado |
 | 06 | [APIs y contratos](06-apis-y-contratos.md) | Fase 1+ | 🟢 Aprobado |
 | 07 | [Roadmap por versiones](07-roadmap-versiones.md) | Planificación | 🟡 Borrador |

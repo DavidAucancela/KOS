@@ -36,8 +36,11 @@ Solo se especifica aquí la superficie; el detalle de cada esquema se genera com
 `POST /v1/graph/query` no acepta Cypher libre: el body es `{template, params}` sobre un set cerrado
 de plantillas (Sprint 9): `nodes_by_type` (listado paginado por tipo), `neighbors_by_type`
 (vecinos de un nodo, opcionalmente filtrados por tipo de relación/nodo vecino), `most_connected`
-(nodos con más relaciones, para priorizar qué revisar a mano). Ampliar el set de plantillas es un
-cambio de código revisado en PR, no una superficie abierta a query arbitraria.
+(nodos con más relaciones, para priorizar qué revisar a mano), `subgraph` (Sprint 10: los mismos
+nodos que `most_connected` más las relaciones activas *entre ellos* — subgrafo inducido, no su
+vecindario completo — para dibujar el grafo en la UI sin traer nodos fuera del conjunto mostrado).
+Ampliar el set de plantillas es un cambio de código revisado en PR, no una superficie abierta a
+query arbitraria.
 
 ### Ingesta
 

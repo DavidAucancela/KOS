@@ -35,6 +35,8 @@ def create_celery() -> Celery:
             "kos_workers.tasks.embed",
             "kos_workers.tasks.enrich",
             "kos_workers.tasks.graph_sync",
+            "kos_workers.tasks.graph_retire",
+            "kos_workers.tasks.memory",
         ],
     )
     celery.conf.update(
@@ -50,6 +52,11 @@ def create_celery() -> Celery:
             "sync-all-sources": {
                 "task": "kos.sync_all_sources",
                 "schedule": settings.kos_sync_poll_seconds,
+            },
+            # Consolidación de memoria (doc 04 §3 paso 2, Sprint 12).
+            "memory-consolidate": {
+                "task": "kos.memory_consolidate",
+                "schedule": settings.kos_memory_consolidation_hours * 3600,
             },
         },
     )

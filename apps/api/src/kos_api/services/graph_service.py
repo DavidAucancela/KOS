@@ -12,7 +12,7 @@ from kos_core.storage import neo4j as neo4j_storage
 
 # Plantillas seguras de POST /v1/graph/query (doc 06 §2): nada de Cypher libre
 # desde el body, solo estas funciones ya validadas.
-QUERY_TEMPLATES = ("nodes_by_type", "neighbors_by_type", "most_connected")
+QUERY_TEMPLATES = ("nodes_by_type", "neighbors_by_type", "most_connected", "subgraph")
 
 
 async def get_node_with_neighborhood(
@@ -47,6 +47,18 @@ async def most_connected(
     driver: AsyncDriver, *, node_type: str | None, limit: int
 ) -> list[dict[str, Any]]:
     return await neo4j_storage.most_connected_nodes(driver, node_type=node_type, limit=limit)
+
+
+async def subgraph(
+    driver: AsyncDriver, *, node_type: str | None, limit: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Nodos más conectados + relaciones activas entre ellos (subgrafo inducido,
+    doc 06 §2, Sprint 10): lo que necesita la visualización del grafo, sin traer
+    vecinos fuera del conjunto mostrado."""
+    nodes = await neo4j_storage.most_connected_nodes(driver, node_type=node_type, limit=limit)
+    node_ids = [str(node["id"]) for node in nodes]
+    relations = await neo4j_storage.subgraph_relations(driver, node_ids)
+    return nodes, relations
 
 
 async def correct_node(

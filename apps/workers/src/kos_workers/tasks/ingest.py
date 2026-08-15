@@ -24,7 +24,7 @@ from kos_core.observability import (
     pipeline_duration_seconds,
 )
 from kos_core.schemas import make_doc_id
-from kos_core.schemas.events import DocumentIngested, DocumentParsed
+from kos_core.schemas.events import DocumentDeleted, DocumentIngested, DocumentParsed
 from kos_core.storage import minio as minio_storage
 from kos_core.storage import redis as redis_storage
 from kos_core.storage.postgres import (
@@ -37,6 +37,8 @@ from kos_core.storage.postgres import (
 from kos_workers.celery_app import app
 from kos_workers.pipeline import PIPELINE_VERSION, run_pipeline
 from kos_workers.tasks.embed import embed_document
+from kos_workers.tasks.graph_retire import graph_retire_document
+from kos_workers.tasks.memory_retire import memory_retire_document
 
 
 async def _load_source(source_uuid: uuid.UUID, settings: Settings) -> dict[str, Any] | None:
@@ -85,12 +87,12 @@ async def _known_hashes(
 
 async def _retire_missing(
     source_uuid: uuid.UUID, connector_name: str, discovered_ids: set[str], settings: Settings
-) -> int:
+) -> list[uuid.UUID]:
     """Tombstone de los documentos conocidos que ya no aparecen en discover() (doc 05 §5)."""
     known = await _known_hashes(source_uuid, connector_name, settings)
     missing = set(known) - discovered_ids
     if not missing:
-        return 0
+        return []
     engine = create_engine(settings)
     try:
         retired = await retire_documents(
@@ -99,7 +101,7 @@ async def _retire_missing(
     finally:
         await engine.dispose()
     if retired:
-        documents_retired_total.labels(connector=connector_name).inc(retired)
+        documents_retired_total.labels(connector=connector_name).inc(len(retired))
     return retired
 
 
@@ -138,11 +140,25 @@ def sync_source(source_uuid: str, force: bool = False) -> dict[str, int]:
     retired = asyncio.run(
         _retire_missing(source_uuid_value, connector.name, discovered_ids, settings)
     )
+    if retired:
+        redis_client = redis_storage.create_sync_client(settings)
+        try:
+            for doc_id in retired:
+                redis_storage.publish_event_sync(redis_client, DocumentDeleted(doc_id=doc_id))
+        finally:
+            redis_client.close()
+        # Propaga el tombstone al grafo y a memoria (doc 05 §5, doc 06 §3, doc 04
+        # §5): mismo patrón de encadenado directo que `embed_document.delay`/
+        # `graph_sync.delay`, no una suscripción al evento recién publicado (ese
+        # evento es para Aprendizaje/Recomendador, que todavía no existen).
+        for doc_id in retired:
+            graph_retire_document.delay(str(doc_id))
+            memory_retire_document.delay(str(doc_id))
     return {
         "discovered": discovered,
         "queued": queued,
         "skipped": discovered - queued,
-        "retired": retired,
+        "retired": len(retired),
     }
 
 

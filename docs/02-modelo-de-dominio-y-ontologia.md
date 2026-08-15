@@ -70,6 +70,9 @@ aliases[]       # variantes ("FastAPI", "fast-api", "fastapi")
 created_at / updated_at
 confidence      # 0–1: cuánta evidencia sostiene la existencia del nodo
 sources[]       # doc_ids que lo mencionan
+source_confidences[]  # confidence de cada fuente, mismo índice que sources[] — Neo4j no admite
+                       # listas de objetos como propiedad (doc 04 §5, decidido 2026-08-13);
+                       # habilita recalcular confidence al perder una fuente
 version         # versionado optimista
 extracted_by    # "parser@vX" | "user" (Sprint 9, mismo campo que ya tenía la relación)
 locked          # true si extracted_by="user" (ver regla 5): el sync puede seguir sumando
@@ -96,6 +99,7 @@ locked          # true si extracted_by="user" (ver regla 5): el sync puede segui
 ```
 confidence      # 0–1
 sources[]       # evidencia: doc_ids + chunk_ids que la sostienen
+source_confidences[]  # mismo esquema de array paralelo que en nodos (doc 04 §5)
 extracted_at
 extracted_by    # "parser@vX" | "user" | "recommender"
 valid_from / valid_to   # vigencia temporal (opcional)

@@ -10,7 +10,7 @@ KOS construye una **representación digital de tu conocimiento**: ingesta cualqu
 
 ## Estado del proyecto
 
-**Fase 0 — Fundaciones** (en curso): arquitectura documentada, entorno de desarrollo e infraestructura base. El desarrollo de código comienza en la Fase 1, una vez cerrados los documentos de diseño.
+**v0.4 — Memoria y aprendizaje en curso, Sprint 12 cerrado** (2026-08-01, ver [`docs/sprints/`](docs/sprints/)). La API, la web y los workers funcionan end-to-end contra el vault real: ingesta, búsqueda semántica, consulta con evidencia, lectura/corrección/visualización del grafo, propagación del tombstone al grafo, y un pipeline de memoria (episódica → semántica) que audita qué aprendió el sistema. Detalle en [Servicios funcionales](#servicios-funcionales) más abajo y progreso sprint a sprint en [doc 08](docs/08-plan-de-sprints.md).
 
 ## Documentación de arquitectura
 
@@ -37,14 +37,14 @@ Toda decisión de diseño vive en [`docs/`](docs/README.md):
 kos/
 ├── docs/                 # Documentos de arquitectura y ADRs
 ├── apps/
-│   ├── api/              # FastAPI — API pública y orquestación (Fase 1)
-│   ├── web/              # React + TS + Vite + Tailwind + shadcn/ui (Fase 1)
-│   └── workers/          # Celery — ingesta, embeddings, grafo (Fase 1)
+│   ├── api/              # FastAPI — API pública y orquestación (activo)
+│   ├── web/              # React + TS + Vite + Tailwind + shadcn/ui (activo)
+│   └── workers/          # Celery — ingesta, embeddings, grafo (activo)
 ├── packages/
 │   ├── core/             # Modelo de dominio, ontología, contratos internos
 │   ├── connectors/       # Conectores de ingesta (Obsidian, PDF, Git…)
-│   ├── agents/           # Planner, Retrieval, Graph, Memory… (Fase 4)
-│   └── mcp-tools/        # Servidores MCP de herramientas
+│   ├── agents/           # Planner, Retrieval, Graph, Memory… (Fase 4, aún sin código)
+│   └── mcp-tools/        # Servidores MCP de herramientas (aún sin código)
 ├── infra/                # Configuración de servicios (init de Postgres, etc.)
 ├── docker-compose.yml    # Infraestructura local completa
 └── Makefile              # Atajos de desarrollo
@@ -68,18 +68,20 @@ kos/
 
 Las decisiones detrás de cada elección están registradas como [ADRs](docs/adr/).
 
-## Arranque rápido (infraestructura)
+## Arranque rápido
 
-Requisitos: Docker Desktop y `make`.
+Requisitos: Docker Desktop, `make`, `uv` y `pnpm`.
 
 ```bash
-cp .env.example .env      # ajusta credenciales si quieres
-make up                   # levanta Postgres, Neo4j, Redis, MinIO y Ollama
-make ps                   # estado de los servicios
-make down                 # detiene todo
+cp .env.example .env    # ajusta credenciales si quieres
+make install             # dependencias del workspace (uv + pnpm)
+make up                  # levanta Postgres, Neo4j, Redis, MinIO y Ollama
+make pull-models         # descarga bge-m3 + el LLM local
+make migrate             # aplica migraciones Alembic
+make dev                 # API + workers + beat + web + vigía de ahorro de recursos
 ```
 
-Servicios locales:
+Infraestructura:
 
 | Servicio | URL | Credenciales por defecto |
 |---|---|---|
@@ -88,6 +90,27 @@ Servicios locales:
 | Redis | `localhost:6379` | — |
 | MinIO Console | http://localhost:9001 | ver `.env` |
 | Ollama (nativo en Mac) | http://localhost:11434 | — |
+| Grafana / Prometheus (`make obs-up`) | http://localhost:3000 | ver `.env` |
+
+Aplicación:
+
+| Servicio | URL |
+|---|---|
+| API (FastAPI, OpenAPI en `/docs`) | http://localhost:8000 |
+| Web | http://localhost:5173 |
+
+`make down` detiene todo; `make clean` además borra los volúmenes de datos locales.
+
+## Servicios funcionales
+
+Estado real a la fecha (Sprint 12 cerrado), no aspiracional — detalle sprint a sprint en [`docs/sprints/`](docs/sprints/):
+
+- **API (`apps/api`)** — `GET /health` (Postgres/Neo4j/Redis), `/metrics` (Prometheus), `sources` (alta y sincronización de fuentes), `notes` (crear notas desde el chat), `documents` (listado/detalle/chunks), `search` (búsqueda semántica sobre pgvector), `query` (consulta con evidencia, mediada por el planner/pipeline), `graph` (lectura de nodos/vecindario/camino más corto y corrección manual de nodos y relaciones vía `PATCH`/`DELETE`), `memory` (auditoría de memoria vía `GET`/`DELETE /v1/memory`).
+- **Web (`apps/web`)** — tres vistas: **Chat** (con panel de citas/evidencia), **Grafo** (visualización de fuerzas del grafo con toggle a tabla de nodos, detalle con vecindario, corrección y rechazo de relaciones) y **Estado** (salud de servicios en vivo).
+- **Workers (`apps/workers`)** — ingesta del conector Obsidian, sincronización automática por polling, detección de `doc_type` e intención de plantilla, retiro de evidencia del grafo cuando un documento se tumba (`kos.graph_retire_document`), y el pipeline de memoria (`kos.memory_learn` por consulta respondida, `kos.memory_consolidate` periódico agrupando episódicas repetidas en semánticas).
+- **Infraestructura** — Postgres+pgvector, Neo4j (con APOC), Redis, MinIO y Ollama funcionando localmente; un vigía (`make guardian-watch`, activable con `KOS_GUARDIAN_ENABLED=true`) apaga y enciende la infraestructura Docker según uso real.
+
+Pendiente (deuda visible, no en progreso): herramientas MCP de lectura del grafo, consumidores del evento `graph.updated`, recálculo de confianza al perder una fuente (doc 04 §5), zoom/pan y caminos resaltados en la visualización del grafo, entity-linking y búsqueda semántica en memoria (`entities[]` vacío, `GET /v1/memory?q=` es texto simple), memoria sin influir todavía en `/v1/query`, y todo `packages/agents` (Fase 4) en adelante (v0.5 Agentes, v1.0).
 
 ## Principios
 

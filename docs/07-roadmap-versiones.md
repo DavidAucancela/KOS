@@ -63,6 +63,18 @@ Fund.    Core     Grafo    Memoria  Agentes  Proactivo+Plataforma
 
 **Criterio de salida:** editar/crear/borrar notas y ver el sistema actualizado solo, con traza de qué cambió y por qué.
 
+> **v0.4 cerrado 2026-08-15** (Sprints 12–15, `docs/sprints/sprint-12.md` a `sprint-15.md`):
+> los 5 tipos de memoria + `MemoryItem`, pipeline de aprendizaje (`kos.memory_learn`/
+> `kos.memory_consolidate`), sistema de confianza transversal con recálculo al perder una fuente
+> (grafo y memoria), entity-linking de memoria contra el grafo, y auditoría vía `GET`/`DELETE
+> /v1/memory`. Criterio de salida cumplido para grafo/memoria vía la propagación de
+> `document.deleted` (Sprint 11 + Sprint 14). Deuda que queda documentada, no bloquea el cierre:
+> **sin UI de auditoría de memoria** en `apps/web` (solo API — a diferencia del grafo, que sí
+> tiene pantalla propia desde Sprint 10); sin corrección manual de memoria (`locked`, análogo a
+> Sprint 9 en el grafo); detección de duplicados con fusión propuesta (doc 04 §6) implementada
+> como consolidación automática determinística, no como propuesta que el usuario aprueba — la
+> autonomía configurable queda para Fase 5 según ya preveía doc 04 §6.
+
 ## v0.5 — Orquestación de agentes (Fase 4) · 6–8 semanas
 
 **Meta:** *cada consulta se resuelve con un plan de ejecución.*

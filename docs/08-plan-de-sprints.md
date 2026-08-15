@@ -116,7 +116,8 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 | 7 | Fuera de plan (pedido directo del usuario): sincronización automática (polling) + crear notas desde el chat | ✅ Cerrado 2026-07-20 |
 | 8 | Fuera de plan (pedido directo del usuario): `doc_type`, detección de intención de plantilla y comando genérico `/crear-nota` — evitar que `/v1/query` fabrique plantillas inexistentes | ✅ Cerrado 2026-07-25 |
 | 9 | `/v1/graph/*` + correcciones manuales | ✅ Cerrado 2026-07-26 |
-| 10 | Visualización del grafo en la UI | Planeado, no iniciado |
+| 10 | Visualización del grafo en la UI | ✅ Cerrado 2026-07-31 |
+| 11 | Fuera de plan: tombstone de documentos borrados propagado al grafo (deuda de Sprint 6) | ✅ Cerrado 2026-07-31 |
 
 > **Sprint 6 cerrado 2026-07-18**: `packages/core/src/kos_core/ontology/`, etapas
 > `s7_entities`/`s8_relations`/`s9_confidence`, entity resolution (doc 05 §4, 5 pasos) y
@@ -154,6 +155,112 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 > de un nodo cambia su label real en Neo4j, y un sync posterior que propusiera el tipo viejo creaba
 > un duplicado en vez de respetar la corrección — arreglado con un chequeo por `canonical_name`
 > sin importar la label, solo para nodos bloqueados. Retro completa en `docs/sprints/sprint-09.md`.
+
+> **Sprint 10 cerrado 2026-07-31**: template `subgraph` (doc 06 §2) — nodos más conectados +
+> relaciones activas entre ellos, subgrafo inducido sin Cypher libre — y `GraphCanvas` en
+> `apps/web`: layout de fuerzas vía `d3-force` (física) renderizado como SVG por React, con
+> toggle Grafo/Tabla sobre el mismo `useGraph()`. Cierra v0.3. Bug real encontrado probando contra
+> el vault (patrón que se repite desde Sprint 8): 19 relaciones sin `id` remanentes del backfill
+> de Sprint 9 rompían `GET /v1/graph/nodes/{id}` con 500 — backfileadas del mismo modo. Retro
+> completa en `docs/sprints/sprint-10.md`.
+
+> **Sprint 11 cerrado 2026-07-31**: `document.deleted` pasó de evento definido-pero-nunca-emitido
+> a estar realmente conectado — `kos.sync_source` lo publica y encadena `kos.graph_retire_document`
+> (nueva task) por cada documento tumbado. `neo4j_storage.retire_document` saca el `doc_id` de
+> `sources[]` de nodos/relaciones y borra lo que queda sin ninguna fuente, protegiendo lo `locked`.
+> Deuda de Sprint 6, reafirmada en las retros de Sprint 9 y 10, resuelta acá. Sin recálculo de
+> `confidence` en lo que sobrevive (doc 04 §5) — no hay fórmula definida todavía, deuda visible.
+> Retro completa en `docs/sprints/sprint-11.md`.
+
+## v0.4 — Memoria y aprendizaje (Fase 3)
+
+| Sprint | Tema | Estado |
+|---|---|---|
+| 12 | Pipeline de memoria: escritura episódica, consolidación a semántica, auditoría (`GET`/`DELETE /v1/memory`) | ✅ Cerrado 2026-08-01 |
+
+> **Sprint 12 cerrado 2026-08-01**: tabla `memory_items` (Postgres + pgvector), `kos.memory_learn`
+> (encolada sin bloquear desde `POST /v1/query`, doc 04 §1.1: pipeline fijo de Celery, no agentes
+> reales) escribe una memoria episódica por consulta respondida; `kos.memory_consolidate` (Celery
+> beat, `KOS_MEMORY_CONSOLIDATION_HOURS`) agrupa ≥3 episódicas con similitud >0.92 en una
+> semántica determinística (sin LLM), marcando las episódicas `superseded_by` sin borrarlas.
+> `effective_salience` calcula el decaimiento exponencial al leer, no en un job aparte. `GET
+> /v1/memory?type=&q=` y `DELETE /v1/memory/{id}` (archivado, doc 06 §2) para auditar. Verificado
+> extremo a extremo contra infra real: una consulta real a `/v1/query` quedó visible como memoria
+> episódica vía `GET /v1/memory`. Deuda visible: sin entity-linking (`entities[]` queda vacío),
+> sin recálculo de confianza al perder una fuente (heredada de Sprint 11), demo de consolidación
+> con 3 preguntas repetidas cubierta por tests (no en vivo — Ollama local ocupado por la
+> sincronización real del vault durante la verificación). Retro completa en
+> `docs/sprints/sprint-12.md`.
+
+| 13 | Entity-linking en memoria (`entities[]`) — deuda de Sprint 12 | ✅ Cerrado 2026-08-14 |
+| 14 | Recálculo de `confidence` al perder una fuente (grafo + memoria) — deuda de Sprint 11/12 | ✅ Cerrado 2026-08-15 |
+| 15 | Cierre de v0.4: demo de consolidación en vivo + deuda restante | ✅ Cerrado 2026-08-15 |
+
+### Sprint 13 — "La memoria conoce el grafo"
+
+**Objetivo:** `kos.memory_learn` deja de escribir `entities=[]` a secas.
+
+- `entities[]` se resuelve buscando qué nodos del grafo comparten alguna `sources[]` con la
+  memoria (relación `MENTIONS` que `graph_sync` ya construyó) — sin extracción LLM nueva, sin
+  latencia adicional en `POST /v1/query` (doc 04 §2, decidido 2026-08-13).
+- Sin cambio de esquema: `MemoryItem.entities` ya existe (`packages/core/src/kos_core/schemas/memory.py:21`).
+
+**Demo:** una consulta real sobre el vault que use evidencia de nodos conocidos deja una memoria
+episódica con `entities[]` no vacío, visible en `GET /v1/memory`.
+
+> **Sprint 13 cerrado 2026-08-14**: `find_node_ids_by_sources` (`packages/core/.../storage/neo4j.py`)
+> + `kos.memory_learn` resolviendo `entities[]` vía `resolve_entities` inyectado (mismo patrón que
+> `embed`). Verificado en vivo: `"¿qué es Next.js?"` contra el vault real dejó una memoria con
+> `entities[]` de 33 node_ids que comparten fuente con la evidencia. 246 tests, ruff y
+> `mypy --strict` (core) limpios. Retro completa en `docs/sprints/sprint-13.md`.
+
+### Sprint 14 — "La confianza se ajusta"
+
+**Objetivo:** implementar la fórmula de recálculo de `confidence` decidida en doc 04 §5, para
+grafo y memoria por igual.
+
+- Migración de esquema: `source_confidences[]` (array paralelo a `sources[]`) en nodos y
+  relaciones de Neo4j; `MemoryItem.sources` pasa de `list[str]` a `list[{doc_id, confidence}]`
+  en Postgres (JSONB) — migración Alembic + backfill de datos existentes.
+- Fórmula `confidence_nueva = min(1.0, max(confidence_base_i restantes) + ALIAS_BOOST × (n_restantes − 1))`
+  aplicada en `retire_document` (`packages/core/src/kos_core/storage/neo4j.py:382`, deuda de
+  Sprint 11) y en el tombstone de memoria (Sprint 12).
+- Umbral de alerta: `confidence_nueva < 0.3` marca candidato a poda/revisión (distinto del
+  umbral de auto-poda `<0.2`, doc 02 §4 regla 4).
+
+**Demo:** borrar un documento que es una de varias fuentes de un nodo y de una memoria; el
+`confidence` de lo que sobrevive baja según la fórmula, visible en `GET /v1/graph/nodes/{id}` y
+`GET /v1/memory`.
+
+> **Sprint 14 cerrado 2026-08-15**: `source_confidences[]` (array paralelo en Neo4j) y
+> `SourceRef` (`{doc_id, confidence}` en Postgres/JSONB); recálculo en `retire_document`
+> (grafo) y nueva `retire_memory_sources`/`kos.memory_retire_document` (memoria, encadenada
+> desde `kos.sync_source`, antes no existía esa propagación). `prune_candidate` (`confidence <
+> 0.3`) expuesto en grafo y memoria. Verificado en vivo con datos sintéticos disparados por el
+> worker Celery real: `confidence` bajó de 0.9 a 0.75 en nodo y memoria tras retirar una de tres
+> fuentes, visible en `GET /v1/graph/nodes/{id}` y `GET /v1/memory`. 246 tests + 16 de
+> integración nuevos/tocados, ruff y `mypy --strict` (core) limpios. Retro completa en
+> `docs/sprints/sprint-14.md`.
+
+### Sprint 15 — cierre de v0.4
+
+**Objetivo:** verificar en vivo lo que Sprint 12 dejó cubierto solo por tests, y cerrar v0.4.
+
+- Correr `kos.memory_consolidate` contra 3 preguntas repetidas reales sobre el vault, sin
+  contención de Ollama con la sincronización del vault.
+- Revisar deuda restante de v0.4 y actualizar el roadmap (doc 07) hacia v0.5 (Fase 4).
+
+**Demo:** consolidación real observada en `GET /v1/memory` (episódicas → `superseded_by` una
+semántica nueva). Retro de cierre de v0.4.
+
+> **Sprint 15 cerrado 2026-08-15 — v0.4 cerrado**: la misma pregunta real ("¿qué es FastAPI?")
+> enviada 3 veces a `/v1/query` generó 3 episódicas lo bastante similares para que
+> `kos.memory_consolidate` (worker Celery real) las agrupara en una semántica nueva, con las 3
+> marcadas `superseded_by` — verificado en `GET /v1/memory`, sin data sintética (preguntas reales
+> sobre el vault real). Deuda de v0.4 revisada con el usuario: sin UI de auditoría de memoria en
+> `apps/web` queda documentada, no bloquea el cierre (decisión explícita 2026-08-15). Roadmap
+> (doc 07) actualizado con la nota de cierre de v0.4. Retro completa en
+> `docs/sprints/sprint-15.md`.
 
 ## Gestión
 

@@ -48,6 +48,7 @@ async def test_resolve_entity_crea_nodo_nuevo_sin_candidatos(
     assert node_id == "node-1"
     assert recording.calls[0]["canonical_name"] == "fastapi"
     assert recording.calls[0]["sources"] == ["doc-1"]
+    assert recording.calls[0]["source_confidences"] == [0.8]  # doc 04 §5
 
 
 async def test_resolve_entity_match_exacto_fusiona(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,6 +84,15 @@ async def test_resolve_entity_match_exacto_fusiona(monkeypatch: pytest.MonkeyPat
     call = recording.calls[0]
     assert set(call["sources"]) == {"doc-viejo", "doc-nuevo"}  # type: ignore[arg-type]
     assert call["confidence"] == pytest.approx(0.95)  # max(0.6, 0.9) + 0.05
+    # doc 04 §5: "doc-viejo" no tenía source_confidences propio (dato previo a
+    # este sprint) → usa la confidence agregada (0.6) como mejor aproximación;
+    # "doc-nuevo" guarda la confidence cruda de esta extracción (0.9).
+    sources = call["sources"]
+    confidences = call["source_confidences"]
+    assert dict(zip(sources, confidences, strict=True)) == {  # type: ignore[arg-type]
+        "doc-viejo": 0.6,
+        "doc-nuevo": 0.9,
+    }
 
 
 async def test_resolve_entity_similitud_alta_pide_veredicto_y_fusiona(

@@ -34,7 +34,7 @@ class NodesPage(BaseModel):
     next_cursor: str | None
 
 
-GraphQueryTemplate = Literal["nodes_by_type", "neighbors_by_type", "most_connected"]
+GraphQueryTemplate = Literal["nodes_by_type", "neighbors_by_type", "most_connected", "subgraph"]
 
 
 class GraphQueryRequest(BaseModel):
@@ -49,6 +49,7 @@ class GraphQueryResponse(BaseModel):
     template: GraphQueryTemplate
     nodes: list[GraphNode] | None = None
     neighbors: list[GraphNeighbor] | None = None
+    relations: list[GraphRelation] | None = None
     next_cursor: str | None = None
 
 
@@ -158,6 +159,19 @@ async def query(
         return GraphQueryResponse(
             template=body.template,
             neighbors=[_neighbor_out(n, body.node_id) for n in neighbors],
+        )
+
+    if body.template == "subgraph":
+        try:
+            nodes, relations = await graph_service.subgraph(
+                driver, node_type=body.node_type, limit=body.limit
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return GraphQueryResponse(
+            template=body.template,
+            nodes=[GraphNode.model_validate(n) for n in nodes],
+            relations=[GraphRelation.model_validate(r) for r in relations],
         )
 
     try:

@@ -449,6 +449,167 @@ async def test_list_nodes_by_type_paginado_y_most_connected() -> None:
         )
         top = next(row for row in most_connected if row["id"] == ids[0])
         assert top["canonical_name"] == canonicals[0]
+
+        # Subgrafo inducido (Sprint 10): solo la relación entre ids[0] e ids[1]
+        # está "dentro" del conjunto — la de ids[0]->ids[2] queda afuera si
+        # ids[2] no se incluye, aunque ids[2] exista en el grafo.
+        induced = await neo4j_storage.subgraph_relations(driver, [ids[0], ids[1]])
+        assert {r["source_id"] for r in induced} == {ids[0]}
+        assert {r["target_id"] for r in induced} == {ids[1]}
+
+        full = await neo4j_storage.subgraph_relations(driver, ids)
+        assert len(full) == 2
+
+        assert await neo4j_storage.subgraph_relations(driver, []) == []
+    finally:
+        await _cleanup(driver, canonicals)
+        await driver.close()
+
+
+async def test_find_node_ids_by_sources_devuelve_nodos_que_comparten_fuente() -> None:
+    """Sprint 13 (doc 04 §2): entity-linking de memoria reusa esta lookup en vez
+    de extraer entidades del contenido destilado con un LLM."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    matching_canonical = f"test-linked-{uuid.uuid4().hex[:8]}"
+    other_canonical = f"test-unlinked-{uuid.uuid4().hex[:8]}"
+    canonicals = [matching_canonical, other_canonical]
+    try:
+        matching_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=matching_canonical,
+            name=matching_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-shared"],
+        )
+        await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=other_canonical,
+            name=other_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-other"],
+        )
+
+        found = await neo4j_storage.find_node_ids_by_sources(driver, ["doc-shared", "doc-x"])
+        assert found == [matching_id]
+
+        assert await neo4j_storage.find_node_ids_by_sources(driver, []) == []
+        assert await neo4j_storage.find_node_ids_by_sources(driver, ["doc-no-existe"]) == []
+    finally:
+        await _cleanup(driver, canonicals)
+        await driver.close()
+
+
+async def test_retire_document_recalcula_confidence_con_las_fuentes_que_sobreviven() -> None:
+    """Sprint 14 (doc 04 §5, decidido 2026-08-13): confidence_nueva =
+    min(1.0, max(confidence_base restantes) + ALIAS_BOOST x (n_restantes - 1))."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    canonical = f"test-recalc-{uuid.uuid4().hex[:8]}"
+    try:
+        node_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=canonical,
+            name=canonical,
+            aliases=[],
+            confidence=0.9,
+            sources=["doc-a", "doc-b", "doc-c"],
+            source_confidences=[0.6, 0.9, 0.7],
+        )
+
+        result = await neo4j_storage.retire_document(driver, "doc-b")
+        assert result == {"relations_deleted": 0, "nodes_deleted": 0}
+
+        node = await neo4j_storage.get_node(driver, node_id)
+        assert node is not None
+        assert set(node["sources"]) == {"doc-a", "doc-c"}
+        # max(0.6, 0.7) + ALIAS_BOOST(0.05) * (2 restantes - 1) = 0.75
+        assert node["confidence"] == pytest.approx(0.75)
+
+        # Retirar otra fuente: solo queda doc-c (confidence base 0.7), sin boost.
+        await neo4j_storage.retire_document(driver, "doc-a")
+        node = await neo4j_storage.get_node(driver, node_id)
+        assert node is not None
+        assert node["sources"] == ["doc-c"]
+        assert node["confidence"] == pytest.approx(0.7)
+    finally:
+        await _cleanup(driver, [canonical])
+        await driver.close()
+
+
+async def test_retire_document_borra_huerfanos_y_protege_lo_locked() -> None:
+    """Sprint 11 (doc 05 §5, doc 06 §3 `document.deleted`): al tumbar un
+    documento, lo que se queda sin ninguna fuente se borra — salvo lo `locked`,
+    que sobrevive porque el usuario ya lo validó."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    orphan_canonical = f"test-retire-orphan-{uuid.uuid4().hex[:8]}"
+    survivor_canonical = f"test-retire-survivor-{uuid.uuid4().hex[:8]}"
+    locked_canonical = f"test-retire-locked-{uuid.uuid4().hex[:8]}"
+    canonicals = [orphan_canonical, survivor_canonical, locked_canonical]
+    try:
+        orphan_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=orphan_canonical,
+            name=orphan_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+        survivor_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=survivor_canonical,
+            name=survivor_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x", "doc-y"],
+        )
+        locked_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=locked_canonical,
+            name=locked_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+        await neo4j_storage.update_node(driver, locked_id, canonical_name=locked_canonical)
+        assert (await neo4j_storage.get_node(driver, locked_id))["locked"] is True
+
+        # Relación solo respaldada por doc-x entre orphan y survivor: debe
+        # desaparecer aunque uno de sus extremos (survivor) sobreviva.
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=orphan_id,
+            relation_type="RELATED_TO",
+            target_id=survivor_id,
+            confidence=0.8,
+            sources=["doc-x"],
+        )
+
+        result = await neo4j_storage.retire_document(driver, "doc-x")
+        assert result == {"relations_deleted": 1, "nodes_deleted": 1}
+
+        assert await neo4j_storage.get_node(driver, orphan_id) is None
+        survivor = await neo4j_storage.get_node(driver, survivor_id)
+        assert survivor is not None
+        assert survivor["sources"] == ["doc-y"]
+        assert survivor["id"] == survivor_id  # sigue existiendo
+
+        locked = await neo4j_storage.get_node(driver, locked_id)
+        assert locked is not None
+        assert locked["sources"] == []  # sin fuentes, pero protegido por locked
+        assert locked["confidence"] == 1.0  # doc 04 §5: corrección del usuario, inmutable
+
+        neighborhood = await neo4j_storage.get_neighborhood(driver, survivor_id)
+        assert neighborhood == []  # la relación huérfana no sobrevive
     finally:
         await _cleanup(driver, canonicals)
         await driver.close()

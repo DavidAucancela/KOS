@@ -15,6 +15,7 @@ from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
+from kos_core.confidence import ALIAS_BOOST
 from kos_core.config import Settings
 from kos_core.ontology import is_valid_node_type, is_valid_relation_type
 
@@ -74,15 +75,25 @@ async def merge_node(
     aliases: list[str],
     confidence: float,
     sources: list[str],
+    source_confidences: list[float] | None = None,
 ) -> str:
     """Crea o actualiza el nodo por `canonical_name` (clave de dedupe, doc 02 §4).
 
     Los valores (`aliases`/`sources`/`confidence`) ya vienen fusionados por quien
     llama — entity resolution decide qué fusionar, esto solo persiste el resultado.
+    `source_confidences` (doc 04 §5, decidido 2026-08-13) es un array paralelo a
+    `sources` (mismo índice): la confidence "cruda" con la que se agregó cada
+    fuente, para poder recalcular al perder una (Neo4j no admite listas de
+    objetos como propiedad). Si se omite, no se toca — el nodo queda sin esa
+    traza hasta la próxima fusión que sí la pase.
+
     Si el nodo está `locked` (corrección manual, Sprint 9, doc 02 §4 regla 5), el
     sync sigue sumando `sources` como evidencia pero no pisa `name`/`aliases`/
     `confidence` — la protección vive acá, no en quien llama, para que aplique
-    sin importar qué compute el caller.
+    sin importar qué compute el caller. Tampoco se actualiza `source_confidences`
+    en ese caso: la confianza de un nodo corregido es inmutable para el pipeline
+    (doc 04 §5 tabla, "Corrección del usuario"), así que no hace falta trazar por
+    fuente algo que nunca se va a recalcular.
 
     Un `PATCH` que corrige el tipo cambia la label real (`update_node`, vía APOC):
     el nodo corregido deja de coincidir con el patrón `MERGE (n:{node_type} ...)`
@@ -114,9 +125,14 @@ async def merge_node(
             "ON MATCH SET n.version = n.version + 1 "
             "SET n.name = $name, n.aliases = $aliases, n.confidence = $confidence, "
             "n.sources = $sources, n.updated_at = datetime() "
-            "RETURN n.id AS id"
+            + (
+                "SET n.source_confidences = $source_confidences "
+                if source_confidences is not None
+                else ""
+            )
+            + "RETURN n.id AS id"
         )
-        params = {
+        params: dict[str, Any] = {
             "canonical_name": canonical_name,
             "id": str(uuid.uuid4()),
             "name": name,
@@ -124,6 +140,8 @@ async def merge_node(
             "confidence": confidence,
             "sources": sources,
         }
+        if source_confidences is not None:
+            params["source_confidences"] = source_confidences
         result = await session.run(query, params)
         record = await result.single()
         assert record is not None  # MERGE siempre devuelve una fila
@@ -138,6 +156,7 @@ async def merge_relation(
     target_id: str,
     confidence: float,
     sources: list[str],
+    source_confidences: list[float] | None = None,
     extracted_by: str = "parser@v1",
 ) -> None:
     """Crea o actualiza la relación entre dos nodos ya resueltos (por `id`).
@@ -147,7 +166,8 @@ async def merge_relation(
     posterior descarta el `SET` — no se resucita ni se le pisa `confidence`. Si
     está `locked` (corrección manual de tipo/confianza), tampoco se pisa la
     confianza; `extracted_by` ya estaba protegido de por sí (solo se fija
-    `ON CREATE`, nunca se reescribe en un re-sync).
+    `ON CREATE`, nunca se reescribe en un re-sync). `source_confidences`: mismo
+    array paralelo que `merge_node` (doc 04 §5), omitido si no se pasa.
     """
     if not is_valid_relation_type(relation_type):
         raise ValueError(f"Tipo de relación desconocido: {relation_type!r}")
@@ -160,14 +180,17 @@ async def merge_relation(
         "SET r.confidence = CASE WHEN coalesce(r.locked, false) "
         "THEN r.confidence ELSE $confidence END, "
         "r.sources = $sources"
+        + (", r.source_confidences = $source_confidences" if source_confidences is not None else "")
     )
-    params = {
+    params: dict[str, Any] = {
         "source_id": source_id,
         "target_id": target_id,
         "confidence": confidence,
         "sources": sources,
         "extracted_by": extracted_by,
     }
+    if source_confidences is not None:
+        params["source_confidences"] = source_confidences
     async with driver.session() as session:
         await session.run(query, params)
 
@@ -188,6 +211,19 @@ async def get_node(driver: AsyncDriver, node_id: str) -> NodeRecord | None:
         result = await session.run(query, {"node_id": node_id})
         record = await result.single()
         return NodeRecord(record) if record is not None else None
+
+
+async def find_node_ids_by_sources(driver: AsyncDriver, doc_ids: list[str]) -> list[str]:
+    """Node ids que ya comparten alguna fuente con `doc_ids` — enlace memoria↔grafo
+    sin extracción LLM nueva (doc 04 §2, `entities[]` de `kos.memory_learn`,
+    decidido 2026-08-13): reusa las `sources[]` que `graph_sync` ya escribió en
+    vez de volver a extraer entidades del contenido destilado de la memoria."""
+    if not doc_ids:
+        return []
+    query = "MATCH (n) WHERE any(s IN n.sources WHERE s IN $doc_ids) RETURN DISTINCT n.id AS id"
+    async with driver.session() as session:
+        result = await session.run(query, {"doc_ids": doc_ids})
+        return [record["id"] async for record in result]
 
 
 class RelationRecord(dict[str, Any]):
@@ -323,6 +359,110 @@ async def most_connected_nodes(
     async with driver.session() as session:
         result = await session.run(query, {"limit": limit})
         return [NodeRecord(record) async for record in result]
+
+
+async def subgraph_relations(driver: AsyncDriver, node_ids: list[str]) -> list[RelationRecord]:
+    """Relaciones activas *entre* los nodos dados (subgrafo inducido, doc 06 §2
+    `subgraph`, Sprint 10): a diferencia de `get_neighborhood`, no trae vecinos
+    fuera del conjunto — es lo que necesita dibujar el grafo sin que aparezcan
+    nodos sueltos que no están en la lista mostrada."""
+    if not node_ids:
+        return []
+    query = (
+        "MATCH (a)-[r]->(b) "
+        "WHERE a.id IN $node_ids AND b.id IN $node_ids "
+        "AND NOT coalesce(r.rejected, false) "
+        f"RETURN DISTINCT {_RELATION_FIELDS}"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"node_ids": node_ids})
+        return [RelationRecord(record) async for record in result]
+
+
+async def _retire_document_relations(driver: AsyncDriver, doc_id: str) -> int:
+    """Saca `doc_id` de `sources[]` de toda relación que lo mencione y recalcula
+    `confidence` con lo que sobrevive (doc 04 §5, fórmula decidida 2026-08-13:
+    misma que suma una fuente -- `max(confidence base restante) + ALIAS_BOOST x
+    (n_restantes - 1)` --, aplicada hacia atrás). `source_confidences[i]` puede
+    faltar en datos previos a este sprint: `coalesce(..., r.confidence)` usa la
+    confidence agregada como la mejor aproximación disponible para esa fuente.
+    Relaciones `locked` no se recalculan (corrección del usuario, inmutable) pero
+    sí pierden la fuente. Se borran las que quedan sin ninguna, salvo `locked`
+    (sobrevive con `sources` vacío — el usuario ya la validó)."""
+    query = (
+        "MATCH ()-[r]->() WHERE $doc_id IN coalesce(r.sources, []) "
+        "WITH r, [i IN range(0, size(r.sources)-1) "
+        "WHERE r.sources[i] <> $doc_id] AS keep_idx "
+        "WITH r, "
+        "     [i IN keep_idx | r.sources[i]] AS kept_sources, "
+        "     [i IN keep_idx | coalesce(r.source_confidences[i], r.confidence, 0.0)] "
+        "AS kept_confidences "
+        "WITH r, kept_sources, kept_confidences, "
+        "     CASE WHEN size(kept_confidences) > 0 "
+        "THEN apoc.coll.max(kept_confidences) ELSE 0.0 END AS max_kept "
+        "SET r.sources = kept_sources, "
+        "    r.source_confidences = kept_confidences, "
+        "    r.confidence = CASE "
+        "        WHEN coalesce(r.locked, false) OR size(kept_sources) = 0 THEN r.confidence "
+        "        WHEN max_kept + $alias_boost * (size(kept_sources) - 1) > 1.0 THEN 1.0 "
+        "        ELSE max_kept + $alias_boost * (size(kept_sources) - 1) "
+        "        END "
+        "WITH r WHERE size(r.sources) = 0 AND NOT coalesce(r.locked, false) "
+        "DELETE r RETURN count(*) AS deleted"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"doc_id": doc_id, "alias_boost": ALIAS_BOOST})
+        record = await result.single()
+        assert record is not None  # count() siempre devuelve una fila
+        return int(record["deleted"])
+
+
+async def _retire_document_nodes(driver: AsyncDriver, doc_id: str) -> int:
+    """Misma lógica que `_retire_document_relations`, para nodos (recalculo de
+    `confidence` incluido, doc 04 §5). `DETACH DELETE` también se lleva cualquier
+    relación que quedara apuntando al nodo borrado, aunque esa relación tuviera
+    otras fuentes propias — un nodo sin evidencia no puede quedar con relaciones
+    colgando (caso límite no visto en la práctica, documentado acá en vez de
+    resuelto)."""
+    query = (
+        "MATCH (n) WHERE $doc_id IN coalesce(n.sources, []) "
+        "WITH n, [i IN range(0, size(n.sources)-1) "
+        "WHERE n.sources[i] <> $doc_id] AS keep_idx "
+        "WITH n, "
+        "     [i IN keep_idx | n.sources[i]] AS kept_sources, "
+        "     [i IN keep_idx | coalesce(n.source_confidences[i], n.confidence, 0.0)] "
+        "AS kept_confidences "
+        "WITH n, kept_sources, kept_confidences, "
+        "     CASE WHEN size(kept_confidences) > 0 "
+        "THEN apoc.coll.max(kept_confidences) ELSE 0.0 END AS max_kept "
+        "SET n.sources = kept_sources, "
+        "    n.source_confidences = kept_confidences, "
+        "    n.confidence = CASE "
+        "        WHEN coalesce(n.locked, false) OR size(kept_sources) = 0 THEN n.confidence "
+        "        WHEN max_kept + $alias_boost * (size(kept_sources) - 1) > 1.0 THEN 1.0 "
+        "        ELSE max_kept + $alias_boost * (size(kept_sources) - 1) "
+        "        END "
+        "WITH n WHERE size(n.sources) = 0 AND NOT coalesce(n.locked, false) "
+        "DETACH DELETE n RETURN count(*) AS deleted"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"doc_id": doc_id, "alias_boost": ALIAS_BOOST})
+        record = await result.single()
+        assert record is not None  # count() siempre devuelve una fila
+        return int(record["deleted"])
+
+
+async def retire_document(driver: AsyncDriver, doc_id: str) -> dict[str, int]:
+    """Propaga el tombstone de un documento al grafo (doc 05 §5, doc 06 §3
+    `document.deleted`, deuda de Sprint 6 resuelta en Sprint 11): retira `doc_id`
+    de `sources[]` en nodos y relaciones, y borra los que quedan sin ninguna
+    fuente. Relaciones primero — ver `_retire_document_nodes` para el porqué del
+    orden. No recalcula `confidence` de lo que sobrevive con otra fuente (doc 04
+    §5 lo pide, pero no hay todavía una fórmula definida de cuánto baja por
+    perder una fuente entre varias) — deuda visible, no silenciosa."""
+    relations_deleted = await _retire_document_relations(driver, doc_id)
+    nodes_deleted = await _retire_document_nodes(driver, doc_id)
+    return {"relations_deleted": relations_deleted, "nodes_deleted": nodes_deleted}
 
 
 async def update_node(

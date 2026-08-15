@@ -8,9 +8,8 @@ Neo4j (`kos.graph_sync`), no aquí — esta etapa solo ve un documento a la vez.
 
 from __future__ import annotations
 
+from kos_core.confidence import ALIAS_BOOST
 from kos_core.schemas import ParsedDocument
-
-ALIAS_BOOST = 0.05
 
 
 def apply_confidence_rules(doc: ParsedDocument) -> ParsedDocument:

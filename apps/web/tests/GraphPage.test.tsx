@@ -65,6 +65,22 @@ describe("GraphPage", () => {
     expect(await screen.findByText("docker")).toBeInTheDocument();
   });
 
+  it("arranca en vista de grafo (SVG) y el botón Tabla cambia a la tabla", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ template: "subgraph", nodes: [node()], relations: [] })),
+    );
+
+    render(<GraphPage />);
+    await screen.findByText("docker");
+
+    expect(screen.getByRole("img", { name: /grafo de conocimiento/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Tabla"));
+
+    expect(screen.getByRole("columnheader", { name: "Nombre" })).toBeInTheDocument();
+  });
+
   it("al seleccionar un nodo muestra su vecindario", async () => {
     const detail: NodeWithNeighborhood = { node: node(), neighbors: [neighbor()] };
     vi.stubGlobal(
