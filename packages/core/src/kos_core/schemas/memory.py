@@ -9,9 +9,21 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from kos_core.confidence import PRUNE_THRESHOLD
 
 MemoryType = Literal["episodic", "semantic", "procedural", "temporal", "preference"]
+
+
+class SourceRef(BaseModel):
+    """Fuente de una memoria con su confidence individual (doc 04 §5, decidido
+    2026-08-13): habilita recalcular `confidence` al perder una fuente, igual
+    que `source_confidences[]` en el grafo — acá cabe como objeto porque
+    Postgres/JSONB sí admite listas de objetos (Neo4j no)."""
+
+    doc_id: str
+    confidence: float
 
 
 class MemoryItem(BaseModel):
@@ -19,13 +31,19 @@ class MemoryItem(BaseModel):
     type: MemoryType
     content: str
     entities: list[str] = Field(default_factory=list)
-    sources: list[str] = Field(default_factory=list)
+    sources: list[SourceRef] = Field(default_factory=list)
     confidence: float
     salience: float
     created_at: datetime
     last_accessed_at: datetime
     archived_at: datetime | None = None
     superseded_by: UUID | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def prune_candidate(self) -> bool:
+        """Doc 04 §5: confidence bajo el umbral tras perder una fuente."""
+        return self.confidence < PRUNE_THRESHOLD
 
 
 def effective_salience(

@@ -466,6 +466,82 @@ async def test_list_nodes_by_type_paginado_y_most_connected() -> None:
         await driver.close()
 
 
+async def test_find_node_ids_by_sources_devuelve_nodos_que_comparten_fuente() -> None:
+    """Sprint 13 (doc 04 §2): entity-linking de memoria reusa esta lookup en vez
+    de extraer entidades del contenido destilado con un LLM."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    matching_canonical = f"test-linked-{uuid.uuid4().hex[:8]}"
+    other_canonical = f"test-unlinked-{uuid.uuid4().hex[:8]}"
+    canonicals = [matching_canonical, other_canonical]
+    try:
+        matching_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=matching_canonical,
+            name=matching_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-shared"],
+        )
+        await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=other_canonical,
+            name=other_canonical,
+            aliases=[],
+            confidence=0.8,
+            sources=["doc-other"],
+        )
+
+        found = await neo4j_storage.find_node_ids_by_sources(driver, ["doc-shared", "doc-x"])
+        assert found == [matching_id]
+
+        assert await neo4j_storage.find_node_ids_by_sources(driver, []) == []
+        assert await neo4j_storage.find_node_ids_by_sources(driver, ["doc-no-existe"]) == []
+    finally:
+        await _cleanup(driver, canonicals)
+        await driver.close()
+
+
+async def test_retire_document_recalcula_confidence_con_las_fuentes_que_sobreviven() -> None:
+    """Sprint 14 (doc 04 §5, decidido 2026-08-13): confidence_nueva =
+    min(1.0, max(confidence_base restantes) + ALIAS_BOOST x (n_restantes - 1))."""
+    settings = get_settings()
+    driver = neo4j_storage.create_driver(settings)
+    canonical = f"test-recalc-{uuid.uuid4().hex[:8]}"
+    try:
+        node_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=_NODE_TYPE,
+            canonical_name=canonical,
+            name=canonical,
+            aliases=[],
+            confidence=0.9,
+            sources=["doc-a", "doc-b", "doc-c"],
+            source_confidences=[0.6, 0.9, 0.7],
+        )
+
+        result = await neo4j_storage.retire_document(driver, "doc-b")
+        assert result == {"relations_deleted": 0, "nodes_deleted": 0}
+
+        node = await neo4j_storage.get_node(driver, node_id)
+        assert node is not None
+        assert set(node["sources"]) == {"doc-a", "doc-c"}
+        # max(0.6, 0.7) + ALIAS_BOOST(0.05) * (2 restantes - 1) = 0.75
+        assert node["confidence"] == pytest.approx(0.75)
+
+        # Retirar otra fuente: solo queda doc-c (confidence base 0.7), sin boost.
+        await neo4j_storage.retire_document(driver, "doc-a")
+        node = await neo4j_storage.get_node(driver, node_id)
+        assert node is not None
+        assert node["sources"] == ["doc-c"]
+        assert node["confidence"] == pytest.approx(0.7)
+    finally:
+        await _cleanup(driver, [canonical])
+        await driver.close()
+
+
 async def test_retire_document_borra_huerfanos_y_protege_lo_locked() -> None:
     """Sprint 11 (doc 05 §5, doc 06 §3 `document.deleted`): al tumbar un
     documento, lo que se queda sin ninguna fuente se borra — salvo lo `locked`,
@@ -530,6 +606,7 @@ async def test_retire_document_borra_huerfanos_y_protege_lo_locked() -> None:
         locked = await neo4j_storage.get_node(driver, locked_id)
         assert locked is not None
         assert locked["sources"] == []  # sin fuentes, pero protegido por locked
+        assert locked["confidence"] == 1.0  # doc 04 §5: corrección del usuario, inmutable
 
         neighborhood = await neo4j_storage.get_neighborhood(driver, survivor_id)
         assert neighborhood == []  # la relación huérfana no sobrevive

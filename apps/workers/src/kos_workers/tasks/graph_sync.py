@@ -97,6 +97,30 @@ def _merge_sources(existing: list[str] | None, doc_id: str) -> list[str]:
     return sorted({*(existing or []), doc_id})
 
 
+def _merge_source_confidences(
+    existing_sources: list[str] | None,
+    existing_source_confidences: list[float] | None,
+    fallback_confidence: float,
+    doc_id: str,
+    confidence: float,
+) -> list[float]:
+    """Array paralelo a `_merge_sources` (doc 04 §5, decidido 2026-08-13): la
+    confidence "cruda" con la que se agregó cada fuente, para poder recalcular
+    al perder una. Si una fuente previa no tiene su propia entrada (datos de
+    antes de este sprint), usa `fallback_confidence` (la confidence agregada del
+    nodo) como mejor aproximación disponible."""
+    pairs = {
+        source: (
+            existing_source_confidences[i]
+            if existing_source_confidences is not None and i < len(existing_source_confidences)
+            else fallback_confidence
+        )
+        for i, source in enumerate(existing_sources or [])
+    }
+    pairs[doc_id] = confidence
+    return [pairs[source] for source in sorted(pairs)]
+
+
 def _merge_aliases(existing: list[str] | None, entity: EntityCandidate) -> list[str]:
     return sorted({*(existing or []), *entity.aliases, entity.name})
 
@@ -129,6 +153,13 @@ async def _resolve_entity(
             aliases=_merge_aliases(exact.get("aliases"), entity),
             confidence=_boosted_confidence(exact.get("confidence"), entity),
             sources=_merge_sources(exact.get("sources"), doc_id),
+            source_confidences=_merge_source_confidences(
+                exact.get("sources"),
+                exact.get("source_confidences"),
+                exact.get("confidence") or 0.0,
+                doc_id,
+                entity.confidence,
+            ),
         )
 
     # Paso 3: similitud de embeddings de nombre/alias > 0.9 → veredicto del LLM.
@@ -154,6 +185,13 @@ async def _resolve_entity(
                 aliases=_merge_aliases(best_candidate.get("aliases"), entity),
                 confidence=_boosted_confidence(best_candidate.get("confidence"), entity),
                 sources=_merge_sources(best_candidate.get("sources"), doc_id),
+                source_confidences=_merge_source_confidences(
+                    best_candidate.get("sources"),
+                    best_candidate.get("source_confidences"),
+                    best_candidate.get("confidence") or 0.0,
+                    doc_id,
+                    entity.confidence,
+                ),
             )
 
     # Paso 4: sin match — nodo nuevo con la evidencia de este documento.
@@ -165,6 +203,7 @@ async def _resolve_entity(
         aliases=list(dict.fromkeys(entity.aliases)),
         confidence=entity.confidence,
         sources=[doc_id],
+        source_confidences=[entity.confidence],
     )
 
 
@@ -184,6 +223,7 @@ async def _sync_relations(
             target_id=target_id,
             confidence=relation.confidence,
             sources=[doc_id],
+            source_confidences=[relation.confidence],
         )
         written += 1
     return written

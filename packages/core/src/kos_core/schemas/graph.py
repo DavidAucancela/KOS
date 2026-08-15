@@ -10,8 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
+from kos_core.confidence import PRUNE_THRESHOLD
 from kos_core.ontology import NodeType, RelationType
 
 
@@ -28,6 +29,12 @@ class GraphNode(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def prune_candidate(self) -> bool:
+        """Doc 04 §5: confidence bajo el umbral tras perder una fuente."""
+        return self.confidence < PRUNE_THRESHOLD
+
 
 class GraphRelation(BaseModel):
     id: str
@@ -39,6 +46,12 @@ class GraphRelation(BaseModel):
     extracted_by: str
     extracted_at: datetime | None = None
     rejected: bool = False
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def prune_candidate(self) -> bool:
+        """Doc 04 §5: confidence bajo el umbral tras perder una fuente."""
+        return self.confidence < PRUNE_THRESHOLD
 
 
 class GraphNeighbor(BaseModel):

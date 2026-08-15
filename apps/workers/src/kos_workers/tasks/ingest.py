@@ -38,6 +38,7 @@ from kos_workers.celery_app import app
 from kos_workers.pipeline import PIPELINE_VERSION, run_pipeline
 from kos_workers.tasks.embed import embed_document
 from kos_workers.tasks.graph_retire import graph_retire_document
+from kos_workers.tasks.memory_retire import memory_retire_document
 
 
 async def _load_source(source_uuid: uuid.UUID, settings: Settings) -> dict[str, Any] | None:
@@ -146,12 +147,13 @@ def sync_source(source_uuid: str, force: bool = False) -> dict[str, int]:
                 redis_storage.publish_event_sync(redis_client, DocumentDeleted(doc_id=doc_id))
         finally:
             redis_client.close()
-        # Propaga el tombstone al grafo (doc 05 §5, doc 06 §3): mismo patrón de
-        # encadenado directo que `embed_document.delay`/`graph_sync.delay`, no
-        # una suscripción al evento recién publicado (ese evento es para
-        # Aprendizaje/Recomendador, que todavía no existen).
+        # Propaga el tombstone al grafo y a memoria (doc 05 §5, doc 06 §3, doc 04
+        # §5): mismo patrón de encadenado directo que `embed_document.delay`/
+        # `graph_sync.delay`, no una suscripción al evento recién publicado (ese
+        # evento es para Aprendizaje/Recomendador, que todavía no existen).
         for doc_id in retired:
             graph_retire_document.delay(str(doc_id))
+            memory_retire_document.delay(str(doc_id))
     return {
         "discovered": discovered,
         "queued": queued,

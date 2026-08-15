@@ -6,12 +6,13 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.deps import postgres_engine
 from kos_api.services import memory_service
-from kos_core.schemas.memory import MemoryType
+from kos_core.confidence import PRUNE_THRESHOLD
+from kos_core.schemas.memory import MemoryType, SourceRef
 
 router = APIRouter(prefix="/v1/memory", tags=["memory"])
 
@@ -21,13 +22,19 @@ class MemoryOut(BaseModel):
     type: MemoryType
     content: str
     entities: list[str]
-    sources: list[str]
+    sources: list[SourceRef]
     confidence: float
     salience: float
     created_at: datetime
     last_accessed_at: datetime
     archived_at: datetime | None
     superseded_by: uuid.UUID | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def prune_candidate(self) -> bool:
+        """Doc 04 §5: confidence bajo el umbral tras perder una fuente."""
+        return self.confidence < PRUNE_THRESHOLD
 
 
 class MemoryPage(BaseModel):

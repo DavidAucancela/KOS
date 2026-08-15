@@ -44,7 +44,7 @@ MemoryItem
 ├── content           # texto destilado (no transcripciones completas)
 ├── embedding         # recuperación semántica de memorias
 ├── entities[]        # node_ids del grafo que menciona (enlace memoria ↔ grafo)
-├── sources[]         # conversaciones/documentos de origen
+├── sources[]         # {doc_id, confidence} — ver §5 sobre confidence por fuente
 ├── confidence        # 0–1
 ├── salience          # importancia; decae con el tiempo, sube con cada uso
 ├── created_at / last_accessed_at
@@ -52,6 +52,15 @@ MemoryItem
 ```
 
 Almacenamiento: PostgreSQL (+pgvector para el embedding). Las memorias referencian nodos del grafo, nunca los duplican.
+
+**Enlace a entidades (`entities[]`), decidido 2026-08-13:** `kos.memory_learn` escribía
+`entities=[]` a secas (deuda de §1.1) porque vincular memoria al grafo con una extracción LLM
+nueva sobre el contenido destilado costaría una llamada extra por cada `POST /v1/query` — en el
+camino síncrono, justo donde el usuario espera. En vez de eso, `entities[]` se resuelve buscando
+qué nodos del grafo ya comparten alguna de las `sources[]` de la memoria (la relación `MENTIONS`
+que `graph_sync` ya construyó) — sin extracción nueva, casi gratis. Si una memoria no comparte
+ninguna fuente con el grafo (ej. inferida solo de la conversación, sin evidencia documental),
+`entities[]` queda vacío; es aceptable y no bloquea el resto del modelo.
 
 ## 3. Ciclo de vida
 
@@ -112,13 +121,37 @@ La confianza es transversal (documentos, grafo, memoria) y sigue reglas únicas:
 | Fuente eliminada | recálculo con la evidencia restante |
 | Antigüedad sin refuerzo | decaimiento lento (configurable por tipo) |
 
-> **Nota de alcance (revisión 2026-07-31):** "Fuente eliminada → recálculo con la evidencia
-> restante" todavía no tiene una fórmula concreta ni en el grafo ni en memoria — Sprint 11
-> implementó el tombstone hacia el grafo (retira la fuente, borra lo que queda sin ninguna) pero
-> sin recalcular `confidence` de lo que sobrevive con menos evidencia (deuda visible, ver
-> `docs/sprints/sprint-11.md`). v0.4 hereda la misma deuda para memoria hasta que se defina una
-> fórmula — no bloquea el resto de este documento porque el caso principal (memoria sin ninguna
-> fuente se archiva) sí queda cubierto por el ciclo de vida de §3.
+> **Nota de alcance (revisión 2026-08-13):** "Fuente eliminada → recálculo con la evidencia
+> restante" ya tiene fórmula concreta, decidida para grafo y memoria por igual:
+>
+> ```
+> confidence_nueva = min(1.0, max(confidence_base_i para i en fuentes_restantes) + ALIAS_BOOST × (n_restantes − 1))
+> ```
+>
+> Es la misma regla que `_boosted_confidence` (Sprint 6, `graph_sync.py:104-106`) ya usa para
+> sumar una fuente nueva — aplicada "hacia atrás" con las fuentes que sobreviven en vez de "hacia
+> adelante" con la que se agrega. `ALIAS_BOOST = 0.05` (constante existente, `s9_confidence.py`).
+> Con `n_restantes = 0` el nodo/memoria ya no sobrevive (se borra, ver `retire_document` y §3).
+>
+> Esto exige conocer el `confidence` de cada fuente individual, no solo el agregado — hoy
+> `sources[]` es una lista plana de `doc_id` en ambos stores. Esquema resultante:
+> - **Neo4j** (nodos y relaciones, doc 02 §3.1/§3.2): las propiedades no admiten listas de
+>   objetos, así que se agrega un array paralelo `source_confidences[]` al mismo índice que
+>   `sources[]`.
+> - **Postgres/memoria** (`MemoryItem.sources`, JSONB): pasa de `list[str]` a
+>   `list[{doc_id, confidence}]` directamente — no necesita array paralelo.
+>
+> **Umbral de poda tras recálculo:** si `confidence_nueva < 0.3`, el nodo/memoria se marca de
+> inmediato como candidato a poda/revisión, en vez de esperar al ciclo normal de decaimiento de
+> `salience` (§3.4). Es un umbral de alerta temprana — distinto del umbral de auto-poda por
+> decaimiento (`<0.2`, doc 02 §4 regla 4): uno dispara revisión, el otro poda directamente.
+>
+> **Implementado en Sprint 14** (2026-08-15): `retire_document` (grafo,
+> `packages/core/src/kos_core/storage/neo4j.py`) y la nueva `retire_memory_sources`/
+> `kos.memory_retire_document` (memoria — Sprint 12 nunca conectó esta propagación, no era solo
+> la fórmula lo que faltaba). `ALIAS_BOOST`/`PRUNE_THRESHOLD` viven en `kos_core.confidence`
+> (antes `ALIAS_BOOST` estaba mal ubicado en `apps/workers/pipeline/s9_confidence.py`, que ahora
+> lo reexporta). Verificado en vivo contra infra real, ver `docs/sprints/sprint-14.md`.
 
 ## 6. Detección de duplicados y reorganización
 

@@ -22,7 +22,7 @@ def _memory(**overrides: Any) -> dict[str, Any]:
         "type": "episodic",
         "content": "Preguntó: 'kubernetes' → usa siempre Railway",
         "entities": [],
-        "sources": ["doc-a"],
+        "sources": [{"doc_id": "doc-a", "confidence": 0.8}],
         "confidence": 0.8,
         "salience": 0.5,
         "created_at": _NOW,
@@ -45,6 +45,9 @@ async def test_learn_core_guarda_memoria_episodica(monkeypatch: pytest.MonkeyPat
         assert len(texts) == 1
         return [[0.1, 0.2, 0.3]]
 
+    async def fake_resolve_entities(doc_ids: list[str]) -> list[str]:
+        return []
+
     monkeypatch.setattr(postgres_module, "insert_memory", fake_insert)
 
     result = await memory_module._learn_core(
@@ -54,6 +57,7 @@ async def test_learn_core_guarda_memoria_episodica(monkeypatch: pytest.MonkeyPat
         sources=["doc-a"],
         confidence=0.9,
         embed=fake_embed,
+        resolve_entities=fake_resolve_entities,
     )
 
     assert uuid.UUID(result["memory_id"])
@@ -61,10 +65,45 @@ async def test_learn_core_guarda_memoria_episodica(monkeypatch: pytest.MonkeyPat
     assert call["type"] == "episodic"
     assert call["content"] == "Preguntó: '¿qué es KOS?' → un motor de conocimiento"
     assert call["embedding"] == [0.1, 0.2, 0.3]
-    assert call["sources"] == ["doc-a"]
+    assert call["sources"] == [{"doc_id": "doc-a", "confidence": 0.9}]
     assert call["confidence"] == 0.9
     assert call["salience"] == memory_module.INITIAL_SALIENCE
     assert call["entities"] == []
+
+
+async def test_learn_core_resuelve_entities_por_sources_compartidas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sprint 13 (doc 04 §2): entities[] sale de nodos que ya comparten sources[]
+    con la memoria — sin extracción LLM nueva."""
+    inserted: list[dict[str, Any]] = []
+    resolve_calls: list[list[str]] = []
+
+    async def fake_insert(engine: Any, **kwargs: Any) -> None:
+        inserted.append(kwargs)
+
+    async def fake_embed(texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3]]
+
+    async def fake_resolve_entities(doc_ids: list[str]) -> list[str]:
+        resolve_calls.append(doc_ids)
+        return ["node-fastapi", "node-railway"]
+
+    monkeypatch.setattr(postgres_module, "insert_memory", fake_insert)
+
+    await memory_module._learn_core(
+        None,
+        query="¿qué uso para deploy?",
+        answer="Railway",
+        sources=["doc-a", "doc-b"],
+        confidence=0.9,
+        embed=fake_embed,
+        resolve_entities=fake_resolve_entities,
+    )
+
+    assert resolve_calls == [["doc-a", "doc-b"]]
+    [call] = inserted
+    assert call["entities"] == ["node-fastapi", "node-railway"]
 
 
 def test_cluster_by_similarity_agrupa_por_encima_del_umbral() -> None:
@@ -86,7 +125,7 @@ async def test_consolidate_core_crea_semantica_desde_tres_episodicas_similares(
             embedding=[1.0, 0.0],
             content=f"Preguntó: 'kubernetes {i}'",
             created_at=_NOW - timedelta(days=i),
-            sources=[f"doc-{i}"],
+            sources=[{"doc_id": f"doc-{i}", "confidence": 0.7}],
             confidence=0.7,
             salience=0.5,
         )
@@ -118,7 +157,11 @@ async def test_consolidate_core_crea_semantica_desde_tres_episodicas_similares(
     assert result == {"episodic_seen": 3, "semantic_created": 1}
     [semantic] = inserted
     assert semantic["type"] == "semantic"
-    assert semantic["sources"] == ["doc-0", "doc-1", "doc-2"]
+    assert semantic["sources"] == [
+        {"doc_id": "doc-0", "confidence": 0.7},
+        {"doc_id": "doc-1", "confidence": 0.7},
+        {"doc_id": "doc-2", "confidence": 0.7},
+    ]
     assert semantic["confidence"] == pytest.approx(0.7 + memory_module.CONSOLIDATED_BOOST)
     [superseded] = superseded_calls
     assert set(superseded["memory_ids"]) == {m["memory_id"] for m in cluster}

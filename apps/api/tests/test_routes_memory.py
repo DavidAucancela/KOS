@@ -21,7 +21,7 @@ def _memory(**overrides: Any) -> dict[str, Any]:
         "type": "episodic",
         "content": "Preguntó: 'qué es KOS' → un motor de conocimiento",
         "entities": [],
-        "sources": ["doc-a"],
+        "sources": [{"doc_id": "doc-a", "confidence": 0.8}],
         "confidence": 0.8,
         "salience": 0.5,
         "created_at": _NOW,

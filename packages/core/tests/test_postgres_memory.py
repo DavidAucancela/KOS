@@ -40,7 +40,7 @@ async def test_insert_get_y_archive_memory() -> None:
             content="Preguntó: 'kubernetes' → usa siempre Railway",
             embedding=[0.1] * 1024,
             entities=[],
-            sources=["doc-a"],
+            sources=[{"doc_id": "doc-a", "confidence": 0.8}],
             confidence=0.8,
             salience=0.5,
         )
@@ -48,7 +48,7 @@ async def test_insert_get_y_archive_memory() -> None:
         fetched = await postgres_storage.get_memory(engine, memory_id)
         assert fetched is not None
         assert fetched["type"] == "episodic"
-        assert fetched["sources"] == ["doc-a"]
+        assert fetched["sources"] == [{"doc_id": "doc-a", "confidence": 0.8}]
         assert fetched["archived_at"] is None
         assert "embedding" not in fetched  # auditoría no expone el vector (doc 06 §2)
 
@@ -84,7 +84,7 @@ async def test_list_memories_filtra_tipo_query_y_excluye_archivadas() -> None:
             content=f"Preguntó por kubernetes-{marker}",
             embedding=None,
             entities=[],
-            sources=["doc-a"],
+            sources=[{"doc_id": "doc-a", "confidence": 0.8}],
             confidence=0.8,
             salience=0.5,
         )
@@ -95,7 +95,7 @@ async def test_list_memories_filtra_tipo_query_y_excluye_archivadas() -> None:
             content=f"Le interesa kubernetes-{marker}",
             embedding=None,
             entities=[],
-            sources=["doc-a"],
+            sources=[{"doc_id": "doc-a", "confidence": 0.9}],
             confidence=0.9,
             salience=0.6,
         )
@@ -106,7 +106,7 @@ async def test_list_memories_filtra_tipo_query_y_excluye_archivadas() -> None:
             content=f"Preguntó por algo viejo-{marker}",
             embedding=None,
             entities=[],
-            sources=["doc-b"],
+            sources=[{"doc_id": "doc-b", "confidence": 0.5}],
             confidence=0.5,
             salience=0.3,
         )
@@ -144,7 +144,7 @@ async def test_list_unconsolidated_episodic_y_mark_superseded() -> None:
             content="episódica activa",
             embedding=[0.2] * 1024,
             entities=[],
-            sources=["doc-a"],
+            sources=[{"doc_id": "doc-a", "confidence": 0.7}],
             confidence=0.7,
             salience=0.5,
         )
@@ -155,7 +155,7 @@ async def test_list_unconsolidated_episodic_y_mark_superseded() -> None:
             content="episódica ya fusionada",
             embedding=[0.3] * 1024,
             entities=[],
-            sources=["doc-b"],
+            sources=[{"doc_id": "doc-b", "confidence": 0.7}],
             confidence=0.7,
             salience=0.5,
         )
@@ -166,7 +166,10 @@ async def test_list_unconsolidated_episodic_y_mark_superseded() -> None:
             content="semántica",
             embedding=[0.4] * 1024,
             entities=[],
-            sources=["doc-a", "doc-b"],
+            sources=[
+                {"doc_id": "doc-a", "confidence": 0.9},
+                {"doc_id": "doc-b", "confidence": 0.9},
+            ],
             confidence=0.9,
             salience=0.7,
         )
@@ -190,4 +193,59 @@ async def test_list_unconsolidated_episodic_y_mark_superseded() -> None:
         assert fetched["superseded_by"] == semantic_id
     finally:
         await _cleanup(engine, [plain_id, superseded_id, semantic_id])
+        await engine.dispose()
+
+
+async def test_retire_memory_sources_recalcula_confidence_y_archiva_sin_fuentes() -> None:
+    """Sprint 14 (doc 04 §5, decidido 2026-08-13): contraparte de
+    `retire_document` (Neo4j) para memoria."""
+    engine = create_engine(get_settings())
+    survivor_id, orphan_id = uuid.uuid4(), uuid.uuid4()
+    try:
+        await postgres_storage.insert_memory(
+            engine,
+            memory_id=survivor_id,
+            type="episodic",
+            content="sobrevive con una fuente menos",
+            embedding=None,
+            entities=[],
+            sources=[
+                {"doc_id": "doc-a", "confidence": 0.6},
+                {"doc_id": "doc-b", "confidence": 0.9},
+                {"doc_id": "doc-c", "confidence": 0.7},
+            ],
+            confidence=0.9,
+            salience=0.5,
+        )
+        await postgres_storage.insert_memory(
+            engine,
+            memory_id=orphan_id,
+            type="episodic",
+            content="se queda sin ninguna fuente",
+            embedding=None,
+            entities=[],
+            sources=[{"doc_id": "doc-b", "confidence": 0.8}],
+            confidence=0.8,
+            salience=0.5,
+        )
+
+        result = await postgres_storage.retire_memory_sources(engine, "doc-b")
+        assert result == {"recalculated": 1, "archived": 1}
+
+        survivor = await postgres_storage.get_memory(engine, survivor_id)
+        assert survivor is not None
+        assert {s["doc_id"] for s in survivor["sources"]} == {"doc-a", "doc-c"}
+        # max(0.6, 0.7) + ALIAS_BOOST(0.05) * (2 restantes - 1) = 0.75
+        assert survivor["confidence"] == pytest.approx(0.75)
+
+        orphan = await postgres_storage.get_memory(engine, orphan_id)
+        assert orphan is not None
+        assert orphan["sources"] == []
+        assert orphan["archived_at"] is not None
+
+        # No queda ninguna fuente "doc-b" restante: un segundo retiro es un no-op.
+        again = await postgres_storage.retire_memory_sources(engine, "doc-b")
+        assert again == {"recalculated": 0, "archived": 0}
+    finally:
+        await _cleanup(engine, [survivor_id, orphan_id])
         await engine.dispose()

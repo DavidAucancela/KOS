@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient
+from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage.postgres import create_engine
 from kos_workers.celery_app import app
@@ -23,6 +24,10 @@ from kos_workers.celery_app import app
 # Genera embeddings a partir de una lista de textos (Ollama real o fake en tests) —
 # mismo patrón de inyección que `AsyncEmbed` en `graph_sync.py`.
 AsyncEmbed = Callable[[list[str]], Awaitable[list[list[float]]]]
+
+# Resuelve entities[] a partir de sources[] (doc 04 §2, decidido 2026-08-13): nodos
+# del grafo que ya comparten alguna fuente con la memoria, sin extracción LLM nueva.
+AsyncResolveEntities = Callable[[list[str]], Awaitable[list[str]]]
 
 # Mismo criterio que entity resolution del grafo (Sprint 6, graph_sync.py):
 # umbral fijo en código, no variable de entorno — parámetro de un algoritmo,
@@ -50,20 +55,29 @@ async def _learn_core(
     sources: list[str],
     confidence: float,
     embed: AsyncEmbed,
+    resolve_entities: AsyncResolveEntities,
 ) -> dict[str, Any]:
-    """Núcleo testeable con un `embed` fake (mismo estilo que `_sync_graph` en
-    graph_sync.py: la task real inyecta Ollama, los tests inyectan un stub)."""
+    """Núcleo testeable con `embed`/`resolve_entities` fake (mismo estilo que
+    `_sync_graph` en graph_sync.py: la task real inyecta Ollama/Neo4j, los tests
+    inyectan stubs)."""
     content = f"Preguntó: {query!r} → {answer}"
     [embedding] = await embed([content])
+    entities = await resolve_entities(sources)
     memory_id = uuid.uuid4()
+    # doc 04 §5 (decidido 2026-08-13): no hay una confidence propia por fuente en
+    # este dominio (a diferencia del grafo, `sources` acá no viene de una
+    # extracción por documento) — todas arrancan del mismo `confidence` agregado
+    # de la memoria; perder una fuente después sí las distingue vía la fórmula
+    # de recálculo (`ALIAS_BOOST x n_restantes`, ver `retire_memory_sources`).
+    source_refs = [{"doc_id": source, "confidence": confidence} for source in sources]
     await postgres_storage.insert_memory(
         engine,
         memory_id=memory_id,
         type="episodic",
         content=content,
         embedding=embedding,
-        entities=[],  # deuda visible (doc 04 §1.1): sin entity-linking todavía
-        sources=sources,
+        entities=entities,
+        sources=source_refs,
         confidence=confidence,
         salience=INITIAL_SALIENCE,
     )
@@ -76,6 +90,11 @@ async def _async_memory_learn(
     settings = get_settings()
     engine = create_engine(settings)
     embedder = OllamaEmbeddingClient(settings)
+    driver = neo4j_storage.create_driver(settings)
+
+    async def resolve_entities(doc_ids: list[str]) -> list[str]:
+        return await neo4j_storage.find_node_ids_by_sources(driver, doc_ids)
+
     try:
         return await _learn_core(
             engine,
@@ -84,9 +103,11 @@ async def _async_memory_learn(
             sources=sources,
             confidence=confidence,
             embed=embedder.embed,
+            resolve_entities=resolve_entities,
         )
     finally:
         await embedder.aclose()
+        await driver.close()
         await engine.dispose()
 
 
@@ -130,7 +151,19 @@ async def _consolidate_core(engine: AsyncEngine) -> dict[str, Any]:
     for cluster in clusters:
         newest = max(cluster, key=lambda memory: memory["created_at"])
         content = f"Preguntaste {len(cluster)} veces por temas similares a: {newest['content']!r}"
-        sources = sorted({source for memory in cluster for source in memory["sources"]})
+        # Fusiona sources[] del cluster por doc_id, quedándose con la confidence
+        # más alta vista para cada uno (doc 04 §5: incorporarla como si fuera
+        # "nueva evidencia independiente", misma regla que la fila 1 de la tabla).
+        merged_sources: dict[str, float] = {}
+        for memory in cluster:
+            for ref in memory["sources"]:
+                merged_sources[ref["doc_id"]] = max(
+                    merged_sources.get(ref["doc_id"], 0.0), ref["confidence"]
+                )
+        sources = [
+            {"doc_id": doc_id, "confidence": conf}
+            for doc_id, conf in sorted(merged_sources.items())
+        ]
         avg_confidence = sum(memory["confidence"] for memory in cluster) / len(cluster)
         max_salience = max(memory["salience"] for memory in cluster)
         semantic_id = uuid.uuid4()

@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from kos_core.confidence import ALIAS_BOOST
 from kos_core.config import Settings
 from kos_core.schemas.documents import ParsedDocument
 
@@ -112,9 +113,7 @@ memory_items_table = Table(
     Column("confidence", Float, nullable=False, server_default=text("1.0")),
     Column("salience", Float, nullable=False, server_default=text("0.5")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    Column(
-        "last_accessed_at", DateTime(timezone=True), nullable=False, server_default=func.now()
-    ),
+    Column("last_accessed_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("archived_at", DateTime(timezone=True)),
     Column(
         "superseded_by",
@@ -251,12 +250,14 @@ async def insert_memory(
     content: str,
     embedding: list[float] | None,
     entities: list[str],
-    sources: list[str],
+    sources: list[dict[str, Any]],
     confidence: float,
     salience: float,
 ) -> None:
     """Escribe una `MemoryItem` (doc 04 §2); `kos.memory_learn`/`kos.memory_consolidate`
-    son los únicos llamadores (v0.4 como pipeline fijo, doc 04 §1.1)."""
+    son los únicos llamadores (v0.4 como pipeline fijo, doc 04 §1.1). `sources` es
+    JSONB de pares `{doc_id, confidence}` (doc 04 §5, decidido 2026-08-13; antes
+    lista plana de `doc_id`) — quien llama ya arma cada par, esto solo persiste."""
     async with engine.begin() as conn:
         await conn.execute(
             memory_items_table.insert().values(
@@ -292,10 +293,14 @@ _MEMORY_COLUMNS = [
 async def get_memory(engine: AsyncEngine, memory_id: uuid_lib.UUID) -> dict[str, Any] | None:
     async with engine.connect() as conn:
         row = (
-            await conn.execute(
-                select(*_MEMORY_COLUMNS).where(memory_items_table.c.memory_id == memory_id)
+            (
+                await conn.execute(
+                    select(*_MEMORY_COLUMNS).where(memory_items_table.c.memory_id == memory_id)
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
 
@@ -356,6 +361,48 @@ async def list_unconsolidated_episodic(engine: AsyncEngine) -> list[dict[str, An
     )
     async with engine.connect() as conn:
         return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
+async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, int]:
+    """Contraparte de `retire_document` (Neo4j) para memoria (doc 04 §5, Sprint 14):
+    saca `doc_id` de `sources[]` de las memorias activas que lo mencionan y
+    recalcula `confidence` con lo que sobrevive — misma fórmula que el grafo,
+    `min(1.0, max(confidence base restante) + ALIAS_BOOST x (n_restantes - 1))`.
+    Memoria no tiene `locked` (no hay corrección manual de memoria todavía, doc
+    04 §2): siempre se recalcula. Sin ninguna fuente restante, se archiva en vez
+    de recalcular (doc 04 §3: nada se borra sin pasar por archivado)."""
+    async with engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                select(memory_items_table.c.memory_id, memory_items_table.c.sources).where(
+                    memory_items_table.c.archived_at.is_(None),
+                    memory_items_table.c.sources.contains([{"doc_id": doc_id}]),
+                )
+            )
+        ).all()
+        archived = 0
+        recalculated = 0
+        for memory_id, sources in rows:
+            remaining = [s for s in sources if s["doc_id"] != doc_id]
+            if not remaining:
+                await conn.execute(
+                    memory_items_table.update()
+                    .where(memory_items_table.c.memory_id == memory_id)
+                    .values(sources=remaining, archived_at=func.now())
+                )
+                archived += 1
+                continue
+            new_confidence = min(
+                1.0,
+                max(s["confidence"] for s in remaining) + ALIAS_BOOST * (len(remaining) - 1),
+            )
+            await conn.execute(
+                memory_items_table.update()
+                .where(memory_items_table.c.memory_id == memory_id)
+                .values(sources=remaining, confidence=new_confidence)
+            )
+            recalculated += 1
+    return {"recalculated": recalculated, "archived": archived}
 
 
 async def mark_superseded(
