@@ -16,6 +16,9 @@ from kos_core.storage import minio as minio_storage
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage import redis as redis_storage
+from kos_mcp.client import EmbeddedToolCaller
+from kos_mcp.server import AppContext as MCPAppContext
+from kos_mcp.server import create_server as create_mcp_server
 
 
 @asynccontextmanager
@@ -31,14 +34,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.minio_client = minio_storage.create_client(settings)
     app.state.embedding_client = OllamaEmbeddingClient(settings)
     app.state.llm_client = OllamaLLMClient(settings)
-    try:
-        yield
-    finally:
-        await app.state.postgres_engine.dispose()
-        await app.state.neo4j_driver.close()
-        await app.state.redis_client.aclose()
-        await app.state.embedding_client.aclose()
-        await app.state.llm_client.aclose()
+
+    # Servidor MCP embebido (Sprint 17, doc 10 §8): comparte las conexiones de
+    # arriba en vez de abrir un segundo pool — los agentes (`packages/agents`)
+    # llaman herramientas a través de esta sesión in-memory, nunca a
+    # kos_core.storage directo (ADR-0005).
+    mcp_context = MCPAppContext(
+        settings=settings,
+        postgres_engine=app.state.postgres_engine,
+        neo4j_driver=app.state.neo4j_driver,
+        embedding_client=app.state.embedding_client,
+    )
+    mcp_server = create_mcp_server(mcp_context)
+    async with EmbeddedToolCaller(mcp_server) as tool_caller:
+        app.state.tool_caller = tool_caller
+        try:
+            yield
+        finally:
+            await app.state.postgres_engine.dispose()
+            await app.state.neo4j_driver.close()
+            await app.state.redis_client.aclose()
+            await app.state.embedding_client.aclose()
+            await app.state.llm_client.aclose()
 
 
 def create_app() -> FastAPI:

@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from kos_api.deps import postgres_engine, settings_dep
+from kos_agents.retrieval import RetrievalAgent
+from kos_api.deps import postgres_engine, settings_dep, tool_caller
 from kos_api.services import memory_service, notes_service, query_service, template_intent_service
 from kos_api.services.intent_service import detect_template_intent
 from kos_core.config import Settings
 from kos_core.schemas import EvidenceRef
+from kos_mcp.client import EmbeddedToolCaller
 
 router = APIRouter(prefix="/v1/query", tags=["query"])
 
@@ -98,6 +100,7 @@ async def query(
     request: Request,
     engine: AsyncEngine = Depends(postgres_engine),
     settings: Settings = Depends(settings_dep),
+    caller: EmbeddedToolCaller = Depends(tool_caller),
 ) -> QueryResponse:
     trace_id: str = getattr(request.state, "trace_id", str(uuid.uuid4()))
 
@@ -147,8 +150,7 @@ async def query(
 
     try:
         result = await query_service.answer_query(
-            engine=engine,
-            embedder=request.app.state.embedding_client,
+            retrieval_agent=RetrievalAgent(caller),
             llm=request.app.state.llm_client,
             query=body.query,
             limit=body.limit,

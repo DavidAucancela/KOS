@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "kos",
+    "kos-agents",
     "kos-api",
     "kos-connectors",
     "kos-core",
@@ -747,6 +748,7 @@ name = "kos"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "kos-agents" },
     { name = "kos-api" },
     { name = "kos-connectors" },
     { name = "kos-core" },
@@ -766,6 +768,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "kos-agents", editable = "packages/agents" },
     { name = "kos-api", editable = "apps/api" },
     { name = "kos-connectors", editable = "packages/connectors" },
     { name = "kos-core", editable = "packages/core" },
@@ -784,13 +787,26 @@ dev = [
 ]
 
 [[package]]
+name = "kos-agents"
+version = "0.1.0"
+source = { editable = "packages/agents" }
+dependencies = [
+    { name = "kos-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kos-core", editable = "packages/core" }]
+
+[[package]]
 name = "kos-api"
 version = "0.1.0"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "celery", extra = ["redis"] },
     { name = "fastapi" },
+    { name = "kos-agents" },
     { name = "kos-core" },
+    { name = "kos-mcp-tools" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -798,7 +814,9 @@ dependencies = [
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.5" },
     { name = "fastapi", specifier = ">=0.116" },
+    { name = "kos-agents", editable = "packages/agents" },
     { name = "kos-core", editable = "packages/core" },
+    { name = "kos-mcp-tools", editable = "packages/mcp-tools" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
 ]
 

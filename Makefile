@@ -6,7 +6,8 @@
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
 .PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-beat dev-web \
-        migrate lint test test-integration demo reindex guardian-watch mcp-inspect mcp-demo help
+        migrate lint test test-integration demo reindex guardian-watch mcp-inspect mcp-demo \
+        agents-demo help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
 	docker compose up -d
@@ -77,6 +78,9 @@ mcp-inspect: ## Abre el MCP Inspector contra el servidor de herramientas (Sprint
 
 mcp-demo: ## Demo del Sprint 16: las 7 herramientas MCP contra infra real (requiere make up + vault sincronizado)
 	uv run python scripts/demo_sprint16.py
+
+agents-demo: ## Demo del Sprint 17: RetrievalAgent en /v1/query + GraphAgent/MemoryAgent standalone (requiere make up + dev-api)
+	uv run python scripts/demo_sprint17.py
 
 clean: ## Detiene servicios y ELIMINA todos los datos locales (volúmenes Docker)
 	docker compose down -v

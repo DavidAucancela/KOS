@@ -8,7 +8,13 @@ Ciclo de vida: mismo patrón que el `lifespan` de `apps/api/src/kos_api/main.py`
 (engine/driver construidos una vez al arrancar, liberados al apagar) y no el de
 `apps/workers` (crear/cerrar por tarea) — un servidor MCP stdio vive toda la
 sesión del cliente, no se invoca en ráfagas cortas como una task de Celery.
-"""
+
+`create_server()` acepta un `AppContext` externo (Sprint 17): `apps/api` lo usa
+para embeber este servidor en su propio proceso, compartiendo el mismo
+`postgres_engine`/`neo4j_driver`/`embedding_client` que ya construyó su propio
+lifespan — evita un segundo pool de conexiones solo para que los agentes
+llamen herramientas. Sin `app_context`, el servidor sigue siendo standalone
+(entrypoint `python -m kos_mcp.server`, dueño de su propio ciclo de vida)."""
 
 from __future__ import annotations
 
@@ -40,7 +46,9 @@ class AppContext:
 
 
 @asynccontextmanager
-async def lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
+async def _standalone_lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
+    """Ciclo de vida por defecto: el servidor es dueño de sus propias
+    conexiones (proceso `python -m kos_mcp.server` real, o tests standalone)."""
     settings = get_settings()
     configure_logging(level=settings.kos_log_level)
     postgres_engine = postgres_storage.create_engine(settings)
@@ -59,8 +67,20 @@ async def lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
         await embedding_client.aclose()
 
 
-def create_server() -> MCPServer:
-    server = MCPServer("kos-mcp-tools", version="0.1.0", lifespan=lifespan)
+def create_server(app_context: AppContext | None = None) -> MCPServer:
+    if app_context is not None:
+        # Ciclo de vida embebido: las conexiones ya existen y las cierra quien
+        # las creó (`apps/api`) — este servidor solo las toma prestadas, nunca
+        # las dispone.
+        @asynccontextmanager
+        async def embedded_lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
+            yield app_context
+
+        server_lifespan = embedded_lifespan
+    else:
+        server_lifespan = _standalone_lifespan
+
+    server = MCPServer("kos-mcp-tools", version="0.1.0", lifespan=server_lifespan)
     graph_tools.register(server)
     vector_tools.register(server)
     docs_tools.register(server)

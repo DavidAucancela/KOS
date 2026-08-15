@@ -5,6 +5,11 @@ pero cada paso se envuelve en los contratos de agentes (`AgentRequest`/
 `AgentResponse`) para que la Fase 4 lo sustituya por un planner real sin cambiar
 el contrato (doc 03 §6). Regla de oro (doc 06 §2): una respuesta sin evidencia
 real solo es válida si declara explícitamente que no encontró nada.
+
+Sprint 17: el paso de retrieval (s1) ya no llama `kos_core.storage.search`
+directo — lo hace `RetrievalAgent` (`packages/agents`) vía la herramienta MCP
+`vector.search` (ADR-0005). El `AgentRequest` que antes se construía y se
+descartaba (`_ = retrieval_request`) ahora es el input real del agente.
 """
 
 from __future__ import annotations
@@ -12,12 +17,10 @@ from __future__ import annotations
 import time
 
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncEngine
 
-from kos_core.llm.base import EmbeddingClient, LLMClient
-from kos_core.schemas import AgentRequest, AgentResponse, Constraints, Cost, EvidenceRef
-from kos_core.storage import search as search_storage
-from kos_core.storage.search import SearchHit, evidence_from_hit
+from kos_agents.base import Agent
+from kos_core.llm.base import LLMClient
+from kos_core.schemas import AgentRequest, Constraints, Cost, EvidenceRef
 
 _SYSTEM_PROMPT = (
     "Eres KOS, un asistente que responde SOLO con la evidencia numerada que se te "
@@ -74,71 +77,6 @@ class QueryResult(BaseModel):
     cost: Cost = Field(default_factory=Cost)
 
 
-def _confidence_from_hits(hits: list[SearchHit], mode: str) -> float:
-    """Confianza heurística honesta a partir del mejor hit (doc 06 §2).
-
-    En modo hybrid el score es una fusión RRF (doc 08, Sprint 3): por diseño
-    está acotado a ~1/(RRF_K + 1) por ranking fusionado (2: léxico + vector),
-    así que el valor crudo nunca se acerca a 1.0 aunque el match sea perfecto.
-    Normalizamos contra ese máximo teórico para que la confianza recorra
-    [0, 1] de verdad. En lexical/vector el score ya viene aprox. en [0, 1].
-    """
-    if not hits:
-        return 0.0
-    top_score = hits[0].score
-    if mode == "hybrid":
-        max_possible = 2.0 / (search_storage.RRF_K + 1)
-        return max(0.0, min(1.0, top_score / max_possible))
-    return max(0.0, min(1.0, top_score))
-
-
-async def _retrieve(
-    engine: AsyncEngine,
-    embedder: EmbeddingClient,
-    *,
-    query: str,
-    limit: int,
-    mode: str,
-    trace_id: str,
-) -> tuple[AgentResponse, bool]:
-    """Paso s1: recupera evidencia. Devuelve (AgentResponse, degraded).
-
-    En modo hybrid/vector embebe la query; si Ollama de embeddings falla, degrada
-    a búsqueda léxica pura (doc 06: la evidencia manda, mejor léxica que nada).
-    """
-    degraded = False
-    effective_mode = mode
-    hits: list[SearchHit]
-    if mode == "lexical":
-        hits = await search_storage.lexical_search(engine, query, limit=limit)
-    else:
-        try:
-            [query_embedding] = await embedder.embed([query])
-        except Exception:
-            hits = await search_storage.lexical_search(engine, query, limit=limit)
-            degraded = True
-            effective_mode = "lexical"
-        else:
-            if mode == "vector":
-                hits = await search_storage.vector_search(engine, query_embedding, limit=limit)
-            else:
-                hits = await search_storage.hybrid_search(
-                    engine, query, query_embedding, limit=limit
-                )
-
-    evidence = [evidence_from_hit(hit) for hit in hits]
-    # Confianza: heurística honesta a partir del mejor hit, normalizada al modo
-    # efectivo de retrieval (no el solicitado, si hubo degradación a léxica).
-    confidence = _confidence_from_hits(hits, effective_mode)
-    response = AgentResponse(
-        outputs={"hit_count": len(hits)},
-        evidence=evidence,
-        confidence=confidence,
-        trace_id=trace_id,
-    )
-    return response, degraded
-
-
 def _build_context(evidence: list[EvidenceRef]) -> str:
     bloques = []
     for index, ref in enumerate(evidence, start=1):
@@ -150,15 +88,14 @@ def _build_context(evidence: list[EvidenceRef]) -> str:
 
 async def answer_query(
     *,
-    engine: AsyncEngine,
-    embedder: EmbeddingClient,
+    retrieval_agent: Agent,
     llm: LLMClient,
     query: str,
     limit: int,
     trace_id: str,
     mode: str = "hybrid",
 ) -> QueryResult:
-    """Pipeline fijo: retrieval (s1) → síntesis con citas (s2)."""
+    """Pipeline fijo: retrieval (s1, vía `RetrievalAgent`/MCP) → síntesis con citas (s2)."""
     started = time.perf_counter()
 
     retrieval_request = AgentRequest(
@@ -167,10 +104,8 @@ async def answer_query(
         constraints=Constraints(),
         trace_id=trace_id,
     )
-    retrieval, degraded = await _retrieve(
-        engine, embedder, query=query, limit=limit, mode=mode, trace_id=trace_id
-    )
-    _ = retrieval_request  # el contrato de entrada existe para el refactor a Fase 4
+    retrieval = await retrieval_agent(retrieval_request)
+    degraded = bool(retrieval.outputs.get("degraded", False))
     evidence = retrieval.evidence
 
     plan = [

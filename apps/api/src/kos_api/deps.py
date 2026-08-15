@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import Settings, get_settings
+from kos_mcp.client import EmbeddedToolCaller
 
 
 def settings_dep() -> Settings:
@@ -34,3 +35,11 @@ def redis_client(request: Request) -> Redis:
 def minio_client(request: Request) -> Minio:
     client: Minio = request.app.state.minio_client
     return client
+
+
+def tool_caller(request: Request) -> EmbeddedToolCaller:
+    """Sesión MCP embebida (Sprint 17): lo que los agentes (`packages/agents`)
+    usan para llamar herramientas — nunca `kos_core.storage` directo desde un
+    agente (ADR-0005)."""
+    caller: EmbeddedToolCaller = request.app.state.tool_caller
+    return caller

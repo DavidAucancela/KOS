@@ -9,13 +9,14 @@ dependencies = [
     "kos-api",
     "kos-workers",
     "kos-mcp-tools",
+    "kos-agents",
 ]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["packages/core", "packages/connectors", "packages/mcp-tools", "apps/api", "apps/workers"]
+members = ["packages/core", "packages/connectors", "packages/mcp-tools", "packages/agents", "apps/api", "apps/workers"]
 
 [tool.uv.sources]
 kos-core = { workspace = true }
@@ -23,6 +24,7 @@ kos-connectors = { workspace = true }
 kos-api = { workspace = true }
 kos-workers = { workspace = true }
 kos-mcp-tools = { workspace = true }
+kos-agents = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -42,7 +44,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["kos_core", "kos_api", "kos_workers", "kos_connectors", "kos_mcp"]
+known-first-party = ["kos_core", "kos_api", "kos_workers", "kos_connectors", "kos_mcp", "kos_agents"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Patrón idiomático de FastAPI: Depends/Query en defaults de parámetros
@@ -69,10 +71,19 @@ ignore_missing_imports = true
 # doc 09 §2: "packages/mcp-tools solo depende de core" — hasta Sprint 16 esta
 # regla no tenía verificación real pese a que el doc decía "se rechaza en CI".
 [tool.importlinter]
-root_packages = ["kos_mcp", "kos_api", "kos_workers"]
+root_packages = ["kos_mcp", "kos_agents", "kos_api", "kos_workers"]
 
 [[tool.importlinter.contracts]]
 name = "kos_mcp no depende de apps/*"
 type = "forbidden"
 source_modules = ["kos_mcp"]
 forbidden_modules = ["kos_api", "kos_workers"]
+
+# doc 09 §2: "packages/agents solo depende de core" — ADR-0005 exige que los
+# agentes consuman herramientas solo vía MCP, nunca importando kos_mcp
+# directo (ver kos_agents/base.py::ToolCaller, duck typing sin import).
+[[tool.importlinter.contracts]]
+name = "kos_agents no depende de apps/* ni de kos_mcp"
+type = "forbidden"
+source_modules = ["kos_agents"]
+forbidden_modules = ["kos_api", "kos_workers", "kos_mcp"]
