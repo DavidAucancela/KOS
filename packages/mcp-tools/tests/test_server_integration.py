@@ -9,11 +9,15 @@ import uuid
 
 import pytest
 from mcp.client import Client
+from sqlalchemy import text as sql_text
 
 from kos_core.config import get_settings
+from kos_core.llm.ollama import OllamaEmbeddingClient
 from kos_core.schemas.graph import GraphNode, NodeWithNeighborhood, neighbor_from_record
 from kos_core.storage import neo4j as neo4j_storage
-from kos_mcp.server import mcp
+from kos_core.storage import postgres as postgres_storage
+from kos_mcp.client import EmbeddedToolCaller
+from kos_mcp.server import AppContext, create_server, mcp
 
 pytestmark = pytest.mark.integration
 
@@ -94,3 +98,30 @@ async def test_memory_store_via_mcp_pide_aprobacion_sin_confirm() -> None:
     assert result.is_error is False
     assert result.structured_content["approved"] is False
     assert result.structured_content["memory_id"] is None
+
+
+async def test_create_server_con_app_context_reusa_las_conexiones_dadas() -> None:
+    """Sprint 17: `apps/api` embebe el servidor pasando su propio engine/driver
+    en vez de que el servidor abra los suyos — así los agentes no duplican el
+    pool de conexiones. `create_server` no debe disponer lo que no creó."""
+    settings = get_settings()
+    engine = postgres_storage.create_engine(settings)
+    driver = neo4j_storage.create_driver(settings)
+    embedder = OllamaEmbeddingClient(settings)
+    app_context = AppContext(
+        settings=settings, postgres_engine=engine, neo4j_driver=driver, embedding_client=embedder
+    )
+    embedded_server = create_server(app_context)
+    try:
+        async with EmbeddedToolCaller(embedded_server) as caller:
+            result = await caller.call_tool("memory.recall", {"limit": 1})
+            assert "items" in result
+
+        # El engine sigue vivo después de que la sesión MCP se cerró — el
+        # servidor embebido no lo dispuso, porque no es el dueño.
+        async with engine.connect() as conn:
+            await conn.execute(sql_text("SELECT 1"))
+    finally:
+        await engine.dispose()
+        await driver.close()
+        await embedder.aclose()

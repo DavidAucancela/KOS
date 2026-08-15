@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kos_core.schemas.agents import EvidenceRef
 
 SearchSource = Literal["lexical", "vector", "title", "hybrid"]
+SearchMode = Literal["lexical", "vector", "hybrid"]
 
 RRF_K = 60
 
@@ -59,6 +60,26 @@ def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
         score=hit.score,
         doc_type=hit.doc_type,
     )
+
+
+def confidence_from_hits(hits: list[SearchHit], mode: SearchMode) -> float:
+    """Confianza heurística honesta a partir del mejor hit (doc 06 §2).
+    Promovido a core en Sprint 17 (antes `_confidence_from_hits` en
+    `apps/api/.../query_service.py`).
+
+    En modo hybrid el score es una fusión RRF (doc 08, Sprint 3): por diseño
+    está acotado a ~1/(RRF_K + 1) por ranking fusionado (2: léxico + vector),
+    así que el valor crudo nunca se acerca a 1.0 aunque el match sea perfecto.
+    Normalizamos contra ese máximo teórico para que la confianza recorra
+    [0, 1] de verdad. En lexical/vector el score ya viene aprox. en [0, 1].
+    """
+    if not hits:
+        return 0.0
+    top_score = hits[0].score
+    if mode == "hybrid":
+        max_possible = 2.0 / (RRF_K + 1)
+        return max(0.0, min(1.0, top_score / max_possible))
+    return max(0.0, min(1.0, top_score))
 
 
 _LEXICAL_SQL = sql_text(
@@ -369,3 +390,48 @@ async def hybrid_search(
         by_id[chunk_id].model_copy(update={"score": score, "source": "hybrid"})
         for chunk_id, score in fused[:limit]
     ]
+
+
+class RetrievalResult(BaseModel):
+    hits: list[SearchHit]
+    degraded: bool
+    confidence: float
+
+
+async def retrieve(
+    engine: AsyncEngine,
+    embed: Callable[[list[str]], Awaitable[list[list[float]]]],
+    *,
+    query: str,
+    limit: int = 10,
+    mode: SearchMode = "hybrid",
+    doc_type: str | None = None,
+) -> RetrievalResult:
+    """Orquesta lexical/vector/hybrid con degradación a léxica si el embedder
+    falla (doc 06: la evidencia manda, mejor léxica que nada). Promovido a
+    core en Sprint 17 (antes `_retrieve` en `apps/api/.../query_service.py`)
+    para que `/v1/query` (vía `RetrievalAgent`) y la herramienta MCP
+    `vector.search` compartan la misma lógica de retrieval, no solo el mapeo
+    a evidencia."""
+    degraded = False
+    effective_mode: SearchMode = mode
+    hits: list[SearchHit]
+    if mode == "lexical":
+        hits = await lexical_search(engine, query, limit=limit, doc_type=doc_type)
+    else:
+        try:
+            [query_embedding] = await embed([query])
+        except Exception:
+            hits = await lexical_search(engine, query, limit=limit, doc_type=doc_type)
+            degraded = True
+            effective_mode = "lexical"
+        else:
+            if mode == "vector":
+                hits = await vector_search(engine, query_embedding, limit=limit, doc_type=doc_type)
+            else:
+                hits = await hybrid_search(
+                    engine, query, query_embedding, limit=limit, doc_type=doc_type
+                )
+
+    confidence = confidence_from_hits(hits, effective_mode)
+    return RetrievalResult(hits=hits, degraded=degraded, confidence=confidence)

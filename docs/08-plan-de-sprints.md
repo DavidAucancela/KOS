@@ -268,7 +268,7 @@ semántica nueva). Retro de cierre de v0.4.
 | Sprint | Tema | Estado |
 |---|---|---|
 | 16 | Servidor MCP real: 7 herramientas de lectura/escritura envolviendo lo ya existente | ✅ Cerrado 2026-08-15 |
-| 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | 🟡 Planificado |
+| 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | 🟡 Planificado |
 | 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | 🟡 Planificado |
 | 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
@@ -300,6 +300,30 @@ explicación de aprobación pendiente, con `confirm=true` escribe la memoria rea
 > real como subproceso stdio contra infra real. 283 tests (255 unitarios + 28 de integración),
 > ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
 > `docs/sprints/sprint-16.md`.
+
+### Sprint 17 — "Los agentes existen"
+
+**Objetivo:** `RetrievalAgent` reemplaza la lógica de retrieval que `/v1/query` llamaba directo
+sobre `kos_core.storage.search`, ahora vía la herramienta MCP `vector.search` (ADR-0005).
+`GraphAgent`/`MemoryAgent` se construyen y prueban reales contra infra, pero standalone — sin
+conectar a `/v1/query` todavía (esperan al Planner de Sprint 18, que decide cuándo corresponde
+cada uno; conectarlos ahora con una heurística casera se tiraría apenas exista el Planner real).
+
+**Demo:** `/v1/query` real da la misma respuesta que antes del refactor, pero el paso de
+retrieval corre vía `RetrievalAgent`/MCP; `GraphAgent`/`MemoryAgent` funcionan contra infra real
+de forma standalone (`scripts/demo_sprint17.py`).
+
+> **Sprint 17 cerrado 2026-08-15**: `packages/agents` (`kos_agents`) nuevo, solo depende de
+> `core` (`ToolCaller`/`Agent` como `Protocol`, duck typing — evita que los agentes importen
+> `kos_mcp` directo). `vector.search` (MCP) extendida con `mode`/degradación/`confidence` para que
+> `RetrievalAgent` no perdiera comportamiento; `kos_mcp.server.create_server()` ahora acepta un
+> `AppContext` externo y nuevo `kos_mcp/client.py::EmbeddedToolCaller` — `apps/api` embebe el
+> servidor MCP compartiendo sus propias conexiones, sin un segundo pool. Dos bugs propios
+> encontrados y arreglados en el momento (colisión de `tests/__init__.py`, fuga de tests
+> pegándole a Ollama real por captura estática del embedder) — ver `docs/deuda-tecnica.md`.
+> Verificado con `POST /v1/query` real (servidor real, no `TestClient`) y
+> `scripts/demo_sprint17.py`. 271 tests unitarios + 30 de integración, ruff, `mypy --strict`
+> (core) e import-linter limpios. Retro completa en `docs/sprints/sprint-17.md`.
 
 ## Gestión
 

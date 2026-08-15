@@ -49,9 +49,10 @@ async def test_search_core_contra_infra_real() -> None:
                 )
             )
 
-        result = await vector_tools._search_core(engine, embedder.embed, marker, 5, None)
+        result = await vector_tools._search_core(engine, embedder.embed, marker, 5, "hybrid", None)
 
         assert any(marker in (ev.quote or "") for ev in result.evidence)
+        assert result.degraded is False
     finally:
         await _cleanup(engine, doc_id)
         await embedder.aclose()

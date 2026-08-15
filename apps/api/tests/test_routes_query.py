@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from kos_api import main as kos_api_main
 from kos_api.main import create_app
 from kos_api.services import memory_service, notes_service
 from kos_core.storage import search as search_storage
@@ -92,14 +93,14 @@ def test_con_hits_devuelve_respuesta_evidencia_y_plan(monkeypatch: pytest.Monkey
     hit = _hit()
 
     async def fake_hybrid(
-        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10, **kwargs: Any
     ) -> list[SearchHit]:
         return [hit]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = llm
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
 
@@ -123,13 +124,13 @@ def test_respuesta_exitosa_encola_memoria_episodica(
     hit = _hit()
 
     async def fake_hybrid(
-        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10, **kwargs: Any
     ) -> list[SearchHit]:
         return [hit]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = _EchoLLM()
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
 
@@ -152,8 +153,8 @@ def test_comando_no_encola_memoria(
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", lambda vault_path, **kwargs: Path("x.md"))
 
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = _EchoLLM()
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
 
@@ -163,14 +164,14 @@ def test_comando_no_encola_memoria(
 
 def test_sin_hits_no_alucina(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_hybrid(
-        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10, **kwargs: Any
     ) -> list[SearchHit]:
         return []
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = llm
         response = client.post("/v1/query", json={"query": "algo que no existe"})
 
@@ -183,12 +184,14 @@ def test_sin_hits_no_alucina(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_hybrid_degrada_a_lexica_si_falla_el_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_lexical(engine: Any, query: str, *, limit: int = 20) -> list[SearchHit]:
+    async def fake_lexical(
+        engine: Any, query: str, *, limit: int = 20, **kwargs: Any
+    ) -> list[SearchHit]:
         return [_hit(source="lexical")]
 
     monkeypatch.setattr(search_storage, "lexical_search", fake_lexical)
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FailingEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FailingEmbedder()
         client.app.state.llm_client = _EchoLLM()
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
 
@@ -200,13 +203,13 @@ def test_hybrid_degrada_a_lexica_si_falla_el_embedder(monkeypatch: pytest.Monkey
 
 def test_llm_caido_con_hits_es_503(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_hybrid(
-        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10, **kwargs: Any
     ) -> list[SearchHit]:
         return [_hit()]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = _FailingLLM()
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
 
@@ -236,8 +239,8 @@ def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
 
     llm = _EchoLLM()
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = llm
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
 
@@ -276,8 +279,8 @@ def test_comando_crear_nota_generico_crea_nota_sin_llamar_al_llm(
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
 
     llm = _EchoLLM()
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = llm
         response = client.post(
             "/v1/query", json={"query": "/crear-nota Proyecto | Proyectos | Tuti"}
@@ -295,13 +298,13 @@ def test_comando_crear_nota_mal_formado_cae_al_pipeline_normal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_hybrid(
-        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10
+        engine: Any, query: str, query_embedding: Sequence[float], *, limit: int = 10, **kwargs: Any
     ) -> list[SearchHit]:
         return []
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = _EchoLLM()
         response = client.post("/v1/query", json={"query": "/crear-nota Proyecto | Proyectos"})
 
@@ -326,8 +329,8 @@ def test_pregunta_por_plantilla_no_fabrica_responde_sin_llm(
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = llm
         response = client.post(
             "/v1/query",
@@ -366,8 +369,8 @@ def test_comando_nueva_maquina_nota_existente_responde_conflicto(
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
 
+    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
-        client.app.state.embedding_client = _FakeEmbedder()
         client.app.state.llm_client = _EchoLLM()
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
 

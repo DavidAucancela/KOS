@@ -5,6 +5,8 @@ description = "API pública de KOS — FastAPI (doc 06)"
 requires-python = ">=3.12"
 dependencies = [
     "kos-core",
+    "kos-mcp-tools",
+    "kos-agents",
     "fastapi>=0.116",
     "uvicorn[standard]>=0.35",
     # Cliente Celery para encolar jobs por nombre (la API no importa kos_workers)
@@ -13,6 +15,8 @@ dependencies = [
 
 [tool.uv.sources]
 kos-core = { workspace = true }
+kos-mcp-tools = { workspace = true }
+kos-agents = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

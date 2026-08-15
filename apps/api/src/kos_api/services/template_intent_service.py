@@ -16,10 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.services import notes_service
 from kos_api.services.intent_service import TEMPLATE_INTENT_PATTERNS
-from kos_api.services.query_service import Cost, PlanStep, QueryResult, evidence_from_hit
+from kos_api.services.query_service import Cost, PlanStep, QueryResult
 from kos_core.llm.base import EmbeddingClient
 from kos_core.storage import search as search_storage
-from kos_core.storage.search import RRF_K, SearchHit
+from kos_core.storage.search import RRF_K, SearchHit, evidence_from_hit
 
 # Umbral inicial conservador (referencia: _TITLE_SIMILARITY_THRESHOLD en
 # search.py), a refinar con uso real del vault — ver retro de sprint-08.md.
