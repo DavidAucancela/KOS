@@ -9,32 +9,25 @@ from __future__ import annotations
 import asyncio
 import math
 import uuid
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient
+from kos_core.memory_learn import INITIAL_SALIENCE as INITIAL_SALIENCE
+from kos_core.memory_learn import AsyncEmbed, AsyncResolveEntities
+from kos_core.memory_learn import learn_from_query_answer as _learn_from_query_answer
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage.postgres import create_engine
 from kos_workers.celery_app import app
-
-# Genera embeddings a partir de una lista de textos (Ollama real o fake en tests) —
-# mismo patrón de inyección que `AsyncEmbed` en `graph_sync.py`.
-AsyncEmbed = Callable[[list[str]], Awaitable[list[list[float]]]]
-
-# Resuelve entities[] a partir de sources[] (doc 04 §2, decidido 2026-08-13): nodos
-# del grafo que ya comparten alguna fuente con la memoria, sin extracción LLM nueva.
-AsyncResolveEntities = Callable[[list[str]], Awaitable[list[str]]]
 
 # Mismo criterio que entity resolution del grafo (Sprint 6, graph_sync.py):
 # umbral fijo en código, no variable de entorno — parámetro de un algoritmo,
 # no configuración de despliegue (doc 04 §6, revisión 2026-07-31).
 DUPLICATE_THRESHOLD = 0.92
 MIN_CLUSTER_SIZE = 3
-INITIAL_SALIENCE = 0.5
 CONSOLIDATED_BOOST = 0.2
 
 
@@ -57,29 +50,17 @@ async def _learn_core(
     embed: AsyncEmbed,
     resolve_entities: AsyncResolveEntities,
 ) -> dict[str, Any]:
-    """Núcleo testeable con `embed`/`resolve_entities` fake (mismo estilo que
-    `_sync_graph` en graph_sync.py: la task real inyecta Ollama/Neo4j, los tests
-    inyectan stubs)."""
-    content = f"Preguntó: {query!r} → {answer}"
-    [embedding] = await embed([content])
-    entities = await resolve_entities(sources)
-    memory_id = uuid.uuid4()
-    # doc 04 §5 (decidido 2026-08-13): no hay una confidence propia por fuente en
-    # este dominio (a diferencia del grafo, `sources` acá no viene de una
-    # extracción por documento) — todas arrancan del mismo `confidence` agregado
-    # de la memoria; perder una fuente después sí las distingue vía la fórmula
-    # de recálculo (`ALIAS_BOOST x n_restantes`, ver `retire_memory_sources`).
-    source_refs = [{"doc_id": source, "confidence": confidence} for source in sources]
-    await postgres_storage.insert_memory(
+    """Wrapper delgado sobre `kos_core.memory_learn.learn_from_query_answer`
+    (Sprint 16, promovido para que la vía Celery y la herramienta MCP
+    `memory.store` compartan la misma lógica ya testeada)."""
+    memory_id = await _learn_from_query_answer(
         engine,
-        memory_id=memory_id,
-        type="episodic",
-        content=content,
-        embedding=embedding,
-        entities=entities,
-        sources=source_refs,
+        query=query,
+        answer=answer,
+        sources=sources,
         confidence=confidence,
-        salience=INITIAL_SALIENCE,
+        embed=embed,
+        resolve_entities=resolve_entities,
     )
     return {"memory_id": str(memory_id)}
 

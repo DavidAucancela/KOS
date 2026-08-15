@@ -80,8 +80,16 @@ def current_trace_id() -> str | None:
     return _trace_id_var.get()
 
 
+# Atributos propios de LogRecord (stdlib): cualquier otra clave en
+# `record.__dict__` viene de `logging.info(..., extra={...})` y se propaga tal
+# cual al JSON (usado por `kos_mcp.permissions.gate` para auditar invocaciones
+# de herramientas con campos propios, no solo un mensaje de texto).
+_STANDARD_LOG_RECORD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
+
+
 class _JsonFormatter(logging.Formatter):
-    """Una línea JSON por registro: nivel, logger, mensaje, trace_id, excepción."""
+    """Una línea JSON por registro: nivel, logger, mensaje, trace_id, excepción
+    y cualquier campo extra pasado vía `extra={...}`."""
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -91,6 +99,13 @@ class _JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "trace_id": current_trace_id(),
         }
+        extra = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in _STANDARD_LOG_RECORD_ATTRS
+        }
+        if extra:
+            payload.update(extra)
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)

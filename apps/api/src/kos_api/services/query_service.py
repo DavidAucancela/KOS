@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kos_core.llm.base import EmbeddingClient, LLMClient
 from kos_core.schemas import AgentRequest, AgentResponse, Constraints, Cost, EvidenceRef
 from kos_core.storage import search as search_storage
-from kos_core.storage.search import SearchHit
+from kos_core.storage.search import SearchHit, evidence_from_hit
 
 _SYSTEM_PROMPT = (
     "Eres KOS, un asistente que responde SOLO con la evidencia numerada que se te "
@@ -72,19 +72,6 @@ class QueryResult(BaseModel):
     plan: list[PlanStep]
     degraded: bool = False
     cost: Cost = Field(default_factory=Cost)
-
-
-def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
-    return EvidenceRef(
-        doc_id=hit.doc_id,
-        chunk_id=hit.chunk_id,
-        quote=hit.text,
-        title=hit.title,
-        source_id=hit.source_id,
-        connector=hit.connector,
-        score=hit.score,
-        doc_type=hit.doc_type,
-    )
 
 
 def _confidence_from_hits(hits: list[SearchHit], mode: str) -> float:

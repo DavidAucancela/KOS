@@ -31,6 +31,25 @@ def test_json_formatter_incluye_trace_id() -> None:
         observability.bind_trace_id(None)
 
 
+def test_json_formatter_incluye_campos_extra() -> None:
+    """Sprint 16: `kos_mcp.permissions.gate` audita invocaciones con campos
+    propios (tool_name, confirm), no solo un mensaje de texto."""
+    buffer = io.StringIO()
+    handler = logging.StreamHandler(buffer)
+    handler.setFormatter(observability._JsonFormatter())
+    logger = logging.getLogger("kos_core.test_observability_extra")
+    logger.handlers = [handler]
+    logger.setLevel("INFO")
+    logger.propagate = False
+
+    logger.info("mcp_tool_invocation", extra={"tool_name": "memory.store", "confirm": False})
+
+    payload = json.loads(buffer.getvalue())
+    assert payload["tool_name"] == "memory.store"
+    assert payload["confirm"] is False
+    assert payload["message"] == "mcp_tool_invocation"
+
+
 def test_traced_span_propaga_trace_id_como_atributo() -> None:
     exporter = InMemorySpanExporter()
     provider = TracerProvider()

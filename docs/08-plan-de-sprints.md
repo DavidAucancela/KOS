@@ -8,7 +8,8 @@ Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no p
 
 - **Demo al cierre**: cada sprint define su demo por adelantado; si no hay demo, el sprint no se cierra.
 - **Un objetivo por sprint**: lo demás es secundario y puede caerse.
-- **Deuda visible**: lo que se recorta se anota en el sprint como deuda, no se olvida.
+- **Deuda visible**: lo que se recorta se anota en el sprint como deuda, no se olvida — vista
+  consolidada en [docs/deuda-tecnica.md](deuda-tecnica.md).
 - **Los docs van un sprint por delante del código** que habilitan.
 
 ## v0.1 — Fundaciones
@@ -262,8 +263,47 @@ semántica nueva). Retro de cierre de v0.4.
 > (doc 07) actualizado con la nota de cierre de v0.4. Retro completa en
 > `docs/sprints/sprint-15.md`.
 
+## v0.5 — Orquestación de agentes (Fase 4)
+
+| Sprint | Tema | Estado |
+|---|---|---|
+| 16 | Servidor MCP real: 7 herramientas de lectura/escritura envolviendo lo ya existente | ✅ Cerrado 2026-08-15 |
+| 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | 🟡 Planificado |
+| 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | 🟡 Planificado |
+| 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | 🟡 Planificado |
+| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
+| 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
+
+Estimación original de doc 07 (6-8 semanas): revisada a 6 sprints (~12 semanas) al planificar
+Sprint 16 — no había ni una línea de código de MCP/agentes, la estimación asumía más base
+construida de la que había.
+
+### Sprint 16 — "Las herramientas hablan MCP"
+
+**Objetivo:** primer servidor MCP real (`packages/mcp-tools`, doc 10 §8, ADR-0005), envolviendo
+las capacidades de lectura ya existentes (`vector.search`, `docs.read_document`,
+`graph.get_node`/`find_path`/`query`, `memory.recall`) más la primera herramienta de escritura
+real (`memory.store`) con su gate de permisos — sin tocar el pipeline fijo de `/v1/query` todavía
+(eso es Sprint 17).
+
+**Demo:** un cliente MCP lista las 7 herramientas y ejecuta `graph.get_node` contra el grafo real,
+mismo resultado que `GET /v1/graph/nodes/{id}`; `memory.store` sin `confirm` devuelve la
+explicación de aprobación pendiente, con `confirm=true` escribe la memoria real y devuelve su
+`memory_id`.
+
+> **Sprint 16 cerrado 2026-08-15**: servidor MCP real (`MCPServer`, transporte stdio) + 7
+> herramientas + `permissions.py` (gate real para escrituras) + 4 promociones de lógica de
+> `apps/*` a `packages/core` (garantizan por construcción que MCP y la API den el mismo resultado)
+> + import-linter en CI (gap real entre doc 09 §2 y lo que CI verificaba, cerrado). De paso,
+> arreglado un bug heredado de Sprint 14 (`GET /v1/memory` rompía sobre memorias previas a la
+> migración de esquema — backfill de 5 filas). Verificado con `scripts/demo_sprint16.py`: servidor
+> real como subproceso stdio contra infra real. 283 tests (255 unitarios + 28 de integración),
+> ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
+> `docs/sprints/sprint-16.md`.
+
 ## Gestión
 
 - Issues en GitHub con etiquetas por dominio (`ingesta`, `parser`, `grafo`, `memoria`, `agentes`, `ui`, `infra`).
 - Un milestone por sprint; el tablero es el project board del repo.
 - Al cerrar cada sprint: retro corta escrita en `docs/sprints/` (qué se demostró, qué se recortó, qué se aprendió).
+- Deuda pendiente entre retros: [docs/deuda-tecnica.md](deuda-tecnica.md), registro consolidado que se actualiza al cerrar cada sprint.

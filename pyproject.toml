@@ -8,19 +8,21 @@ dependencies = [
     "kos-connectors",
     "kos-api",
     "kos-workers",
+    "kos-mcp-tools",
 ]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["packages/core", "packages/connectors", "apps/api", "apps/workers"]
+members = ["packages/core", "packages/connectors", "packages/mcp-tools", "apps/api", "apps/workers"]
 
 [tool.uv.sources]
 kos-core = { workspace = true }
 kos-connectors = { workspace = true }
 kos-api = { workspace = true }
 kos-workers = { workspace = true }
+kos-mcp-tools = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -28,6 +30,8 @@ dev = [
     "mypy>=1.16",
     "pytest>=8.4",
     "pytest-asyncio>=1.0",
+    "import-linter>=2.1",
+    "mcp[cli]>=2.0.0,<3",
 ]
 
 [tool.ruff]
@@ -38,7 +42,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["kos_core", "kos_api", "kos_workers", "kos_connectors"]
+known-first-party = ["kos_core", "kos_api", "kos_workers", "kos_connectors", "kos_mcp"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Patrón idiomático de FastAPI: Depends/Query en defaults de parámetros
@@ -61,3 +65,14 @@ exclude = ["alembic"]
 [[tool.mypy.overrides]]
 module = ["minio.*", "pgvector.*", "celery.*"]
 ignore_missing_imports = true
+
+# doc 09 §2: "packages/mcp-tools solo depende de core" — hasta Sprint 16 esta
+# regla no tenía verificación real pese a que el doc decía "se rechaza en CI".
+[tool.importlinter]
+root_packages = ["kos_mcp", "kos_api", "kos_workers"]
+
+[[tool.importlinter.contracts]]
+name = "kos_mcp no depende de apps/*"
+type = "forbidden"
+source_modules = ["kos_mcp"]
+forbidden_modules = ["kos_api", "kos_workers"]

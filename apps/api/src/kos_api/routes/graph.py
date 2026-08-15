@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from neo4j import AsyncDriver
 from pydantic import BaseModel, Field
@@ -13,44 +11,23 @@ from redis.asyncio import Redis
 from kos_api.deps import neo4j_driver, redis_client
 from kos_api.services import graph_service
 from kos_core.schemas.events import GraphUpdated
-from kos_core.schemas.graph import GraphNeighbor, GraphNode, GraphRelation
+from kos_core.schemas.graph import (
+    GraphNode,
+    GraphPathOut,
+    GraphQueryRequest,
+    GraphQueryResponse,
+    GraphRelation,
+    NodeWithNeighborhood,
+    neighbor_from_record,
+)
 from kos_core.storage.redis import publish_event
 
 router = APIRouter(prefix="/v1/graph", tags=["graph"])
 
 
-class NodeWithNeighborhood(BaseModel):
-    node: GraphNode
-    neighbors: list[GraphNeighbor]
-
-
-class GraphPathOut(BaseModel):
-    nodes: list[GraphNode]
-    relations: list[GraphRelation]
-
-
 class NodesPage(BaseModel):
     items: list[GraphNode]
     next_cursor: str | None
-
-
-GraphQueryTemplate = Literal["nodes_by_type", "neighbors_by_type", "most_connected", "subgraph"]
-
-
-class GraphQueryRequest(BaseModel):
-    template: GraphQueryTemplate
-    node_type: str | None = None
-    node_id: str | None = None
-    cursor: str | None = None
-    limit: int = Field(default=20, ge=1, le=100)
-
-
-class GraphQueryResponse(BaseModel):
-    template: GraphQueryTemplate
-    nodes: list[GraphNode] | None = None
-    neighbors: list[GraphNeighbor] | None = None
-    relations: list[GraphRelation] | None = None
-    next_cursor: str | None = None
 
 
 class PatchNodeRequest(BaseModel):
@@ -64,40 +41,9 @@ class PatchRelationRequest(BaseModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
-def _neighbor_out(record: dict[str, Any], node_id: str) -> GraphNeighbor:
-    """`get_neighborhood` no devuelve source_id/target_id de la relación: se
-    derivan de la dirección respecto al nodo consultado."""
-    direction = record["direction"]
-    source_id, target_id = (
-        (node_id, record["neighbor_id"])
-        if direction == "outgoing"
-        else (record["neighbor_id"], node_id)
-    )
-    return GraphNeighbor(
-        relation=GraphRelation(
-            id=record["rel_id"],
-            relation_type=record["relation_type"],
-            source_id=source_id,
-            target_id=target_id,
-            confidence=record["rel_confidence"],
-            sources=record["rel_sources"] or [],
-            extracted_by=record["rel_extracted_by"],
-            extracted_at=record["rel_extracted_at"],
-            rejected=record["rel_rejected"],
-        ),
-        node=GraphNode(
-            id=record["neighbor_id"],
-            node_type=record["neighbor_type"],
-            canonical_name=record["neighbor_canonical_name"],
-            name=record["neighbor_name"],
-            aliases=record["neighbor_aliases"] or [],
-            confidence=record["neighbor_confidence"],
-            sources=record["neighbor_sources"] or [],
-            extracted_by=record["neighbor_extracted_by"],
-            locked=record["neighbor_locked"],
-        ),
-        direction=direction,
-    )
+# Promovido a `kos_core.schemas.graph.neighbor_from_record` en Sprint 16, para
+# que esta ruta y la herramienta MCP `graph.get_node` compartan el mismo mapeo.
+_neighbor_out = neighbor_from_record
 
 
 @router.get("/nodes/{node_id}", response_model=NodeWithNeighborhood)

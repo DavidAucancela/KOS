@@ -6,7 +6,7 @@
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
 .PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-beat dev-web \
-        migrate lint test test-integration demo reindex guardian-watch help
+        migrate lint test test-integration demo reindex guardian-watch mcp-inspect mcp-demo help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
 	docker compose up -d
@@ -49,10 +49,11 @@ dev-web: ## Solo la web (http://localhost:5173)
 migrate: ## Aplica las migraciones de Postgres (Alembic)
 	uv run alembic -c packages/core/alembic.ini upgrade head
 
-lint: ## Ruff + mypy (core estricto) + eslint web
+lint: ## Ruff + mypy (core estricto) + reglas de dependencia + eslint web
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy --strict packages/core/src/kos_core
+	uv run lint-imports
 	pnpm --filter kos-web lint
 
 test: ## Tests unitarios (Python + web)
@@ -70,6 +71,12 @@ reindex: ## kos reindex: reconstruye los derivados desde MinIO + fuentes (doc 05
 
 guardian-watch: ## Vigía de ahorro de recursos: apaga la infra Docker sin uso (doc 09 §9; requiere KOS_GUARDIAN_ENABLED=true)
 	uv run python -m kos_api.ops.docker_guardian watch
+
+mcp-inspect: ## Abre el MCP Inspector contra el servidor de herramientas (Sprint 16, smoke test manual)
+	uv run mcp dev packages/mcp-tools/src/kos_mcp/server.py
+
+mcp-demo: ## Demo del Sprint 16: las 7 herramientas MCP contra infra real (requiere make up + vault sincronizado)
+	uv run python scripts/demo_sprint16.py
 
 clean: ## Detiene servicios y ELIMINA todos los datos locales (volúmenes Docker)
 	docker compose down -v

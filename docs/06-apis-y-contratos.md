@@ -131,7 +131,9 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > usuario quien teclea el comando explícito — no hay ningún agente/LLM
 > decidiendo escribir de forma autónoma. La implementación completa vía MCP +
 > `permissions.py` sigue pendiente para la Fase 3 real; cuando llegue, esta
-> ruta se migra o convive con ella.
+> ruta se migra o convive con ella. **Planificado para Sprint 20** (doc 08,
+> v0.5), una vez que `packages/mcp-tools`/`permissions.py` existan de verdad
+> (Sprint 16) — ver también [docs/deuda-tecnica.md](deuda-tecnica.md).
 >
 > **Actualización (Sprint 8)**: el comando se generaliza de `/nueva-maquina <nombre>`
 > (template y carpeta fijos en código) a `/crear-nota <template>|<folder>|<título>`,
