@@ -1,0 +1,19 @@
+[project]
+name = "kos-mcp-tools"
+version = "0.1.0"
+description = "Servidores MCP de KOS (ADR-0005, doc 10 §8): única vía de herramientas para agentes"
+requires-python = ">=3.12"
+dependencies = [
+    "kos-core",
+    "mcp>=2.0.0,<3",
+]
+
+[tool.uv.sources]
+kos-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kos_mcp"]

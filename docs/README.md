@@ -33,6 +33,12 @@ Las decisiones técnicas puntuales se registran en [`adr/`](adr/). Cada ADR capt
 | [0005](adr/0005-mcp-como-protocolo-de-herramientas.md) | MCP como protocolo único de herramientas |
 | [0006](adr/0006-local-first-con-ollama.md) | Local-first: Ollama como runtime de LLM por defecto |
 
+## Deuda técnica
+
+[`docs/deuda-tecnica.md`](deuda-tecnica.md) — registro vivo de lo que cada retro de sprint dejó
+pendiente, consolidado en un solo lugar. Se actualiza al cerrar cada sprint, no es un documento de
+diseño.
+
 ## Cómo proponer un cambio de diseño
 
 1. Si es una decisión puntual → nuevo ADR usando [la plantilla](adr/0000-plantilla.md).

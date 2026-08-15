@@ -22,6 +22,8 @@ from pydantic import BaseModel
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from kos_core.schemas.agents import EvidenceRef
+
 SearchSource = Literal["lexical", "vector", "title", "hybrid"]
 
 RRF_K = 60
@@ -40,6 +42,23 @@ class SearchHit(BaseModel):
     source_id: str | None = None
     heading: str | None = None
     doc_type: str | None = None
+
+
+def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
+    """Mapeo canónico de un hit de búsqueda a evidencia citable (doc 06 §2).
+    Promovido a core en Sprint 16 (antes `evidence_from_hit` en
+    `apps/api/.../query_service.py`) para que `/v1/query` y la herramienta MCP
+    `vector.search` compartan el mismo mapeo."""
+    return EvidenceRef(
+        doc_id=hit.doc_id,
+        chunk_id=hit.chunk_id,
+        quote=hit.text,
+        title=hit.title,
+        source_id=hit.source_id,
+        connector=hit.connector,
+        score=hit.score,
+        doc_type=hit.doc_type,
+    )
 
 
 _LEXICAL_SQL = sql_text(

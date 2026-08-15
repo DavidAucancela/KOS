@@ -48,6 +48,9 @@ jobs:
       - name: Mypy estricto en packages/core (doc 09 §3)
         run: uv run mypy --strict packages/core/src/kos_core
 
+      - name: Reglas de dependencia entre packages/apps (doc 09 §2)
+        run: uv run lint-imports
+
       - name: Tests unitarios
         run: uv run pytest -q
 
