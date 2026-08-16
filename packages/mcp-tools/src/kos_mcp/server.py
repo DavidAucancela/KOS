@@ -35,6 +35,7 @@ from kos_mcp.tools import docs as docs_tools
 from kos_mcp.tools import github as github_tools
 from kos_mcp.tools import graph as graph_tools
 from kos_mcp.tools import memory as memory_tools
+from kos_mcp.tools import obsidian as obsidian_tools
 from kos_mcp.tools import vector as vector_tools
 from kos_mcp.tools import web as web_tools
 
@@ -89,6 +90,7 @@ def create_server(app_context: AppContext | None = None) -> MCPServer:
     memory_tools.register(server)
     github_tools.register(server)
     web_tools.register(server)
+    obsidian_tools.register(server)
     return server
 
 

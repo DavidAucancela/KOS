@@ -24,6 +24,7 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | `Planner` no exigía presupuestos (`Constraints.timeout_s`/`max_steps` se pasaban pero no se hacían cumplir) | [Sprint 18](sprints/sprint-18.md) — alcance explícito, dejado para el sprint que persiste el plan | [Sprint 19](sprints/sprint-19.md) |
 | Plan generado no se persistía — `GET /v1/plans/{id}` no existía | [Sprint 18](sprints/sprint-18.md) — alcance explícito | [Sprint 19](sprints/sprint-19.md) |
 | Tools MCP que devuelven una lista top-level llegan envueltas en `{"result": [...]}` (distinto de las tools de grafo, que siempre devuelven un objeto con listas anidadas) — `ResearchAgent` iteraba directo sobre el resultado crudo y explotaba con `TypeError` | Hallazgo de Sprint 20, probando `ResearchAgent` contra la API real de GitHub | [Sprint 20](sprints/sprint-20.md), `_unwrap_list()` |
+| `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 — pospuesto en Sprint 20, retomado a pedido directo del usuario | [Sprint 20](sprints/sprint-20.md) (addendum, 2026-08-16), `packages/mcp-tools/.../obsidian.py` + `packages/core/src/kos_core/notes.py` |
 
 ## Resuelta por v0.5 (Sprint 21), no requiere sprint aparte
 
@@ -36,8 +37,8 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 
 | Ítem | Origen |
 |---|---|
-| `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 — planificado para Sprint 20, pospuesto por decisión explícita del usuario al planificar ese sprint (2026-08-16) |
-| Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) | Sin sprint asignado todavía — no bloqueaba la demo de Sprint 18 |
+| Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) — no bloqueaba la demo de Sprint 18 |
+| `obsidian.read_note`, `obsidian.update_note`, `obsidian.create_folder` (doc 06 §4) siguen sin implementar — solo `create_note` se migró a MCP | [Sprint 20](sprints/sprint-20.md) (addendum) — sin caso de uso real que las pida todavía |
 | El catálogo del Planner describe `research` en texto libre; con `llama3.2` (modelo chico) el LLM a veces omite `operation` en los `inputs` del paso `research` — el sistema ya degrada correctamente ese caso, pero no hay validación adicional en el prompt para reducir la tasa | [Sprint 20](sprints/sprint-20.md) | Ajuste fino, sin sprint asignado |
 
 ## UI/UX — baja prioridad, sin sprint asignado

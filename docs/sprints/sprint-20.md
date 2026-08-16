@@ -102,3 +102,46 @@ limpios.
   el límite real del protocolo MCP contra infra real (GitHub), no en la lógica de mapeo que ya
   tenía tests con fakes — los fakes reprodujeron la forma incorrecta hasta que la ejecución real
   la corrigió.
+
+## Addendum (2026-08-16): migración de `obsidian.create_note` a MCP real
+
+Lo que este sprint había pospuesto (ver "Decisiones de alcance" arriba) se retomó a pedido directo
+del usuario el mismo día. `obsidian.create_note` pasa de vivir solo como lógica directa en
+`apps/api` a ser una herramienta MCP real con gate de aprobación.
+
+### Qué se construye
+
+- **`packages/core/src/kos_core/notes.py`** (nuevo, promovido desde
+  `apps/api/.../notes_service.py`): `get_vault_path`, `list_templates`, `create_note` y sus tres
+  excepciones. Se promueve porque ahora lo necesitan dos consumidores en paquetes distintos
+  (`apps/api` y `kos_mcp`), y `kos_mcp` no puede depender de `apps/api` (doc 09 §2,
+  import-linter) — mismo criterio que cualquier tipo/lógica que cruza una frontera de paquete.
+- **`apps/api/.../notes_service.py`**: queda como re-export delgado (mismo patrón que
+  `query_service.py` reexportando `Cost`/`PlanStep` desde Sprint 18) — cero cambios en los call
+  sites existentes (`routes/query.py`, `routes/notes.py`, `template_intent_service.py`).
+- **`packages/mcp-tools/src/kos_mcp/tools/obsidian.py`** (nuevo): `obsidian.create_note`, mismo
+  patrón que `memory.store` — `gate()` real vía `permissions.py`, sin `confirm=true` devuelve la
+  explicación de aprobación pendiente sin escribir nada.
+- **`permissions.WRITE_TOOLS`** suma `"obsidian.create_note"`.
+- El comando `/crear-nota` del chat no cambia: sigue llamando la lógica promovida directo (su
+  aprobación ya la satisface el usuario tecleando el comando explícito, doc 06 §4) — la tool MCP
+  es la vía nueva para que un agente (`WritingAgent`, doc 03 §2) pueda crear notas más adelante,
+  pasando siempre por el gate real.
+
+### Verificación
+
+Contra el vault real (`/Users/david/Documents/Obsidian Vault`), sin mocks: (1) `confirm=false` no
+tocó el filesystem; (2) `confirm=true` creó una nota real desde la plantilla `Concepto` con el
+frontmatter y el título renderizados correctamente; (3) un segundo intento sobre el mismo título
+falló (`NoteAlreadyExistsError` vía `ToolError`), confirmando que nunca sobreescribe; limpieza
+verificada sin residuo en el vault real. 316 tests unitarios (7 nuevos:
+`test_notes.py`, `test_obsidian_tools.py`, +1 en `test_permissions.py`), ruff, `mypy --strict`
+(core) e import-linter limpios.
+
+### Qué se recorta
+
+- `obsidian.read_note`, `obsidian.update_note`, `obsidian.create_folder` (doc 06 §4) siguen sin
+  implementar — sin caso de uso real que las pida todavía.
+- `WritingAgent` todavía no invoca `obsidian.create_note`: la tool existe y está gateada, pero
+  ningún agente la llama todavía — sigue siendo terreno de un sprint futuro que conecte el
+  Writing agent a herramientas de escritura reales (doc 03 §2).

@@ -26,6 +26,12 @@ def test_write_tools_contiene_memory_store() -> None:
     assert "graph.get_node" not in WRITE_TOOLS
 
 
+def test_write_tools_contiene_obsidian_create_note() -> None:
+    """Sprint 20 (deuda cerrada): `obsidian.create_note` migró de la API
+    directa a una herramienta MCP real con gate."""
+    assert "obsidian.create_note" in WRITE_TOOLS
+
+
 def test_approval_required_incluye_descripcion_legible() -> None:
     with pytest.raises(ApprovalRequired) as exc_info:
         gate(

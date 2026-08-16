@@ -415,6 +415,25 @@ vez de romper la respuesta.
 > (25 nuevos), ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
 > `docs/sprints/sprint-20.md`.
 
+### Fuera de plan (pedido directo del usuario, 2026-08-16): migrar `obsidian.create_note` a MCP
+
+Lo que Sprint 20 pospuso por decisión explícita. `obsidian.create_note` pasa a ser una herramienta
+MCP real con gate de aprobación en `permissions.py` (`WRITE_TOOLS`), en vez de vivir solo como
+lógica directa en `apps/api`. La lógica de renderizado/escritura se promueve a
+`packages/core/src/kos_core/notes.py` (`kos_mcp` no puede depender de `apps/api`, doc 09 §2). El
+comando `/crear-nota` del chat sigue funcionando igual (convive con la tool, doc 06 §4).
+
+> **Cerrado 2026-08-16**: `packages/core/src/kos_core/notes.py` (promovido desde
+> `apps/api/.../notes_service.py`, que queda como re-export delgado para no romper los call sites
+> existentes) + `obsidian.create_note` (`packages/mcp-tools/src/kos_mcp/tools/obsidian.py`,
+> `confirm=true` requerido) + `WRITE_TOOLS` suma `"obsidian.create_note"` (mismo gate real que
+> `memory.store`). Verificado contra el vault real (`/Users/david/Documents/Obsidian Vault`, no
+> mockeado): sin `confirm` no escribió nada; con `confirm=true` creó una nota real desde la
+> plantilla `Concepto` con contenido renderizado correcto; un segundo intento sobre el mismo
+> título falló como se esperaba (nunca sobreescribe); limpieza verificada, sin residuo en el
+> vault. 316 tests unitarios (7 nuevos), ruff, `mypy --strict` (core) e import-linter limpios.
+> Retro (addendum) en `docs/sprints/sprint-20.md`.
+
 ## Gestión
 
 - Issues en GitHub con etiquetas por dominio (`ingesta`, `parser`, `grafo`, `memoria`, `agentes`, `ui`, `infra`).

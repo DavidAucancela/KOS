@@ -20,9 +20,9 @@ from kos_core.observability import bind_trace_id
 
 logger = logging.getLogger("kos_mcp.permissions")
 
-# Registro de herramientas de escritura: `obsidian.*`/`roadmap.*` (Sprints
-# posteriores) se suman acá sin tocar los call sites de `gate()`.
-WRITE_TOOLS: frozenset[str] = frozenset({"memory.store"})
+# Registro de herramientas de escritura: `roadmap.*` (Sprints posteriores) se
+# suma acá sin tocar los call sites de `gate()`.
+WRITE_TOOLS: frozenset[str] = frozenset({"memory.store", "obsidian.create_note"})
 
 
 class ApprovalRequired(Exception):
