@@ -197,7 +197,9 @@ class Planner:
                 prompt if last_error is None else f"{prompt}\n\nError anterior: {last_error}"
             )
             try:
-                raw = await self._llm.generate(full_prompt, system=_PLANNER_SYSTEM)
+                raw = await self._llm.generate(
+                    full_prompt, system=_PLANNER_SYSTEM, timeout=request.constraints.timeout_s
+                )
             except Exception as exc:  # cualquier fallo del LLM dispara fallback
                 last_error = str(exc)
                 continue

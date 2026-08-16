@@ -84,6 +84,7 @@ class _EchoLLM:
         system: str | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str:
         if system is not None and "planner de KOS" in system:
             return _FIXED_PLAN_JSON

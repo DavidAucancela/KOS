@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 
@@ -10,6 +11,12 @@ from kos_core.config import Settings, get_settings
 from kos_core.observability import get_tracer, llm_tokens_total
 
 _DEFAULT_TIMEOUT = 120.0
+"""Timeout del cliente HTTP cuando el caller no pasa `timeout` explícito a
+`generate()`/`embed()` (auditoría de cierre v0.5, 2026-08-16: antes era el
+único timeout posible, desacoplado de `Constraints.timeout_s`). Los agentes
+que reciben un `AgentRequest.constraints` pasan `timeout_s` para que la
+llamada real respete el presupuesto declarado del plan en vez de poder tardar
+hasta acá."""
 _tracer = get_tracer("kos-llm")
 
 
@@ -34,13 +41,16 @@ class OllamaEmbeddingClient:
             base_url=settings.ollama_base_url, timeout=_DEFAULT_TIMEOUT
         )
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def embed(
+        self, texts: Sequence[str], *, timeout: float | None = None
+    ) -> list[list[float]]:
         with _tracer.start_as_current_span("ollama.embed") as span:
             span.set_attribute("kos.llm.model", self.model)
             span.set_attribute("kos.llm.input_count", len(texts))
-            response = await self._client.post(
-                "/api/embed", json={"model": self.model, "input": list(texts)}
-            )
+            request_kwargs: dict[str, Any] = {"json": {"model": self.model, "input": list(texts)}}
+            if timeout is not None:
+                request_kwargs["timeout"] = timeout
+            response = await self._client.post("/api/embed", **request_kwargs)
             response.raise_for_status()
             embeddings: list[list[float]] = response.json()["embeddings"]
             return embeddings
@@ -69,6 +79,7 @@ class OllamaLLMClient:
         system: str | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str:
         options: dict[str, float | int] = {"temperature": temperature}
         if max_tokens is not None:
@@ -84,7 +95,10 @@ class OllamaLLMClient:
         with _tracer.start_as_current_span("ollama.generate") as span:
             span.set_attribute("kos.llm.model", self.model)
             span.set_attribute("kos.llm.temperature", temperature)
-            response = await self._client.post("/api/generate", json=payload)
+            request_kwargs: dict[str, Any] = {"json": payload}
+            if timeout is not None:
+                request_kwargs["timeout"] = timeout
+            response = await self._client.post("/api/generate", **request_kwargs)
             response.raise_for_status()
             body = response.json()
             if "prompt_eval_count" in body:

@@ -4,7 +4,12 @@ con la cuota liviana de un cliente anónimo (60 req/hora); con token, la cuota
 sube (5000 req/hora) — nunca requerido, solo mejora el límite.
 
 Mismo patrón `_xxx_core(client, ...)` testeable con un `httpx.AsyncClient` fake
-que ya usan `graph.py`/`vector.py` con sus storages."""
+que ya usan `graph.py`/`vector.py` con sus storages.
+
+Auditoría de cierre v0.5 (2026-08-16): `get_with_retry` (`_http.py`) reintenta
+fallos de transporte; `RateLimitedError` distingue "sin cuota" (403/429) de un
+error genérico, para que quien lea la traza sepa que no es un bug — es el
+límite público de GitHub."""
 
 from __future__ import annotations
 
@@ -12,8 +17,14 @@ import httpx
 from mcp.server.mcpserver import Context, MCPServer
 from pydantic import BaseModel
 
+from kos_mcp.tools._http import get_with_retry
+
 _BASE_URL = "https://api.github.com"
 _TIMEOUT = 15.0
+
+
+class RateLimitedError(Exception):
+    """GitHub devolvió 403/429 — cuota de la API pública agotada."""
 
 
 class GitHubRepoResult(BaseModel):
@@ -37,15 +48,27 @@ def _headers(token: str) -> dict[str, str]:
     return headers
 
 
+def _raise_for_status_or_rate_limit(response: httpx.Response, *, token: str) -> None:
+    if response.status_code in (403, 429):
+        hint = (
+            "configurar GITHUB_TOKEN sube la cuota de 60 a 5000 req/hora"
+            if not token
+            else "cuota agotada pese a GITHUB_TOKEN configurado — esperar a que se renueve"
+        )
+        raise RateLimitedError(f"GitHub rate limit (status={response.status_code}): {hint}")
+    response.raise_for_status()
+
+
 async def _search_repos_core(
     client: httpx.AsyncClient, query: str, limit: int, token: str
 ) -> list[GitHubRepoResult]:
-    response = await client.get(
+    response = await get_with_retry(
+        client,
         "/search/repositories",
         params={"q": query, "per_page": limit},
         headers=_headers(token),
     )
-    response.raise_for_status()
+    _raise_for_status_or_rate_limit(response, token=token)
     items = response.json().get("items", [])
     return [
         GitHubRepoResult(
@@ -61,12 +84,13 @@ async def _search_repos_core(
 async def _search_commits_core(
     client: httpx.AsyncClient, query: str, limit: int, token: str
 ) -> list[GitHubCommitResult]:
-    response = await client.get(
+    response = await get_with_retry(
+        client,
         "/search/commits",
         params={"q": query, "per_page": limit},
         headers=_headers(token),
     )
-    response.raise_for_status()
+    _raise_for_status_or_rate_limit(response, token=token)
     items = response.json().get("items", [])
     return [
         GitHubCommitResult(

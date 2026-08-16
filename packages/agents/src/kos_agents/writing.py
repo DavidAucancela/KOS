@@ -8,7 +8,13 @@ la lógica que hasta Sprint 17 vivía inline en
 `apps/api/.../query_service.py::answer_query` (`_build_context`, `_SYSTEM_PROMPT`,
 `llm.generate(...)`), Sprint 18 la promueve a agente real para que el Planner
 pueda tratarla como cualquier otro paso del plan (mismo contrato
-`AgentRequest`/`AgentResponse`)."""
+`AgentRequest`/`AgentResponse`).
+
+`llm.generate(..., timeout=request.constraints.timeout_s)` (auditoría de
+cierre v0.5, 2026-08-16): antes la llamada real a Ollama usaba el timeout fijo
+del cliente (120s) sin importar el presupuesto declarado del plan — la
+síntesis, siendo el paso más lento típico, era el caso más visible de esa
+desconexión."""
 
 from __future__ import annotations
 
@@ -95,7 +101,9 @@ class WritingAgent:
             "Responde a la pregunta usando solo la evidencia anterior y citando con [n]."
         )
         try:
-            answer = await self._llm.generate(prompt, system=SYSTEM_PROMPT)
+            answer = await self._llm.generate(
+                prompt, system=SYSTEM_PROMPT, timeout=request.constraints.timeout_s
+            )
         except Exception as exc:  # solo la síntesis; los pasos previos ya terminaron
             raise SynthesisError(str(exc)) from exc
 
