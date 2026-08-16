@@ -372,6 +372,34 @@ oleadas ya completadas.
 > `docs/deuda-tecnica.md`, sin relación con este sprint), ruff, `mypy --strict` (core) e
 > import-linter limpios. Retro completa en `docs/sprints/sprint-19.md`.
 
+### Sprint 20 — "El mundo entra"
+
+**Objetivo:** `ResearchAgent` real, conectado al Planner, buscando fuera del vault vía MCP
+externo (`github.*`, `web.*`, doc 06 §4) cuando una pregunta lo necesita.
+
+> **Decisión de alcance (2026-08-16)**: la migración de `obsidian.create_note` a herramienta MCP
+> con `permissions.py` (la otra mitad del objetivo original de este sprint en la fila de arriba)
+> se pospone — decisión explícita del usuario, para no mezclar "conectar el mundo exterior" con
+> "reescribir un camino que ya funciona sin bloquear nada". Queda como deuda sin sprint asignado
+> todavía (`docs/deuda-tecnica.md`). Fuentes elegidas: GitHub (API pública, sin key para uso
+> liviano) y Brave Search (`BRAVE_SEARCH_API_KEY`) para `web.*` — ver doc 06 §4 para el detalle.
+
+- `packages/mcp-tools/src/kos_mcp/tools/github.py`: `github.search_repos`, `github.search_commits`
+  contra la API pública de GitHub (`GITHUB_TOKEN` opcional para más cuota).
+- `packages/mcp-tools/src/kos_mcp/tools/web.py`: `web.search`, `web.open` contra Brave Search API
+  (`BRAVE_SEARCH_API_KEY` requerido — sin key, la tool devuelve un error claro, no falla en
+  silencio).
+- `packages/agents/src/kos_agents/research.py`: `ResearchAgent` (mismo contrato `Agent` que
+  Retrieval/Graph/Writing), evidencia con `source_id`=URL, `connector="github"|"web"`.
+- `Planner` suma `research` a su catálogo (doc 03 §3); `executor.py`/`query_service.py` lo
+  registran junto a los demás agentes.
+
+**Demo:** una pregunta que necesita contexto externo (ej. "¿qué cambió recientemente en la
+librería X que uso?") genera un plan con un paso `research`, con evidencia citando resultados
+reales de GitHub/web; una pregunta puramente sobre el vault no lo incluye (el LLM decide, no una
+heurística); sin `BRAVE_SEARCH_API_KEY` configurada, un plan que necesita `web.search` degrada en
+vez de romper la respuesta.
+
 ## Gestión
 
 - Issues en GitHub con etiquetas por dominio (`ingesta`, `parser`, `grafo`, `memoria`, `agentes`, `ui`, `infra`).

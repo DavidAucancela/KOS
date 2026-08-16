@@ -71,6 +71,13 @@ Reglas:
    > que hubiera preferido, pero respondió con lo que sí pudo"). Sprint 19 extiende esta misma
    > señal a los presupuestos de tiempo/pasos por ejecución (no solo a la generación del plan).
 
+   > **Catálogo ampliado (Sprint 20, decidido 2026-08-16):** `research` se suma a
+   > `retrieval`/`graph`/`writing` en el catálogo del Planner — el LLM lo elige cuando la pregunta
+   > pide algo que el vault no puede tener (código/documentación de un proyecto externo, estado
+   > actual de una librería). Vía las herramientas MCP `github.search_repos`,
+   > `github.search_commits`, `web.search`, `web.open` (doc 06 §4) — todas de lectura, sin gate de
+   > `permissions.py` nuevo. `memory` sigue fuera del catálogo (Sprint 21).
+
 ## 4. Coordinación mediante MCP
 
 - Cada agente consume herramientas **solo** vía MCP ([ADR-0005](adr/0005-mcp-como-protocolo-de-herramientas.md)); los agentes no importan clientes de BD directamente — usan las herramientas registradas (`graph.query`, `vector.search`, `memory.recall`, `obsidian.write_note`…).
