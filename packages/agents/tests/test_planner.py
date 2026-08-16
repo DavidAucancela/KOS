@@ -1,0 +1,151 @@
+"""Tests unitarios de `Planner` (Sprint 18): LLM/agentes fake, sin infra real."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from kos_agents.planner.planner import Planner, parse_plan_response
+from kos_core.schemas.agents import AgentRequest, AgentResponse
+from kos_core.schemas.plan import PlanRequest
+
+
+class _FakeAgent:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.calls: list[AgentRequest] = []
+
+    async def __call__(self, request: AgentRequest) -> AgentResponse:
+        self.calls.append(request)
+        return AgentResponse(
+            outputs={"agent": self.name},
+            evidence=[{"doc_id": None, "chunk_id": None, "quote": f"evidencia de {self.name}"}],
+            confidence=0.6,
+            trace_id=request.trace_id,
+        )
+
+
+class _ScriptedLLM:
+    """Devuelve, en orden, cada elemento de `responses`; lanza si se agotan."""
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    async def generate(self, prompt: str, **kwargs: Any) -> str:
+        self.calls += 1
+        return self._responses.pop(0)
+
+
+def test_parse_plan_response_tolera_fences_de_markdown() -> None:
+    raw = (
+        "```json\n"
+        '[{"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},\n'
+        ' {"id": "s2", "agent": "writing", "task": "redactar", "inputs": {}, '
+        '"depends_on": ["s1"]}]\n'
+        "```"
+    )
+    steps = parse_plan_response(raw, query="x")
+    assert steps is not None
+    assert [s.id for s in steps] == ["s1", "s2"]
+
+
+def test_parse_plan_response_json_invalido_devuelve_none() -> None:
+    assert parse_plan_response("no es json", query="x") is None
+
+
+def test_parse_plan_response_requiere_exactamente_un_writing_con_dependencia() -> None:
+    sin_writing = json.dumps(
+        [{"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []}]
+    )
+    assert parse_plan_response(sin_writing, query="x") is None
+
+    writing_sin_depender = json.dumps(
+        [{"id": "s1", "agent": "writing", "task": "redactar", "inputs": {}, "depends_on": []}]
+    )
+    assert parse_plan_response(writing_sin_depender, query="x") is None
+
+
+def test_parse_plan_response_rechaza_dependencia_a_id_inexistente() -> None:
+    raw = json.dumps(
+        [
+            {
+                "id": "s1",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["no-existe"],
+            }
+        ]
+    )
+    assert parse_plan_response(raw, query="x") is None
+
+
+async def test_planner_usa_el_plan_dinamico_si_valida() -> None:
+    plan_json = json.dumps(
+        [
+            {"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},
+            {
+                "id": "s2",
+                "agent": "graph",
+                "task": "grafo",
+                "inputs": {"template": "most_connected"},
+                "depends_on": [],
+            },
+            {
+                "id": "s3",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1", "s2"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM([plan_json])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    planner = Planner(llm=llm, retrieval_agent=retrieval, graph_agent=graph, writing_agent=writing)
+
+    plan, responses = await planner(
+        PlanRequest(query="¿qué relaciona FastAPI?", trace_id="trace-1")
+    )
+
+    assert plan.degraded is False
+    assert [s.id for s in plan.steps] == ["s1", "s2", "s3"]
+    assert set(responses.keys()) == {"s1", "s2", "s3"}
+    assert llm.calls == 1
+
+
+async def test_planner_degrada_al_plan_fijo_tras_dos_fallos() -> None:
+    llm = _ScriptedLLM(["no es json", "tampoco esto"])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    planner = Planner(llm=llm, retrieval_agent=retrieval, graph_agent=graph, writing_agent=writing)
+
+    plan, responses = await planner(PlanRequest(query="¿qué es KOS?", trace_id="trace-2"))
+
+    assert plan.degraded is True
+    assert [s.agent for s in plan.steps] == ["retrieval", "writing"]
+    assert set(responses.keys()) == {"s1", "s2"}
+    assert llm.calls == 2
+
+
+async def test_planner_reintenta_una_vez_con_el_error_antes_de_degradar() -> None:
+    plan_json = json.dumps(
+        [
+            {"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},
+            {
+                "id": "s2",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM(["no válido", plan_json])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    planner = Planner(llm=llm, retrieval_agent=retrieval, graph_agent=graph, writing_agent=writing)
+
+    plan, _responses = await planner(PlanRequest(query="x", trace_id="trace-3"))
+
+    assert plan.degraded is False
+    assert llm.calls == 2

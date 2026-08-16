@@ -18,15 +18,20 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | `memory_items.sources` con filas viejas (`list[str]`, pre-Sprint 14) rompía `GET /v1/memory` con 500 | Hallazgo al construir `memory.recall` en Sprint 16 (bug heredado de Sprint 14, no de Sprint 16) | [Sprint 16](sprints/sprint-16.md), backfill SQL puntual de 5 filas |
 | `tests/__init__.py` en `packages/mcp-tools` y `packages/agents` colisionaban en el mismo nombre de módulo `tests` (ningún otro paquete del repo usa `__init__.py` en `tests/`) — rompía la colección de pytest al correr la suite completa | Introducido por mí mismo en Sprint 16/17, encontrado al agregar `packages/agents` | [Sprint 17](sprints/sprint-17.md), se sacaron ambos `__init__.py` |
 | `search_storage.hybrid_search`/`lexical_search` mockeados en tests de `/v1/query` dejaron de interceptar el embedder real tras Sprint 17 (el `MCPAppContext` capturaba `embedding_client` al arrancar el lifespan, antes de que el test lo reemplazara) — la mayoría de los tests pasaban igual porque pegaban contra Ollama real sin que nadie lo notara | Introducido por mí mismo en Sprint 17 al embeber el servidor MCP en `apps/api` | [Sprint 17](sprints/sprint-17.md), tests ahora inyectan el fake antes de que arranque el lifespan |
+| `GraphAgent._node_evidence` no completaba `EvidenceRef.quote` — `WritingAgent` armaba citas vacías para evidencia de grafo, el LLM concluía "no hay evidencia" pese a que sí la había | Introducido en Sprint 17 (nunca se notó porque `GraphAgent` era standalone), encontrado al conectarlo al Planner en Sprint 18 | [Sprint 18](sprints/sprint-18.md) |
+| Un paso de evidencia que falla (ej. el LLM propuso un `node_type` inválido) tumbaba toda la request de `/v1/query` con 500 en vez de degradar | Hallazgo de Sprint 18, probando el Planner contra infra real | [Sprint 18](sprints/sprint-18.md), el executor ahora degrada pasos de evidencia que fallan (`writing` sigue propagando el suyo) |
+| Doc 03 §6 decía que "Fase 2 agregó el paso de grafo al pipeline fijo", pero `/v1/query` nunca incorporó contexto del grafo a sus respuestas — el grafo se construyó (Sprints 6-11) como panel explorable separado en la UI, no como evidencia de respuesta | Hallazgo al planificar Sprint 17 (2026-08-15) | [Sprint 18](sprints/sprint-18.md), el Planner decide cuándo el grafo aporta al plan |
 
-## Resuelta por v0.5 (Sprints 18-21), no requiere sprint aparte
+## Resuelta por v0.5 (Sprints 19-21), no requiere sprint aparte
 
 | Ítem | Origen | Se resuelve en |
 |---|---|---|
 | Nadie consume el evento `graph.updated` (Learning/Recomendador no existen) | [Sprint 9](sprints/sprint-09.md) | Sprint 21 (Learning agent) |
 | `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 | Sprint 20 |
 | Memoria se escribe pero nunca se lee — `/v1/query` no consulta memoria para responder (doc 04 §3 paso "Recuperación" nunca construido) | Hallazgo de la sesión 2026-08-15 (Sprints 13-15), no ligado a una retro puntual anterior | Sprint 21 (Memory agent lee, no solo escribe) |
-| Doc 03 §6 dice que "Fase 2 agregó el paso de grafo al pipeline fijo", pero `/v1/query` nunca incorporó contexto del grafo a sus respuestas — el grafo se construyó (Sprints 6-11) como panel explorable separado en la UI, no como evidencia de respuesta | Hallazgo al planificar Sprint 17 (2026-08-15) | `GraphAgent` ya existe y funciona (Sprint 17), pero decidir CUÁNDO una consulta necesita grafo es del Planner — Sprint 18 lo conecta a `/v1/query` |
+| `Planner` no exige presupuestos (`Constraints.timeout_s`/`max_steps` se pasan pero no se hacen cumplir) | [Sprint 18](sprints/sprint-18.md) — alcance explícito, dejado para el sprint que persiste el plan | Sprint 19 |
+| Plan generado no se persiste — `GET /v1/plans/{id}` sigue sin existir | [Sprint 18](sprints/sprint-18.md) — alcance explícito | Sprint 19 |
+| Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) | Sin sprint asignado todavía — no bloqueaba la demo de Sprint 18 |
 
 ## UI/UX — baja prioridad, sin sprint asignado
 
