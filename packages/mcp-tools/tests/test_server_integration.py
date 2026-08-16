@@ -32,7 +32,10 @@ async def _cleanup(driver: object, canonical_names: list[str]) -> None:
         )
 
 
-async def test_list_tools_expone_las_7_herramientas() -> None:
+async def test_list_tools_expone_las_herramientas_registradas() -> None:
+    """12 herramientas al cierre de v0.5 (Sprint 21): las 7 de Sprint 16
+    (lectura/escritura sobre datos propios) + `github.*`/`web.*` (Sprint 20,
+    lectura externa) + `obsidian.create_note` (Sprint 20 addendum, escritura)."""
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
@@ -45,6 +48,11 @@ async def test_list_tools_expone_las_7_herramientas() -> None:
         "docs.read_document",
         "memory.recall",
         "memory.store",
+        "github.search_repos",
+        "github.search_commits",
+        "web.search",
+        "web.open",
+        "obsidian.create_note",
     }
 
 

@@ -27,6 +27,20 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 — pospuesto en Sprint 20, retomado a pedido directo del usuario | [Sprint 20](sprints/sprint-20.md) (addendum, 2026-08-16), `packages/mcp-tools/.../obsidian.py` + `packages/core/src/kos_core/notes.py` |
 | Memoria se escribe pero nunca se lee — `/v1/query` no consulta memoria para responder (doc 04 §3 paso "Recuperación" nunca construido) | Hallazgo de la sesión 2026-08-15 (Sprints 13-15), no ligado a una retro puntual anterior | [Sprint 21](sprints/sprint-21.md), `memory` se suma al catálogo del Planner |
 | `kos.memory_learn` llamaba `kos_core.memory_learn` directo, no un agente real (doc 04 §1.1 lo prometía desde v0.4) | [Sprint 12](sprints/sprint-12.md), doc 04 §1.1 | [Sprint 21](sprints/sprint-21.md), `LearningAgent` vía MCP embebido en el worker |
+| `test_list_tools_expone_las_7_herramientas` (`packages/mcp-tools/tests/test_server_integration.py`) seguía fijado en las 7 tools de Sprint 16 — Sprint 20 sumó 5 tools más (`github.*`, `web.*`, `obsidian.create_note`) sin que nadie actualizara este test; fallaba en silencio porque los tests de integración no corren en el `pytest` por defecto (`-m 'not integration'`) | Auditoría de cierre de v0.5 (2026-08-16), no ligada a una retro puntual — arrastrada desde Sprint 20 sin que ninguna retro la haya notado | Auditoría 2026-08-16, test renombrado y actualizado a las 12 tools reales |
+
+## Auditoría de cierre v0.5 (2026-08-16) — hallazgos nuevos, sin sprint asignado
+
+Revisión puntual al cerrar v0.5: tests de integración completos, `pnpm test`/`pnpm lint` de
+`apps/web`, y lectura dirigida de las herramientas externas nuevas (Sprint 20). No es una retro de
+sprint — es una foto del estado real antes de planificar v0.6.
+
+| Ítem | Riesgo | Origen |
+|---|---|---|
+| `web.open` (`packages/mcp-tools/.../tools/web.py`) hace `httpx.get(url)` sobre cualquier URL que el Planner (LLM) le pase, sin allowlist/denylist ni bloqueo de rangos privados/loopback/metadata (`169.254.169.254`, `localhost`, `10.0.0.0/8`…) — SSRF clásico si un plan (generado por un LLM que puede ser influenciado por contenido externo vía `web.search`) apunta a un recurso interno | Medio — mitigado hoy por ser local-first de un solo usuario sin red interna sensible detrás de la API, pero se vuelve real si KOS corre en una red con otros servicios internos | Auditoría de cierre de v0.5, no bloqueaba la demo de Sprint 20 |
+| `Constraints.timeout_s` (default 30s, presupuesto de todo el plan, doc 03 §3) no tiene relación con el timeout de cada llamada HTTP a Ollama (`_DEFAULT_TIMEOUT = 120.0` en `kos_core/llm/ollama.py`, fijo, no lee `Constraints`) — un solo paso con una llamada a Ollama lenta puede tardar hasta 120s aunque el plan haya pedido un presupuesto de 30s; `executor.py` solo corta *entre* oleadas, nunca cancela una llamada en curso | Medio — ya documentado como limitación de diseño en `executor.py`, pero el desacople concreto de los dos timeouts (30s vs 120s) no estaba escrito en ningún lado | Auditoría de cierre de v0.5 |
+| `github.py`/`web.py` (Sprint 20) no tienen retry/backoff ni manejo explícito de rate limit — la API pública de GitHub sin `GITHUB_TOKEN` da 60 req/hora; agotarla tira un 403 que sube como `ToolError` genérico (el executor lo degrada bien, pero sin distinguir "temporalmente sin cuota" de "la tool está rota") | Bajo — no bloquea nada hoy (uso esporádico, un solo usuario), pero sería el primer cuello de botella real si el Research agent se usa seguido | Auditoría de cierre de v0.5 |
+| `web.open` no limita el tamaño de la descarga antes de truncar a `_OPEN_MAX_CHARS` — una URL que sirva un archivo grande se descarga entero a memoria antes de cortarse | Bajo — mismo perfil de riesgo que el punto anterior, autoinfligido en un entorno de un solo usuario | Auditoría de cierre de v0.5 |
 
 ## Sin sprint asignado todavía
 
