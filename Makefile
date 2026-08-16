@@ -35,8 +35,8 @@ install: ## Instala las dependencias (workspace uv + pnpm)
 dev: ## API + workers + beat + web + vigía de ahorro de recursos (Ctrl-C para salir; doc 09 §8)
 	$(MAKE) -j5 dev-api dev-workers dev-beat dev-web guardian-watch
 
-dev-api: ## Solo la API (http://localhost:8000)
-	uv run uvicorn kos_api.main:app --reload --port 8000
+dev-api: ## Solo la API (http://localhost:8000, o siguiente puerto si está en uso)
+	uv run python scripts/start_dev.py
 
 dev-workers: ## Solo los workers Celery
 	uv run celery -A kos_workers.celery_app worker --loglevel=INFO

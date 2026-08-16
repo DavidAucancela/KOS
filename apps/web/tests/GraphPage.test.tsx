@@ -17,6 +17,7 @@ function node(overrides: Partial<GraphNode> = {}): GraphNode {
     locked: false,
     created_at: null,
     updated_at: null,
+    prune_candidate: false,
     ...overrides,
   };
 }
@@ -33,6 +34,7 @@ function neighbor(overrides: Partial<GraphNeighbor> = {}): GraphNeighbor {
       extracted_by: "parser@v1",
       extracted_at: null,
       rejected: false,
+      prune_candidate: false,
     },
     node: node({ id: "node-2", canonical_name: "proyecto-kos", node_type: "Project" }),
     direction: "outgoing",

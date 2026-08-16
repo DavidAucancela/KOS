@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import (
 from kos_core.confidence import ALIAS_BOOST
 from kos_core.config import Settings
 from kos_core.schemas.documents import ParsedDocument
+from kos_core.schemas.plan import Plan
 
 EMBEDDING_DIM = 1024  # dimensión de bge-m3
 
@@ -120,6 +121,19 @@ memory_items_table = Table(
         UUID(as_uuid=True),
         ForeignKey("memory_items.memory_id", ondelete="SET NULL"),
     ),
+)
+
+plans_table = Table(
+    "plans",
+    metadata,
+    Column("plan_id", UUID(as_uuid=True), primary_key=True),
+    Column("query", Text, nullable=False),
+    Column("steps", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("degraded", Boolean, nullable=False, server_default=text("false")),
+    Column("degraded_reason", Text),
+    Column("elapsed_ms", Float, nullable=False, server_default=text("0")),
+    Column("trace_id", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
 
 
@@ -484,3 +498,45 @@ async def mark_superseded(
             .values(superseded_by=superseded_by)
         )
         return result.rowcount
+
+
+async def insert_plan(engine: AsyncEngine, plan: Plan) -> None:
+    """Persiste un `Plan` ya ejecutado (doc 03 §3 regla 3, Sprint 19) — escritura
+    síncrona desde `query_service.answer_query`, no un job en background: el
+    caller necesita `plan.plan_id` consultable de inmediato vía
+    `GET /v1/plans/{id}`, sin condición de carrera."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            plans_table.insert().values(
+                plan_id=plan.plan_id,
+                query=plan.query,
+                steps=[step.model_dump(mode="json") for step in plan.steps],
+                degraded=plan.degraded,
+                degraded_reason=plan.degraded_reason,
+                elapsed_ms=plan.elapsed_ms,
+                trace_id=plan.trace_id,
+                created_at=plan.created_at,
+            )
+        )
+
+
+_PLAN_COLUMNS = [
+    plans_table.c.plan_id,
+    plans_table.c.query,
+    plans_table.c.steps,
+    plans_table.c.degraded,
+    plans_table.c.degraded_reason,
+    plans_table.c.elapsed_ms,
+    plans_table.c.trace_id,
+    plans_table.c.created_at,
+]
+
+
+async def get_plan(engine: AsyncEngine, plan_id: uuid_lib.UUID) -> dict[str, Any] | None:
+    async with engine.connect() as conn:
+        row = (
+            (await conn.execute(select(*_PLAN_COLUMNS).where(plans_table.c.plan_id == plan_id)))
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None

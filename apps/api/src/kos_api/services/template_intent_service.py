@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import time
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -108,6 +109,9 @@ async def resolve_template_intent(
                 plan=plan,
                 degraded=False,
                 cost=Cost(ms=elapsed_ms),
+                # Sintético: la rama s0 no pasa por el Planner real, no hay
+                # fila en `plans` para este id (Sprint 19).
+                plan_id=str(uuid.uuid4()),
             )
 
     templates = await notes_service.list_templates(engine)
@@ -135,4 +139,5 @@ async def resolve_template_intent(
         plan=plan,
         degraded=False,
         cost=Cost(ms=elapsed_ms),
+        plan_id=str(uuid.uuid4()),
     )

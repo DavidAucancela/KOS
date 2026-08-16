@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from kos_core.schemas.agents import Constraints, Cost
+
+DegradedReason = Literal["llm_generation", "step_failure", "budget_timeout", "budget_max_steps"]
 
 
 class PlanStep(BaseModel):
@@ -45,11 +47,20 @@ class PlanRequest(BaseModel):
 
 
 class Plan(BaseModel):
-    """Plan generado (dinámico) o degradado (fijo, doc 03 §3 regla 4)."""
+    """Plan generado (dinámico) o degradado (fijo, doc 03 §3 regla 4).
+
+    `degraded_reason` (Sprint 19) distingue por qué se degradó sin cambiar el
+    significado de `degraded` (doc 03: "mismo campo, mismo significado") — es
+    un campo adicional para que la traza sea depurable, no un reemplazo.
+    Prioridad si coexisten varias causas: presupuesto > step_failure >
+    llm_generation (la causa más externa es la más útil de ver primero).
+    """
 
     plan_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     query: str
     steps: list[PlanStep]
     degraded: bool = False
+    degraded_reason: DegradedReason | None = None
+    elapsed_ms: float = 0.0
     trace_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

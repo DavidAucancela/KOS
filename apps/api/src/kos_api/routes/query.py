@@ -50,6 +50,7 @@ class QueryResponse(BaseModel):
     plan: list[query_service.PlanStep]
     degraded: bool
     trace_id: str
+    plan_id: str
 
 
 async def _handle_crear_nota(
@@ -85,6 +86,9 @@ async def _handle_crear_nota(
         ],
         degraded=False,
         trace_id=trace_id,
+        # Sintético: este comando no pasa por el Planner real, no hay fila en
+        # `plans` que consultar vía GET /v1/plans/{id} para este id.
+        plan_id=str(uuid.uuid4()),
     )
 
 
@@ -149,6 +153,9 @@ async def query(
             plan=result.plan,
             degraded=result.degraded,
             trace_id=trace_id,
+            # Sintético (generado en template_intent_service): la rama s0 no
+            # pasa por el Planner real, no hay fila en `plans` para este id.
+            plan_id=result.plan_id,
         )
 
     planner = Planner(
@@ -163,6 +170,7 @@ async def query(
             query=body.query,
             limit=body.limit,
             trace_id=trace_id,
+            engine=engine,
             mode=body.mode,
         )
     except query_service.SynthesisError as exc:
@@ -189,4 +197,5 @@ async def query(
         plan=result.plan,
         degraded=result.degraded,
         trace_id=trace_id,
+        plan_id=result.plan_id,
     )

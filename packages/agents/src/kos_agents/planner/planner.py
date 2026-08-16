@@ -156,9 +156,25 @@ class Planner:
 
     async def __call__(self, request: PlanRequest) -> tuple[Plan, dict[str, AgentResponse]]:
         steps, degraded = await self._generate_steps(request)
+        degraded_reason: str | None = "llm_generation" if degraded else None
+
+        # Presupuesto de pasos (doc 03 §3 regla 4, Sprint 19): un plan dinámico
+        # con más pasos de los permitidos degrada al plan fijo en vez de
+        # ejecutarse tal cual — misma red de seguridad que un fallo de
+        # generación, no un podador nuevo.
+        max_steps = request.constraints.max_steps
+        if max_steps is not None and len(steps) > max_steps:
+            steps = _fixed_plan_steps(request.query, mode=request.mode, limit=request.limit)
+            degraded = True
+            degraded_reason = "budget_max_steps"
 
         responses = await execute_plan(
-            steps, self._registry, query=request.query, trace_id=request.trace_id
+            steps,
+            self._registry,
+            query=request.query,
+            trace_id=request.trace_id,
+            constraints=request.constraints,
+            timeout_s=request.constraints.timeout_s,
         )
 
         enriched: list[PlanStep] = []
@@ -177,16 +193,32 @@ class Planner:
                 )
             )
 
+        # Presupuesto de tiempo excedido (Sprint 19): quedaron pasos sin
+        # correr porque `execute_plan` cortó al tope de una oleada, no porque
+        # una dependencia nunca resolviera (eso ya lo cubre `step_degraded`
+        # más abajo vía `outputs["degraded"]` de cada agente).
+        budget_timeout = len(responses) < len(steps)
+
         # Un paso individual (ej. retrieval degradando a léxica por fallo del
         # embedder, doc 06) también cuenta como plan degradado — no solo el
         # fallback de generación de este Planner.
         step_degraded = any(bool(r.outputs.get("degraded", False)) for r in responses.values())
 
+        # Prioridad si coexisten varias causas: presupuesto > step_failure >
+        # llm_generation — la causa más externa es la más útil al inspeccionar.
+        if budget_timeout:
+            degraded_reason = "budget_timeout"
+        elif degraded_reason == "budget_max_steps":
+            pass
+        elif step_degraded:
+            degraded_reason = "step_failure"
+
         plan = Plan(
             plan_id=uuid.uuid4(),
             query=request.query,
             steps=enriched,
-            degraded=degraded or step_degraded,
+            degraded=degraded or step_degraded or budget_timeout,
+            degraded_reason=degraded_reason,
             trace_id=request.trace_id,
         )
         return plan, responses

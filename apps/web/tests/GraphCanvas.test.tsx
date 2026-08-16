@@ -17,6 +17,7 @@ function node(overrides: Partial<GraphNode> = {}): GraphNode {
     locked: false,
     created_at: null,
     updated_at: null,
+    prune_candidate: false,
     ...overrides,
   };
 }
@@ -32,6 +33,7 @@ function relation(overrides: Partial<GraphRelation> = {}): GraphRelation {
     extracted_by: "parser@v1",
     extracted_at: null,
     rejected: false,
+    prune_candidate: false,
     ...overrides,
   };
 }

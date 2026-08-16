@@ -8,11 +8,21 @@ evidencia fusionada (concatenada) y la confidence (máxima) de los pasos de los
 que depende — ni el LLM ni el plan fijo tienen que construir eso a mano. El
 paso `graph` (Sprint 18: catálogo acotado a `graph.query`, ver `planner.py`)
 recibe `operation="query"` forzado, sin que el LLM tenga que saberlo.
+
+Sprint 19: `timeout_s` (presupuesto de tiempo por plan, doc 03 §3 regla 4)
+corta al final de una oleada en vez de cancelar tareas en curso — las
+respuestas de oleadas ya completadas no se pierden, y los pasos de
+`remaining` que no llegan a correr simplemente no aparecen en el resultado
+(mismo comportamiento que una dependencia nunca resuelta). `constraints`
+(antes siempre `Constraints()` por defecto — bug de deuda, `Constraints` se
+pasaban en el contrato pero nunca se exigían) ahora se deriva de
+`PlanRequest.constraints` y se propaga a cada `AgentRequest`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from kos_agents.base import Agent
@@ -50,15 +60,25 @@ async def execute_plan(
     *,
     query: str,
     trace_id: str,
+    constraints: Constraints | None = None,
+    timeout_s: float | None = None,
 ) -> dict[str, AgentResponse]:
     """Corre `steps` respetando `depends_on`, en oleadas paralelas. Un paso
     cuyo `agent` no está en `registry`, o cuya dependencia nunca resuelve
     (ciclo/id inexistente — ya debería haberse descartado en la validación del
-    Planner), simplemente no aparece en el resultado."""
+    Planner), simplemente no aparece en el resultado.
+
+    Si `timeout_s` no es `None`, se chequea al tope de cada oleada (no dentro
+    de una en curso): si ya se superó el presupuesto, se corta sin arrancar la
+    siguiente oleada — las respuestas ya obtenidas se conservan."""
     responses: dict[str, AgentResponse] = {}
     remaining = list(steps)
+    step_constraints = constraints if constraints is not None else Constraints()
+    started = time.monotonic()
 
     while remaining:
+        if timeout_s is not None and time.monotonic() - started > timeout_s:
+            break
         ready = [step for step in remaining if set(step.depends_on) <= responses.keys()]
         if not ready:
             break
@@ -70,7 +90,7 @@ async def execute_plan(
                 return None
             inputs = _step_inputs(step, responses, query=query)
             request = AgentRequest(
-                task=step.task, inputs=inputs, constraints=Constraints(), trace_id=trace_id
+                task=step.task, inputs=inputs, constraints=step_constraints, trace_id=trace_id
             )
             if step.agent == "writing":
                 # La síntesis SÍ debe propagar su fallo (mapeado a 503 por

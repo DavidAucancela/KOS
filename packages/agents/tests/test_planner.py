@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from kos_agents.planner.planner import Planner, parse_plan_response
-from kos_core.schemas.agents import AgentRequest, AgentResponse
+from kos_core.schemas.agents import AgentRequest, AgentResponse, Constraints
 from kos_core.schemas.plan import PlanRequest
 
 
@@ -110,6 +111,7 @@ async def test_planner_usa_el_plan_dinamico_si_valida() -> None:
     )
 
     assert plan.degraded is False
+    assert plan.degraded_reason is None
     assert [s.id for s in plan.steps] == ["s1", "s2", "s3"]
     assert set(responses.keys()) == {"s1", "s2", "s3"}
     assert llm.calls == 1
@@ -123,6 +125,7 @@ async def test_planner_degrada_al_plan_fijo_tras_dos_fallos() -> None:
     plan, responses = await planner(PlanRequest(query="¿qué es KOS?", trace_id="trace-2"))
 
     assert plan.degraded is True
+    assert plan.degraded_reason == "llm_generation"
     assert [s.agent for s in plan.steps] == ["retrieval", "writing"]
     assert set(responses.keys()) == {"s1", "s2"}
     assert llm.calls == 2
@@ -149,3 +152,79 @@ async def test_planner_reintenta_una_vez_con_el_error_antes_de_degradar() -> Non
 
     assert plan.degraded is False
     assert llm.calls == 2
+
+
+async def test_max_steps_excedido_degrada_al_plan_fijo() -> None:
+    """Sprint 19: un plan dinámico con más pasos de los permitidos por
+    `constraints.max_steps` no se ejecuta tal cual — cae al plan fijo, misma
+    red de seguridad que un fallo de generación."""
+    plan_json = json.dumps(
+        [
+            {"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},
+            {
+                "id": "s2",
+                "agent": "graph",
+                "task": "grafo",
+                "inputs": {"template": "most_connected"},
+                "depends_on": [],
+            },
+            {
+                "id": "s3",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1", "s2"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM([plan_json])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    planner = Planner(llm=llm, retrieval_agent=retrieval, graph_agent=graph, writing_agent=writing)
+
+    plan, responses = await planner(
+        PlanRequest(query="x", trace_id="trace-4", constraints=Constraints(max_steps=2))
+    )
+
+    assert plan.degraded is True
+    assert plan.degraded_reason == "budget_max_steps"
+    assert [s.agent for s in plan.steps] == ["retrieval", "writing"]
+    assert set(responses.keys()) == {"s1", "s2"}
+
+
+async def test_timeout_s_del_plan_degrada_con_motivo_observable() -> None:
+    """Sprint 19: un plan que se corta por presupuesto de tiempo queda
+    marcado `degraded=True` con `degraded_reason="budget_timeout"`, distinto
+    de una degradación por fallo de generación o de un paso individual."""
+
+    class _SlowRetrieval:
+        async def __call__(self, request: AgentRequest) -> AgentResponse:
+            await asyncio.sleep(0.05)
+            return AgentResponse(outputs={}, evidence=[], confidence=0.5, trace_id=request.trace_id)
+
+    plan_json = json.dumps(
+        [
+            {"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},
+            {
+                "id": "s2",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM([plan_json])
+    planner = Planner(
+        llm=llm,
+        retrieval_agent=_SlowRetrieval(),
+        graph_agent=_FakeAgent("graph"),
+        writing_agent=_FakeAgent("writing"),
+    )
+
+    plan, responses = await planner(
+        PlanRequest(query="x", trace_id="trace-5", constraints=Constraints(timeout_s=0.01))
+    )
+
+    assert plan.degraded is True
+    assert plan.degraded_reason == "budget_timeout"
+    assert set(responses.keys()) == {"s1"}

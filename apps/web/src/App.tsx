@@ -1,23 +1,27 @@
 import { useState } from "react";
-import { Activity, MessagesSquare, Network } from "lucide-react";
+import { Activity, ListTree, MessagesSquare, Network } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ChatPage } from "./features/chat/ChatPage";
 import { GraphPage } from "./features/graph/GraphPage";
 import { StatusPage } from "./features/status/StatusPage";
+import { TracesPage } from "./features/traces/TracesPage";
 
-// Shell de la app: semilla del layout IDE del doc 10 §4. Chat, Grafo y Estado;
-// las trazas llegan en fases posteriores.
-type View = "chat" | "graph" | "status";
+// Shell de la app: semilla del layout IDE del doc 10 §4. Chat, Grafo, Trazas
+// (Sprint 19) y Estado.
+type View = "chat" | "graph" | "traces" | "status";
 
 const NAV: { id: View; label: string; icon: typeof Activity }[] = [
   { id: "chat", label: "Chat", icon: MessagesSquare },
   { id: "graph", label: "Grafo", icon: Network },
+  { id: "traces", label: "Trazas", icon: ListTree },
   { id: "status", label: "Estado", icon: Activity },
 ];
 
 export default function App() {
   const [view, setView] = useState<View>("chat");
+  // Sprint 19: "ver plan" en el chat navega acá con un plan_id preseleccionado.
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   return (
     <div className="flex h-screen">
@@ -41,8 +45,16 @@ export default function App() {
       </nav>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {view === "chat" && <ChatPage />}
+        {view === "chat" && (
+          <ChatPage
+            onViewPlan={(planId) => {
+              setSelectedPlanId(planId);
+              setView("traces");
+            }}
+          />
+        )}
         {view === "graph" && <GraphPage />}
+        {view === "traces" && <TracesPage initialPlanId={selectedPlanId} />}
         {view === "status" && <StatusPage />}
       </div>
     </div>
