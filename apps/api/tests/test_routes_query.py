@@ -60,8 +60,19 @@ class _FailingEmbedder:
         return None
 
 
+_FIXED_PLAN_JSON = (
+    '[{"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []},'
+    ' {"id": "s2", "agent": "writing", "task": "redactar", "inputs": {}, "depends_on": ["s1"]}]'
+)
+
+
 class _EchoLLM:
-    """Ecoa el contexto recibido: permite verificar que la síntesis lo consume."""
+    """Ecoa el contexto recibido: permite verificar que la síntesis lo consume.
+
+    Sprint 18: el mismo cliente sirve tanto al Planner (pide el plan en JSON)
+    como a `WritingAgent` (síntesis) — se distingue por el `system` prompt.
+    `calls` cuenta solo las llamadas de síntesis, para no romper el sentido
+    original de estas aserciones ("el LLM no se llama para alucinar")."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -74,6 +85,8 @@ class _EchoLLM:
         temperature: float = 0.2,
         max_tokens: int | None = None,
     ) -> str:
+        if system is not None and "planner de KOS" in system:
+            return _FIXED_PLAN_JSON
         self.calls += 1
         return f"Respuesta con citas [1]. (prompt visto: {len(prompt)} chars)"
 
@@ -253,8 +266,11 @@ def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
             "id": "s0",
             "agent": "notes",
             "task": "crear nota desde plantilla",
+            "inputs": {},
             "depends_on": [],
             "evidence_count": None,
+            "confidence": None,
+            "cost": None,
         }
     ]
     assert llm.calls == 0, "el comando no debe pasar por retrieval/síntesis"
@@ -348,8 +364,11 @@ def test_pregunta_por_plantilla_no_fabrica_responde_sin_llm(
             "id": "s0",
             "agent": "intent",
             "task": "detectar intención de creación de nota",
+            "inputs": {},
             "depends_on": [],
             "evidence_count": None,
+            "confidence": None,
+            "cost": None,
         }
     ]
     [ev] = body["evidence"]

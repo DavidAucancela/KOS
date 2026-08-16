@@ -183,15 +183,23 @@ packages/connectors/
 ```
 packages/agents/
 ├── src/kos_agents/
-│   ├── base.py                   # Agent (Protocol) sobre AgentRequest/Response
-│   ├── planner/                  #   generación y ejecución de planes (doc 03)
-│   │   ├── planner.py · plan.py · executor.py
-│   ├── retrieval.py · graph.py · memory.py
-│   ├── research.py · writing.py · learning.py
+│   ├── base.py                   # Agent/ToolCaller (Protocol) sobre AgentRequest/Response
+│   ├── planner/                  #   generación y ejecución de planes (doc 03), Sprint 18
+│   │   └── planner.py · executor.py
+│   ├── retrieval.py · graph.py · memory.py     # Sprint 17
+│   ├── writing.py                              # Sprint 18
+│   ├── research.py                             # Sprint 20
+│   └── learning.py                             # Sprint 21
 └── tests/
 ```
 
 Se crea vacío salvo `base.py` (los contratos se usan desde el Sprint 4 en el pipeline fijo).
+
+> **Corrección (Sprint 18, 2026-08-15):** `Plan`/`PlanStep`/`PlanRequest` no viven en
+> `planner/plan.py` como preveía el árbol original — cruzan el límite `kos_agents` ↔ `apps/api`
+> (la API también arma/persiste planes, doc 06), así que terminaron en
+> `packages/core/src/kos_core/schemas/plan.py`, mismo criterio que cualquier tipo que cruza una
+> frontera de paquete (CLAUDE.md, regla 2). `planner/` solo contiene la lógica, no el esquema.
 
 ## 8. `packages/mcp-tools` — Fase 3+
 

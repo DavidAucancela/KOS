@@ -269,7 +269,7 @@ semántica nueva). Retro de cierre de v0.4.
 |---|---|---|
 | 16 | Servidor MCP real: 7 herramientas de lectura/escritura envolviendo lo ya existente | ✅ Cerrado 2026-08-15 |
 | 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
-| 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | 🟡 Planificado |
+| 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
 | 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | 🟡 Planificado |
 | 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
 | 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
@@ -324,6 +324,30 @@ de forma standalone (`scripts/demo_sprint17.py`).
 > Verificado con `POST /v1/query` real (servidor real, no `TestClient`) y
 > `scripts/demo_sprint17.py`. 271 tests unitarios + 30 de integración, ruff, `mypy --strict`
 > (core) e import-linter limpios. Retro completa en `docs/sprints/sprint-17.md`.
+
+### Sprint 18 — "El planner decide"
+
+**Objetivo:** Planner real (LLM genera el plan) reemplaza el pipeline fijo de `/v1/query`,
+eligiendo entre `RetrievalAgent`/`GraphAgent` (Memory queda para Sprint 21), ejecutando en
+paralelo los pasos sin dependencias entre sí, fusionando evidencia y delegando la síntesis a un
+nuevo `WritingAgent`. Si la generación del plan falla, degrada al pipeline fijo de Sprint 17.
+
+**Demo:** una pregunta que se beneficia de contexto del grafo genera un plan con pasos de
+retrieval y grafo; una pregunta factual reduce a 2 pasos equivalentes al pipeline fijo (ahora
+decidido por el LLM); forzar un fallo de generación demuestra la caída a `degraded=true` sin
+romper la respuesta.
+
+> **Sprint 18 cerrado 2026-08-15**: `packages/core/src/kos_core/schemas/plan.py` (`Plan`,
+> `PlanRequest`, `PlanStep` — el tipo que doc 03 §5 nombraba desde el principio pero nunca se
+> implementó) + `packages/agents/src/kos_agents/{writing.py,planner/}` (`Planner` con parseo
+> tolerante de JSON — mismo patrón que `s7_entities`/`s8_relations` — y `execute_plan` con
+> ejecución paralela por dependencias). Dos bugs encontrados y arreglados probando contra infra
+> real: evidencia de grafo sin `quote` citable (el LLM veía "evidencia" vacía), y un paso de
+> evidencia que falla (LLM propuso un `node_type` inválido) tumbaba toda la request con 500 en vez
+> de degradar — ver `docs/deuda-tecnica.md` y la retro. Verificado con `scripts/demo_sprint18.py`
+> contra infra real (3 escenarios: plan con grafo, plan factual, fallback). 287 tests unitarios +
+> 30 de integración, ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
+> `docs/sprints/sprint-18.md`.
 
 ## Gestión
 

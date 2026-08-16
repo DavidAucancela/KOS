@@ -1,12 +1,9 @@
 """GraphAgent (doc 03 §2): opera el grafo de conocimiento vía las
 herramientas MCP `graph.get_node`/`graph.find_path`/`graph.query`.
 
-Construido en Sprint 17, standalone — no conectado a `/v1/query` todavía:
-decidir CUÁNDO una consulta necesita contexto del grafo es trabajo del
-Planner real (Sprint 18); conectar esto ahora con una heurística casera
-(ej. "buscar entidades mencionadas en el título de la evidencia") se tiraría
-apenas el Planner exista. Este agente ya es real y testeado, listo para que
-el Planner lo invoque cuando corresponda."""
+Construido en Sprint 17, standalone; Sprint 18 lo conecta al `Planner` real
+(la decisión de CUÁNDO usar el grafo ya no es una heurística casera, la toma
+el LLM al generar el plan)."""
 
 from __future__ import annotations
 
@@ -20,9 +17,16 @@ _OPERATIONS = ("get_node", "find_path", "query")
 
 
 def _node_evidence(node: dict[str, Any]) -> EvidenceRef:
+    """`quote` (Sprint 18, bug encontrado probando el Planner contra infra
+    real): sin esto, `WritingAgent._build_context` arma una cita vacía para
+    cada nodo y el LLM concluye "no hay evidencia" pese a que sí la hay."""
+    name = node.get("name") or node.get("canonical_name") or "?"
+    node_type = node.get("node_type")
+    quote = f"{name} ({node_type})" if node_type else str(name)
     return EvidenceRef(
         node_id=node["id"],
-        title=node.get("name") or node.get("canonical_name"),
+        title=name,
+        quote=quote,
         score=node.get("confidence"),
     )
 

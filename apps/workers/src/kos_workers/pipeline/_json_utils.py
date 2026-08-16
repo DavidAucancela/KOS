@@ -1,14 +1,8 @@
-"""Utilidad compartida por las etapas que piden JSON al LLM (s7, s8): los modelos
-locales (ej. llama3.2) suelen envolver la respuesta en fences de markdown
-(```` ```json ... ``` ````) aunque el prompt pida "SOLO JSON"."""
+"""Reexporta `kos_core.json_utils` (promovido a core en Sprint 18: `Planner`
+en `packages/agents` también lo necesita, no solo s7/s8 acá)."""
 
 from __future__ import annotations
 
-import re
+from kos_core.json_utils import strip_code_fence
 
-_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-
-
-def strip_code_fence(text: str) -> str:
-    """Quita los fences ```/```json de inicio y fin, si están; deja el resto intacto."""
-    return _CODE_FENCE_RE.sub("", text.strip()).strip()
+__all__ = ["strip_code_fence"]

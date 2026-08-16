@@ -59,7 +59,17 @@ Reglas:
 1. Los pasos sin dependencias entre sí se ejecutan **en paralelo**.
 2. Todo paso devuelve **evidencia** (doc_ids, node_ids, memory_ids); la respuesta final solo puede citar evidencia recogida.
 3. El plan completo se persiste con su traza — es la unidad de depuración y de evaluación de calidad.
-4. Presupuestos por plan (tiempo, tokens, pasos); si se exceden, el planner degrada a un plan más simple en lugar de fallar.
+4. Presupuestos por plan (tiempo, tokens, pasos); si se exceden, el planner degrada a un plan más
+   simple en lugar de fallar.
+
+   > **Algoritmo concreto (Sprint 18, decidido 2026-08-15):** si la generación del plan falla o el
+   > JSON no valida contra `Plan`/`PlanStep` (`kos_core.schemas.plan`) tras un reintento (con el
+   > error de validación adjunto al prompt), el Planner cae al plan fijo retrieval→writing de
+   > Sprint 17 — la misma ruta que ya existía antes de este sprint, ahora como red de seguridad en
+   > vez de único camino. Se marca `Plan.degraded = true`: mismo campo y mismo significado que
+   > `QueryResult.degraded` ya usaba desde Sprint 4 para la degradación léxica ("no pudo hacer lo
+   > que hubiera preferido, pero respondió con lo que sí pudo"). Sprint 19 extiende esta misma
+   > señal a los presupuestos de tiempo/pasos por ejecución (no solo a la generación del plan).
 
 ## 4. Coordinación mediante MCP
 

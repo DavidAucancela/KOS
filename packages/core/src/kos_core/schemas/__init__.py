@@ -15,6 +15,7 @@ from kos_core.schemas.documents import (
     make_doc_id,
 )
 from kos_core.schemas.entities import EntityCandidate, RelationCandidate
+from kos_core.schemas.plan import Plan, PlanRequest, PlanStep
 
 __all__ = [
     "AgentRequest",
@@ -26,6 +27,9 @@ __all__ = [
     "EntityCandidate",
     "EvidenceRef",
     "ParsedDocument",
+    "Plan",
+    "PlanRequest",
+    "PlanStep",
     "RawDocument",
     "RelationCandidate",
     "make_doc_id",

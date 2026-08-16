@@ -13,7 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from kos_agents.graph import GraphAgent
+from kos_agents.planner.planner import Planner
 from kos_agents.retrieval import RetrievalAgent
+from kos_agents.writing import WritingAgent
 from kos_api.deps import postgres_engine, settings_dep, tool_caller
 from kos_api.services import memory_service, notes_service, query_service, template_intent_service
 from kos_api.services.intent_service import detect_template_intent
@@ -148,10 +151,15 @@ async def query(
             trace_id=trace_id,
         )
 
+    planner = Planner(
+        llm=request.app.state.llm_client,
+        retrieval_agent=RetrievalAgent(caller),
+        graph_agent=GraphAgent(caller),
+        writing_agent=WritingAgent(request.app.state.llm_client),
+    )
     try:
         result = await query_service.answer_query(
-            retrieval_agent=RetrievalAgent(caller),
-            llm=request.app.state.llm_client,
+            planner=planner,
             query=body.query,
             limit=body.limit,
             trace_id=trace_id,
