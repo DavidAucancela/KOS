@@ -29,7 +29,13 @@ class EvidenceRef(BaseModel):
 
 
 class Constraints(BaseModel):
-    """Presupuestos de un paso o plan (doc 03 §3): si se exceden, se degrada."""
+    """Presupuestos de un paso o plan (doc 03 §3): si se exceden, se degrada.
+
+    Sprint 19 exige `timeout_s`/`max_steps` de verdad (`kos_agents.planner`).
+    `max_tokens` sigue sin fuente real de conteo (ningún agente puebla
+    `Cost.tokens` desde Ollama todavía) — se acepta pero se ignora hasta que
+    exista esa fuente; no-op documentado, no deuda oculta.
+    """
 
     timeout_s: float = 30.0
     max_tokens: int | None = None

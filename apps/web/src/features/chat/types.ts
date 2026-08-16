@@ -38,6 +38,7 @@ export interface QueryResponse {
   plan: PlanStep[];
   degraded: boolean;
   trace_id: string;
+  plan_id: string;
 }
 
 // Lectura del documento original para el visor de citas.

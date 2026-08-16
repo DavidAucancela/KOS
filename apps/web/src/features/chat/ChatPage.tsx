@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { AlertTriangle, Quote, Send } from "lucide-react";
+import { AlertTriangle, ListTree, Quote, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,9 +88,11 @@ function CitationCard({
 function AssistantTurn({
   turn,
   onCite,
+  onViewPlan,
 }: {
   turn: ChatTurn;
   onCite: (evidence: Evidence) => void;
+  onViewPlan: (planId: string) => void;
 }) {
   if (turn.pending) {
     return <p className="text-muted-foreground text-sm">Pensando…</p>;
@@ -104,7 +106,7 @@ function AssistantTurn({
   }
   if (!turn.response) return null;
 
-  const { answer, evidence, confidence, degraded } = turn.response;
+  const { answer, evidence, confidence, degraded, plan_id } = turn.response;
   return (
     <div className="space-y-3">
       {degraded && (
@@ -149,11 +151,21 @@ function AssistantTurn({
           Confianza: {(confidence * 100).toFixed(0)}%
         </p>
       )}
+      {plan_id && (
+        <button
+          type="button"
+          onClick={() => onViewPlan(plan_id)}
+          className="text-muted-foreground hover:text-primary flex items-center gap-1 text-xs"
+        >
+          <ListTree className="size-3" aria-hidden />
+          Ver plan
+        </button>
+      )}
     </div>
   );
 }
 
-export function ChatPage() {
+export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void }) {
   const { turns, busy, ask } = useChat();
   const [draft, setDraft] = useState("");
   const [citation, setCitation] = useState<CitationTarget | null>(null);
@@ -182,7 +194,7 @@ export function ChatPage() {
               <p className="ml-auto w-fit max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm">
                 {turn.question}
               </p>
-              <AssistantTurn turn={turn} onCite={openCitation} />
+              <AssistantTurn turn={turn} onCite={openCitation} onViewPlan={onViewPlan} />
             </div>
           ))}
         </div>

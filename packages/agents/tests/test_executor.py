@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from kos_agents.planner.executor import execute_plan
-from kos_core.schemas.agents import AgentRequest, AgentResponse
+from kos_core.schemas.agents import AgentRequest, AgentResponse, Constraints
 from kos_core.schemas.plan import PlanStep
 
 
@@ -106,6 +107,46 @@ async def test_un_paso_de_evidencia_que_falla_degrada_en_vez_de_propagar() -> No
 
     assert responses["s1"].evidence == []
     assert responses["s1"].outputs["degraded"] is True
+
+
+async def test_timeout_s_corta_al_tope_de_oleada_sin_perder_respuestas_previas() -> None:
+    """Sprint 19: presupuesto de tiempo por plan. Una oleada lenta que ya
+    completó no se pierde; la siguiente oleada no arranca si ya se pasó el
+    presupuesto."""
+
+    class _SlowAgent:
+        async def __call__(self, request: AgentRequest) -> AgentResponse:
+            await asyncio.sleep(0.05)
+            return AgentResponse(outputs={}, evidence=[], confidence=0.5, trace_id=request.trace_id)
+
+    class _NeverReached:
+        async def __call__(self, request: AgentRequest) -> AgentResponse:
+            raise AssertionError("no debía correr: el presupuesto ya se agotó")
+
+    registry: dict[str, Any] = {"retrieval": _SlowAgent(), "writing": _NeverReached()}
+    steps = [
+        PlanStep(id="s1", agent="retrieval", task="buscar", inputs={}),
+        PlanStep(id="s2", agent="writing", task="redactar", depends_on=["s1"]),
+    ]
+
+    responses = await execute_plan(steps, registry, query="x", trace_id="trace-1", timeout_s=0.01)
+
+    assert set(responses.keys()) == {"s1"}
+    assert "s2" not in responses
+
+
+async def test_constraints_del_plan_se_propagan_a_cada_agente() -> None:
+    """Sprint 19: antes `AgentRequest` siempre usaba `Constraints()` por
+    defecto — bug de deuda (se pasaban pero no se exigían)."""
+    calls: list[tuple[str, AgentRequest]] = []
+    registry = {"retrieval": _FakeAgent("retrieval", calls)}
+    steps = [PlanStep(id="s1", agent="retrieval", task="buscar", inputs={})]
+    constraints = Constraints(timeout_s=5.0, max_steps=3)
+
+    await execute_plan(steps, registry, query="x", trace_id="trace-1", constraints=constraints)
+
+    [(_, request)] = calls
+    assert request.constraints == constraints
 
 
 async def test_fallo_del_paso_writing_se_propaga() -> None:

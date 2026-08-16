@@ -27,6 +27,7 @@ function queryResponse(overrides: Partial<QueryResponse> = {}): QueryResponse {
     plan: [],
     degraded: false,
     trace_id: "trace-1",
+    plan_id: "plan-1",
     ...overrides,
   };
 }
@@ -53,7 +54,7 @@ describe("ChatPage", () => {
   it("muestra la respuesta y sus dos citas", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(queryResponse())));
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     expect(await screen.findByText(/Docker es contenedores/)).toBeInTheDocument();
@@ -65,7 +66,7 @@ describe("ChatPage", () => {
   it("renderiza los marcadores [1] y [2] como elementos interactivos", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(queryResponse())));
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     expect(await screen.findByLabelText("Abrir cita 1")).toBeInTheDocument();
@@ -78,7 +79,7 @@ describe("ChatPage", () => {
       vi.fn().mockResolvedValue(jsonResponse(queryResponse({ degraded: true }))),
     );
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     expect(await screen.findByText(/Respuesta degradada/)).toBeInTheDocument();
@@ -96,7 +97,7 @@ describe("ChatPage", () => {
       ),
     );
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     expect(await screen.findByText("Plantilla")).toBeInTheDocument();
@@ -108,7 +109,7 @@ describe("ChatPage", () => {
       vi.fn().mockResolvedValue(jsonResponse(queryResponse({ confidence: 0.2 }))),
     );
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     expect(await screen.findByText(/Confianza baja \(20%\)/)).toBeInTheDocument();
@@ -117,7 +118,7 @@ describe("ChatPage", () => {
   it("muestra un mensaje de error si el modelo no está disponible (503)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "sin ollama" }, 503)));
 
-    render(<ChatPage />);
+    render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
     await waitFor(() =>

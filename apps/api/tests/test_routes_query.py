@@ -129,6 +129,7 @@ def test_con_hits_devuelve_respuesta_evidencia_y_plan(monkeypatch: pytest.Monkey
     assert [step["id"] for step in body["plan"]] == ["s1", "s2"]
     assert body["plan"][0]["evidence_count"] == 1
     assert body["trace_id"]
+    assert uuid.UUID(body["plan_id"])
 
 
 def test_respuesta_exitosa_encola_memoria_episodica(
