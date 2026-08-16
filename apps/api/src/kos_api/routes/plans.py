@@ -22,6 +22,7 @@ class PlanOut(BaseModel):
     plan_id: uuid.UUID
     query: str
     steps: list[PlanStep]
+    post: list[PlanStep]
     degraded: bool
     degraded_reason: str | None
     elapsed_ms: float

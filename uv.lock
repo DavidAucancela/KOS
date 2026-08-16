@@ -895,15 +895,19 @@ version = "0.1.0"
 source = { editable = "apps/workers" }
 dependencies = [
     { name = "celery", extra = ["redis"] },
+    { name = "kos-agents" },
     { name = "kos-connectors" },
     { name = "kos-core" },
+    { name = "kos-mcp-tools" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.5" },
+    { name = "kos-agents", editable = "packages/agents" },
     { name = "kos-connectors", editable = "packages/connectors" },
     { name = "kos-core", editable = "packages/core" },
+    { name = "kos-mcp-tools", editable = "packages/mcp-tools" },
 ]
 
 [[package]]

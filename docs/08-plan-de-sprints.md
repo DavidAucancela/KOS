@@ -272,7 +272,7 @@ semántica nueva). Retro de cierre de v0.4.
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
 | 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | ✅ Cerrado 2026-08-16 |
 | 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | ✅ Cerrado 2026-08-16 (`obsidian.create_note` a MCP: pospuesto en el sprint, retomado el mismo día vía addendum) |
-| 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
+| 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | ✅ Cerrado 2026-08-16 |
 
 Estimación original de doc 07 (6-8 semanas): revisada a 6 sprints (~12 semanas) al planificar
 Sprint 16 — no había ni una línea de código de MCP/agentes, la estimación asumía más base
@@ -468,6 +468,17 @@ la memoria empieza a leerse en `/v1/query`, no solo a escribirse.
 tema ya conversado) genera un plan con un paso `memory` real, visible en `GET /v1/plans/{id}`;
 tras responder, `GET /v1/memory` muestra una memoria episódica nueva creada por el `LearningAgent`
 real (no por la llamada directa a storage de antes) — verificado contra infra real, sin mocks.
+
+> **Sprint 21 cerrado 2026-08-16 — v0.5 cerrado**: `Plan.post` (migración `0008_plan_post.py`) +
+> `LearningAgent` (reusa `MemoryAgent.store`, fuerza `confirm=true`) + `Planner` suma `memory` al
+> catálogo y arma `Plan.post` de forma declarativa + `kos.memory_learn` (worker) pasa a llamar al
+> `LearningAgent` real vía un servidor MCP embebido, en vez de `kos_core.memory_learn` directo.
+> Verificado con `scripts/demo_sprint21.py` contra infra real (API + worker de Celery real, sin
+> mocks): un `POST /v1/query` real dejó `Plan.post` declarado y, tras esperar al worker real
+> (~13s, latencia normal de Ollama), una memoria episódica nueva visible en `GET /v1/memory`; una
+> pregunta sobre "conversaciones previas" hizo que el LLM local eligiera `memory` por su cuenta
+> como paso de evidencia. 320 tests unitarios (14 nuevos), ruff, `mypy --strict` (core) e
+> import-linter limpios. Retro completa en `docs/sprints/sprint-21.md`.
 
 ## Gestión
 

@@ -54,11 +54,18 @@ class Plan(BaseModel):
     un campo adicional para que la traza sea depurable, no un reemplazo.
     Prioridad si coexisten varias causas: presupuesto > step_failure >
     llm_generation (la causa más externa es la más útil de ver primero).
+
+    `post` (Sprint 21, doc 03 §3): pasos que corren después de responder, sin
+    bloquear ni esperarse (`kos.memory_learn`, Celery). Es un registro
+    declarativo de que el post-paso se disparó, no su resultado — a
+    diferencia de `steps`, nunca tiene `evidence_count`/`confidence`/`cost`
+    poblados porque `execute_plan` no los ejecuta.
     """
 
     plan_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     query: str
     steps: list[PlanStep]
+    post: list[PlanStep] = Field(default_factory=list)
     degraded: bool = False
     degraded_reason: DegradedReason | None = None
     elapsed_ms: float = 0.0
