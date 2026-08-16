@@ -271,7 +271,7 @@ semántica nueva). Retro de cierre de v0.4.
 | 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
 | 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | ✅ Cerrado 2026-08-16 |
-| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | ✅ Cerrado 2026-08-16 (alcance revisado: la migración de `obsidian.create_note` se pospuso) |
+| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | ✅ Cerrado 2026-08-16 (`obsidian.create_note` a MCP: pospuesto en el sprint, retomado el mismo día vía addendum) |
 | 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
 
 Estimación original de doc 07 (6-8 semanas): revisada a 6 sprints (~12 semanas) al planificar
@@ -433,6 +433,41 @@ comando `/crear-nota` del chat sigue funcionando igual (convive con la tool, doc
 > título falló como se esperaba (nunca sobreescribe); limpieza verificada, sin residuo en el
 > vault. 316 tests unitarios (7 nuevos), ruff, `mypy --strict` (core) e import-linter limpios.
 > Retro (addendum) en `docs/sprints/sprint-20.md`.
+
+### Sprint 21 — "Aprender del plan"
+
+**Objetivo:** el Learning agent pasa a ser un post-paso real del plan (`Plan.post`, doc 03 §3);
+la memoria empieza a leerse en `/v1/query`, no solo a escribirse.
+
+> **Decisiones de alcance (2026-08-16)**: (1) el post-paso de aprendizaje sigue corriendo en
+> Celery — no se mueve a una tarea en el proceso de la API — pero la tarea `kos.memory_learn`
+> pasa a construir un `LearningAgent` real y llamarlo vía un servidor MCP embebido en el worker
+> (mismo patrón que `apps/api` desde Sprint 17), en vez de llamar `kos_core.memory_learn`
+> directo. Mantiene la propiedad clave de hoy (no bloquea la respuesta, es durable si el worker
+> se cae) y cumple la promesa de doc 04 §1.1 de exponer esto como agente real en Fase 4. (2)
+> `memory` se suma al catálogo del Planner con el mismo patrón que `research` (Sprint 20): el LLM
+> decide cuándo una pregunta se beneficia de memoria previa, no una heurística fija. Consumir el
+> evento `graph.updated` (deuda desde Sprint 9) queda fuera de este sprint — ver doc 03 §3 y
+> `docs/deuda-tecnica.md`.
+
+- `packages/core/src/kos_core/schemas/plan.py`: `Plan.post: list[PlanStep]` (nuevo campo).
+- `packages/agents/src/kos_agents/learning.py` (nuevo): `LearningAgent`, mismo contrato `Agent`
+  que los demás — llama `memory.store` con `confirm=true` (el sistema completando un paso ya
+  decidido de antemano, doc 03 §3, no un agente decidiendo escribir algo nuevo por su cuenta).
+- `Planner` suma `memory` a su catálogo de evidencia (`MemoryAgent.recall`, ya existe desde
+  Sprint 17, standalone) y arma `Plan.post` con un paso `learning` fijo (determinístico, no
+  elegido por el LLM — mismo comportamiento incondicional que `kos.memory_learn` ya tiene desde
+  Sprint 12) al final de cada plan.
+- `apps/workers/src/kos_workers/tasks/memory.py::memory_learn`: en vez de llamar
+  `kos_core.memory_learn.learn_from_query_answer` directo, construye un `AppContext`/
+  `create_server`/`EmbeddedToolCaller` por invocación (mismo patrón de recursos por-tarea que ya
+  usa este módulo) y llama al `LearningAgent` real.
+- `apps/workers/pyproject.toml` suma `kos-mcp-tools` y `kos-agents` como dependencias nuevas.
+
+**Demo:** una pregunta que se beneficia de memoria previa (ej. una consulta repetida sobre un
+tema ya conversado) genera un plan con un paso `memory` real, visible en `GET /v1/plans/{id}`;
+tras responder, `GET /v1/memory` muestra una memoria episódica nueva creada por el `LearningAgent`
+real (no por la llamada directa a storage de antes) — verificado contra infra real, sin mocks.
 
 ## Gestión
 
