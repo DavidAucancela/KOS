@@ -21,16 +21,16 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | `GraphAgent._node_evidence` no completaba `EvidenceRef.quote` — `WritingAgent` armaba citas vacías para evidencia de grafo, el LLM concluía "no hay evidencia" pese a que sí la había | Introducido en Sprint 17 (nunca se notó porque `GraphAgent` era standalone), encontrado al conectarlo al Planner en Sprint 18 | [Sprint 18](sprints/sprint-18.md) |
 | Un paso de evidencia que falla (ej. el LLM propuso un `node_type` inválido) tumbaba toda la request de `/v1/query` con 500 en vez de degradar | Hallazgo de Sprint 18, probando el Planner contra infra real | [Sprint 18](sprints/sprint-18.md), el executor ahora degrada pasos de evidencia que fallan (`writing` sigue propagando el suyo) |
 | Doc 03 §6 decía que "Fase 2 agregó el paso de grafo al pipeline fijo", pero `/v1/query` nunca incorporó contexto del grafo a sus respuestas — el grafo se construyó (Sprints 6-11) como panel explorable separado en la UI, no como evidencia de respuesta | Hallazgo al planificar Sprint 17 (2026-08-15) | [Sprint 18](sprints/sprint-18.md), el Planner decide cuándo el grafo aporta al plan |
+| `Planner` no exigía presupuestos (`Constraints.timeout_s`/`max_steps` se pasaban pero no se hacían cumplir) | [Sprint 18](sprints/sprint-18.md) — alcance explícito, dejado para el sprint que persiste el plan | [Sprint 19](sprints/sprint-19.md) |
+| Plan generado no se persistía — `GET /v1/plans/{id}` no existía | [Sprint 18](sprints/sprint-18.md) — alcance explícito | [Sprint 19](sprints/sprint-19.md) |
 
-## Resuelta por v0.5 (Sprints 19-21), no requiere sprint aparte
+## Resuelta por v0.5 (Sprints 20-21), no requiere sprint aparte
 
 | Ítem | Origen | Se resuelve en |
 |---|---|---|
 | Nadie consume el evento `graph.updated` (Learning/Recomendador no existen) | [Sprint 9](sprints/sprint-09.md) | Sprint 21 (Learning agent) |
 | `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 | Sprint 20 |
 | Memoria se escribe pero nunca se lee — `/v1/query` no consulta memoria para responder (doc 04 §3 paso "Recuperación" nunca construido) | Hallazgo de la sesión 2026-08-15 (Sprints 13-15), no ligado a una retro puntual anterior | Sprint 21 (Memory agent lee, no solo escribe) |
-| `Planner` no exige presupuestos (`Constraints.timeout_s`/`max_steps` se pasan pero no se hacen cumplir) | [Sprint 18](sprints/sprint-18.md) — alcance explícito, dejado para el sprint que persiste el plan | Sprint 19 |
-| Plan generado no se persiste — `GET /v1/plans/{id}` sigue sin existir | [Sprint 18](sprints/sprint-18.md) — alcance explícito | Sprint 19 |
 | Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) | Sin sprint asignado todavía — no bloqueaba la demo de Sprint 18 |
 
 ## UI/UX — baja prioridad, sin sprint asignado

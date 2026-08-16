@@ -270,7 +270,7 @@ semántica nueva). Retro de cierre de v0.4.
 | 16 | Servidor MCP real: 7 herramientas de lectura/escritura envolviendo lo ya existente | ✅ Cerrado 2026-08-15 |
 | 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
-| 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | 🟡 Planificado |
+| 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | ✅ Cerrado 2026-08-16 |
 | 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
 | 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
 
@@ -348,6 +348,29 @@ romper la respuesta.
 > contra infra real (3 escenarios: plan con grafo, plan factual, fallback). 287 tests unitarios +
 > 30 de integración, ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
 > `docs/sprints/sprint-18.md`.
+
+### Sprint 19 — "El plan se audita"
+
+**Objetivo:** cerrar la deuda explícita de Sprint 18 — presupuestos (`Constraints.timeout_s`/
+`max_steps`) exigidos de verdad, y el plan generado persistido y auditable vía `GET
+/v1/plans/{id}`.
+
+**Demo:** una consulta real a `/v1/query` persiste su plan y `GET /v1/plans/{plan_id}` devuelve
+los mismos `steps`/`degraded`; un `plan_id` inexistente da 404; forzar `timeout_s`/`max_steps`
+bajos corta la ejecución con `degraded=true` y un `degraded_reason` específico, sin perder las
+oleadas ya completadas.
+
+> **Sprint 19 cerrado 2026-08-16**: tabla `kos.plans` (migración `0007_plans.py`) +
+> `save_plan`/`get_plan` (`packages/core/.../storage/postgres.py`) + `GET /v1/plans/{plan_id}`
+> (`apps/api/.../routes/plans.py`, doc 06 línea 59). `executor.py` exige `timeout_s` (corta al
+> tope de una oleada, no cancela tareas en curso) y `max_steps` de verdad —
+> `degraded_reason="budget_timeout"`/`"budget_max_steps"`, mismo campo `degraded` que
+> `QueryResult` usa desde Sprint 4. Tercera pestaña en `apps/web` (`TracesPage`) para inspeccionar
+> un plan por `plan_id`. Verificado con `scripts/demo_sprint19.py` contra infra real (API real,
+> `make up`): persistencia, 404, y ambos tipos de degradación por presupuesto. 294 tests
+> unitarios + 34 de integración (33 pasan; el fallo restante es el preexistente ya registrado en
+> `docs/deuda-tecnica.md`, sin relación con este sprint), ruff, `mypy --strict` (core) e
+> import-linter limpios. Retro completa en `docs/sprints/sprint-19.md`.
 
 ## Gestión
 
