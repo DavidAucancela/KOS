@@ -23,15 +23,22 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | Doc 03 §6 decía que "Fase 2 agregó el paso de grafo al pipeline fijo", pero `/v1/query` nunca incorporó contexto del grafo a sus respuestas — el grafo se construyó (Sprints 6-11) como panel explorable separado en la UI, no como evidencia de respuesta | Hallazgo al planificar Sprint 17 (2026-08-15) | [Sprint 18](sprints/sprint-18.md), el Planner decide cuándo el grafo aporta al plan |
 | `Planner` no exigía presupuestos (`Constraints.timeout_s`/`max_steps` se pasaban pero no se hacían cumplir) | [Sprint 18](sprints/sprint-18.md) — alcance explícito, dejado para el sprint que persiste el plan | [Sprint 19](sprints/sprint-19.md) |
 | Plan generado no se persistía — `GET /v1/plans/{id}` no existía | [Sprint 18](sprints/sprint-18.md) — alcance explícito | [Sprint 19](sprints/sprint-19.md) |
+| Tools MCP que devuelven una lista top-level llegan envueltas en `{"result": [...]}` (distinto de las tools de grafo, que siempre devuelven un objeto con listas anidadas) — `ResearchAgent` iteraba directo sobre el resultado crudo y explotaba con `TypeError` | Hallazgo de Sprint 20, probando `ResearchAgent` contra la API real de GitHub | [Sprint 20](sprints/sprint-20.md), `_unwrap_list()` |
 
-## Resuelta por v0.5 (Sprints 20-21), no requiere sprint aparte
+## Resuelta por v0.5 (Sprint 21), no requiere sprint aparte
 
 | Ítem | Origen | Se resuelve en |
 |---|---|---|
 | Nadie consume el evento `graph.updated` (Learning/Recomendador no existen) | [Sprint 9](sprints/sprint-09.md) | Sprint 21 (Learning agent) |
-| `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 | Sprint 20 |
 | Memoria se escribe pero nunca se lee — `/v1/query` no consulta memoria para responder (doc 04 §3 paso "Recuperación" nunca construido) | Hallazgo de la sesión 2026-08-15 (Sprints 13-15), no ligado a una retro puntual anterior | Sprint 21 (Memory agent lee, no solo escribe) |
+
+## Sin sprint asignado todavía
+
+| Ítem | Origen |
+|---|---|
+| `obsidian.create_note` implementado directo en la API, no como herramienta MCP (desviación documentada, doc 06 §4) | Sprint 7, doc 06 §4 — planificado para Sprint 20, pospuesto por decisión explícita del usuario al planificar ese sprint (2026-08-16) |
 | Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) | Sin sprint asignado todavía — no bloqueaba la demo de Sprint 18 |
+| El catálogo del Planner describe `research` en texto libre; con `llama3.2` (modelo chico) el LLM a veces omite `operation` en los `inputs` del paso `research` — el sistema ya degrada correctamente ese caso, pero no hay validación adicional en el prompt para reducir la tasa | [Sprint 20](sprints/sprint-20.md) | Ajuste fino, sin sprint asignado |
 
 ## UI/UX — baja prioridad, sin sprint asignado
 

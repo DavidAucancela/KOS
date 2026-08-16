@@ -271,7 +271,7 @@ semántica nueva). Retro de cierre de v0.4.
 | 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
 | 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | ✅ Cerrado 2026-08-16 |
-| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
+| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | ✅ Cerrado 2026-08-16 (alcance revisado: la migración de `obsidian.create_note` se pospuso) |
 | 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
 
 Estimación original de doc 07 (6-8 semanas): revisada a 6 sprints (~12 semanas) al planificar
@@ -399,6 +399,21 @@ librería X que uso?") genera un plan con un paso `research`, con evidencia cita
 reales de GitHub/web; una pregunta puramente sobre el vault no lo incluye (el LLM decide, no una
 heurística); sin `BRAVE_SEARCH_API_KEY` configurada, un plan que necesita `web.search` degrada en
 vez de romper la respuesta.
+
+> **Sprint 20 cerrado 2026-08-16**: `packages/mcp-tools/src/kos_mcp/tools/{github,web}.py`
+> (`github.search_repos`/`search_commits` contra la API pública; `web.search` vía Brave Search
+> API, `web.open` con extracción de texto por regex) + `ResearchAgent` (`packages/agents`) +
+> `Planner`/`query.py` conectándolo al catálogo real. Verificado con `scripts/demo_sprint20.py`
+> contra internet real (sin mocks de red): 3 repos reales de GitHub, fetch real de
+> `fastapi.tiangolo.com`, y `POST /v1/query` real donde el LLM (llama3.2 local) eligió `research`
+> por su cuenta para una pregunta que lo necesitaba — degradó (`degraded=true`) porque el LLM
+> omitió `operation` en los inputs del paso, y `executor.py` (Sprint 18) lo absorbió sin romper
+> la respuesta, sin necesitar ningún cambio de código nuevo. Un bug encontrado y arreglado
+> (tools MCP que devuelven una lista top-level llegan envueltas en `{"result": [...]}`, distinto
+> de como devuelven las tools de grafo) — ver `docs/deuda-tecnica.md` y la retro. La migración de
+> `obsidian.create_note` a MCP se pospuso por decisión explícita del usuario. 309 tests unitarios
+> (25 nuevos), ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
+> `docs/sprints/sprint-20.md`.
 
 ## Gestión
 

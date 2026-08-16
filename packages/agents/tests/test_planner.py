@@ -117,6 +117,77 @@ async def test_planner_usa_el_plan_dinamico_si_valida() -> None:
     assert llm.calls == 1
 
 
+async def test_planner_ejecuta_un_paso_research_si_esta_registrado() -> None:
+    plan_json = json.dumps(
+        [
+            {
+                "id": "s1",
+                "agent": "research",
+                "task": "buscar en github",
+                "inputs": {"operation": "github_repos", "query": "fastapi"},
+                "depends_on": [],
+            },
+            {
+                "id": "s2",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM([plan_json])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    research = _FakeAgent("research")
+    planner = Planner(
+        llm=llm,
+        retrieval_agent=retrieval,
+        graph_agent=graph,
+        writing_agent=writing,
+        research_agent=research,
+    )
+
+    plan, responses = await planner(PlanRequest(query="¿qué es fastapi en GitHub?", trace_id="t"))
+
+    assert plan.degraded is False
+    assert set(responses.keys()) == {"s1", "s2"}
+    assert len(research.calls) == 1
+
+
+async def test_planner_sin_research_agent_no_registra_ese_paso() -> None:
+    """Compatibilidad: `research_agent` es opcional — un plan que igual lo
+    pida simplemente no encuentra el agente, y `s1` nunca resuelve
+    (`executor.py` trata un `agent` fuera del registry igual que una
+    dependencia que nunca resuelve: `s2` tampoco corre porque depende de `s1`)."""
+    plan_json = json.dumps(
+        [
+            {
+                "id": "s1",
+                "agent": "research",
+                "task": "buscar en github",
+                "inputs": {"operation": "github_repos", "query": "fastapi"},
+                "depends_on": [],
+            },
+            {
+                "id": "s2",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1"],
+            },
+        ]
+    )
+    llm = _ScriptedLLM([plan_json])
+    retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")
+    planner = Planner(llm=llm, retrieval_agent=retrieval, graph_agent=graph, writing_agent=writing)
+
+    plan, responses = await planner(PlanRequest(query="¿qué es fastapi en GitHub?", trace_id="t"))
+
+    assert "s1" not in responses
+    assert "s2" not in responses
+    assert plan.degraded is True
+
+
 async def test_planner_degrada_al_plan_fijo_tras_dos_fallos() -> None:
     llm = _ScriptedLLM(["no es json", "tampoco esto"])
     retrieval, graph, writing = _FakeAgent("retrieval"), _FakeAgent("graph"), _FakeAgent("writing")

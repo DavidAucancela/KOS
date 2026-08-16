@@ -39,6 +39,11 @@ _CATALOG = (
     'agent="graph": consulta el grafo de conocimiento sin necesitar un id de nodo '
     "específico (nodos más conectados, o nodos de un tipo dado). "
     'inputs: {"template": "most_connected"|"nodes_by_type", "node_type"?: str, "limit"?: int}.\n'
+    'agent="research": busca FUERA del vault (código/documentación real, no lo que el '
+    "usuario ya escribió) — úsalo solo cuando la pregunta pida algo que las notas no "
+    "pueden tener (un proyecto de GitHub, el estado actual de una librería). "
+    'inputs: {"operation": "github_repos"|"github_commits"|"web_search"|"web_open", '
+    '"query"?: str (repos/commits/web_search), "url"?: str (web_open), "limit"?: int}.\n'
     'agent="writing": redacta la respuesta final citando la evidencia de los pasos '
     "de los que depende. Siempre debe existir exactamente un paso `writing` al final "
     "del plan, dependiendo de todos los pasos de evidencia que uses."
@@ -56,7 +61,7 @@ _PLANNER_SYSTEM = (
 )
 
 _MAX_ATTEMPTS = 2
-_ALLOWED_AGENTS = frozenset({"retrieval", "graph", "writing"})
+_ALLOWED_AGENTS = frozenset({"retrieval", "graph", "research", "writing"})
 
 
 def _fixed_plan_steps(query: str, *, mode: str, limit: int) -> list[PlanStep]:
@@ -126,6 +131,7 @@ class Planner:
         retrieval_agent: Agent,
         graph_agent: Agent,
         writing_agent: Agent,
+        research_agent: Agent | None = None,
     ) -> None:
         self._llm = llm
         self._registry: dict[str, Agent] = {
@@ -133,6 +139,8 @@ class Planner:
             "graph": graph_agent,
             "writing": writing_agent,
         }
+        if research_agent is not None:
+            self._registry["research"] = research_agent
 
     async def _generate_steps(self, request: PlanRequest) -> tuple[list[PlanStep], bool]:
         """Intenta generar un plan dinámico hasta `_MAX_ATTEMPTS` veces; si

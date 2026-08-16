@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_agents.graph import GraphAgent
 from kos_agents.planner.planner import Planner
+from kos_agents.research import ResearchAgent
 from kos_agents.retrieval import RetrievalAgent
 from kos_agents.writing import WritingAgent
 from kos_api.deps import postgres_engine, settings_dep, tool_caller
@@ -162,6 +163,7 @@ async def query(
         llm=request.app.state.llm_client,
         retrieval_agent=RetrievalAgent(caller),
         graph_agent=GraphAgent(caller),
+        research_agent=ResearchAgent(caller),
         writing_agent=WritingAgent(request.app.state.llm_client),
     )
     try:
