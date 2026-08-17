@@ -559,6 +559,32 @@ async def insert_recommendation(
         )
 
 
+async def recent_seed_chunks(engine: AsyncEngine, *, limit: int) -> list[dict[str, Any]]:
+    """Chunks recientes con embedding real, para sembrar candidatos de
+    contradicción (Sprint 24, doc 11 §4) — devuelve `embedding` como
+    `list[float]` real (vía el tipo `Vector` de la columna, no SQL textual,
+    que no deserializa el vector de vuelta a Python). No acotado por el
+    disparo real (`node_ids`/`relation_ids`) que debounceó — misma deuda
+    documentada que `gaps_by_prerequisite` (Sprint 23)."""
+    query = (
+        select(
+            chunks_table.c.chunk_id,
+            chunks_table.c.doc_id,
+            chunks_table.c.text,
+            chunks_table.c.embedding,
+            documents_table.c.title,
+        )
+        .select_from(
+            chunks_table.join(documents_table, documents_table.c.doc_id == chunks_table.c.doc_id)
+        )
+        .where(chunks_table.c.embedding.is_not(None))
+        .order_by(documents_table.c.created_at.desc(), chunks_table.c.position.asc())
+        .limit(limit)
+    )
+    async with engine.connect() as conn:
+        return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
 async def has_pending_recommendation(
     engine: AsyncEngine, *, type: str, target_entities: list[str]
 ) -> bool:

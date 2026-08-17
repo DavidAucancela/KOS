@@ -1,9 +1,10 @@
 """Tests de las tasks del Recomendador (Sprint 22 debounce, Sprint 23 lagunas
-de conocimiento, doc 11 §3/§4): Redis y MCP mockeados, sin infra real — mismo
-estilo que `test_memory_task.py`."""
+de conocimiento, Sprint 24 contradicciones, doc 11 §3/§4): Redis y MCP
+mockeados, sin infra real — mismo estilo que `test_memory_task.py`."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -11,6 +12,8 @@ import pytest
 from kos_agents.recommender import RecommenderAgent
 from kos_core.storage import postgres as postgres_module
 from kos_core.storage import redis as redis_module
+from kos_core.storage import search as search_module
+from kos_core.storage.search import SearchHit
 from kos_workers.celery_app import app
 from kos_workers.tasks import recommend as recommend_module
 
@@ -161,6 +164,14 @@ class _FakeEmbedder:
         return None
 
 
+class _FakeLLM:
+    async def generate(self, prompt: str, *, system: str | None = None) -> str:
+        return '{"contradicts": false, "explanation": ""}'
+
+    async def aclose(self) -> None:
+        return None
+
+
 class _FakeDriver:
     async def close(self) -> None:
         return None
@@ -183,12 +194,31 @@ def _gap_candidate(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def _no_op_result(**overrides: Any) -> dict[str, Any]:
+    """Forma completa del resultado de `_async_recommend` (gaps + contradicciones,
+    Sprint 23/24) con ambos sub-resultados en cero por defecto."""
+    base: dict[str, Any] = {
+        "candidates_found": 0,
+        "recommendations_created": 0,
+        "contradiction_candidates_checked": 0,
+        "contradiction_recommendations_created": 0,
+    }
+    base.update(overrides)
+    return base
+
+
 def _patch_infra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(recommend_module, "create_engine", lambda settings: _FakeEngine())
     monkeypatch.setattr(
         recommend_module.neo4j_storage, "create_driver", lambda settings: _FakeDriver()
     )
     monkeypatch.setattr(recommend_module, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(recommend_module, "OllamaLLMClient", lambda settings: _FakeLLM())
+
+    async def fake_recent_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_recent_seed_chunks)
 
 
 async def test_async_recommend_crea_una_recomendacion_por_candidato_nuevo(
@@ -219,7 +249,7 @@ async def test_async_recommend_crea_una_recomendacion_por_candidato_nuevo(
         node_ids=["node-1"], relation_ids=[], trace_id="trace-1"
     )
 
-    assert result == {"candidates_found": 1, "recommendations_created": 1}
+    assert result == _no_op_result(candidates_found=1, recommendations_created=1)
     [call] = inserted
     assert call["type"] == "gap"
     assert call["target_entities"] == ["node-1"]
@@ -250,7 +280,7 @@ async def test_async_recommend_salta_candidatos_ya_pendientes(
         node_ids=[], relation_ids=[], trace_id="trace-1"
     )
 
-    assert result == {"candidates_found": 1, "recommendations_created": 0}
+    assert result == _no_op_result(candidates_found=1)
 
 
 async def test_async_recommend_respeta_el_tope_por_pasada(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,10 +305,10 @@ async def test_async_recommend_respeta_el_tope_por_pasada(monkeypatch: pytest.Mo
         node_ids=[], relation_ids=[], trace_id="trace-1"
     )
 
-    assert result == {
-        "candidates_found": 10,
-        "recommendations_created": recommend_module.MAX_GAP_RECOMMENDATIONS_PER_RUN,
-    }
+    assert result == _no_op_result(
+        candidates_found=10,
+        recommendations_created=recommend_module.MAX_GAP_RECOMMENDATIONS_PER_RUN,
+    )
     assert len(inserted) == recommend_module.MAX_GAP_RECOMMENDATIONS_PER_RUN
 
 
@@ -297,7 +327,231 @@ async def test_async_recommend_sin_candidatos_no_crea_nada(monkeypatch: pytest.M
         node_ids=[], relation_ids=[], trace_id="trace-1"
     )
 
-    assert result == {"candidates_found": 0, "recommendations_created": 0}
+    assert result == _no_op_result()
+
+
+def _seed_chunk(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "chunk_id": uuid.uuid4(),
+        "doc_id": uuid.uuid4(),
+        "text": "Redis es un almacén clave-valor en memoria.",
+        "embedding": [0.1, 0.2, 0.3],
+        "title": "Nota A",
+    }
+    base.update(overrides)
+    return base
+
+
+def _match_hit(**overrides: Any) -> SearchHit:
+    base: dict[str, Any] = {
+        "chunk_id": uuid.uuid4(),
+        "doc_id": uuid.uuid4(),
+        "text": "Redis persiste todo a disco por defecto.",
+        "score": 0.85,
+        "source": "vector",
+        "title": "Nota B",
+    }
+    base.update(overrides)
+    return SearchHit.model_validate(base)
+
+
+async def test_default_contradiction_verdict_json_valido_true() -> None:
+    async def generate(prompt: str, *, system: str) -> str:
+        return '{"contradicts": true, "explanation": "A dice X, B dice lo opuesto"}'
+
+    contradicts, explanation = await recommend_module._default_contradiction_verdict(
+        generate, "texto A", "texto B"
+    )
+
+    assert contradicts is True
+    assert explanation == "A dice X, B dice lo opuesto"
+
+
+async def test_default_contradiction_verdict_json_valido_false() -> None:
+    async def generate(prompt: str, *, system: str) -> str:
+        return '{"contradicts": false, "explanation": ""}'
+
+    contradicts, explanation = await recommend_module._default_contradiction_verdict(
+        generate, "texto A", "texto B"
+    )
+
+    assert contradicts is False
+    assert explanation == ""
+
+
+async def test_default_contradiction_verdict_json_invalido_falla_a_false() -> None:
+    async def generate(prompt: str, *, system: str) -> str:
+        return "no es json"
+
+    contradicts, explanation = await recommend_module._default_contradiction_verdict(
+        generate, "texto A", "texto B"
+    )
+
+    assert contradicts is False
+    assert explanation == ""
+
+
+async def test_async_recommend_contradiccion_confirmada_crea_recomendacion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inserted: list[dict[str, Any]] = []
+
+    async def fake_insert(engine: Any, **kwargs: Any) -> None:
+        inserted.append(kwargs)
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    seed = _seed_chunk()
+    match = _match_hit()
+
+    async def fake_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [seed]
+
+    async def fake_band(engine: Any, embedding: Any, **kwargs: Any) -> list[SearchHit]:
+        return [match]
+
+    async def fake_has_pending(engine: Any, **kwargs: Any) -> bool:
+        return False
+
+    class _ConfirmingLLM:
+        async def generate(self, prompt: str, *, system: str | None = None) -> str:
+            return '{"contradicts": true, "explanation": "se contradicen"}'
+
+        async def aclose(self) -> None:
+            return None
+
+    _patch_infra(monkeypatch)
+    monkeypatch.setattr(postgres_module, "insert_recommendation", fake_insert)
+    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
+    monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+    monkeypatch.setattr(recommend_module, "OllamaLLMClient", lambda settings: _ConfirmingLLM())
+
+    result = await recommend_module._async_recommend(
+        node_ids=[], relation_ids=[], trace_id="trace-1"
+    )
+
+    assert result == _no_op_result(
+        recommendations_created=1,
+        contradiction_candidates_checked=1,
+        contradiction_recommendations_created=1,
+    )
+    [call] = inserted
+    assert call["type"] == "contradiction"
+    assert call["confidence"] == pytest.approx(0.6)
+    assert call["target_entities"] == sorted([str(seed["chunk_id"]), str(match.chunk_id)])
+    assert len(call["evidence"]) == 2
+    assert call["source_event_id"] == "trace-1"
+
+
+async def test_async_recommend_contradiccion_no_confirmada_no_crea_nada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_insert(engine: Any, **kwargs: Any) -> None:
+        raise AssertionError("un veredicto negativo no debe crear una recomendación")
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    seed = _seed_chunk()
+    match = _match_hit()
+
+    async def fake_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [seed]
+
+    async def fake_band(engine: Any, embedding: Any, **kwargs: Any) -> list[SearchHit]:
+        return [match]
+
+    async def fake_has_pending(engine: Any, **kwargs: Any) -> bool:
+        return False
+
+    _patch_infra(monkeypatch)  # OllamaLLMClient fake responde contradicts=false por defecto
+    monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
+    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
+    monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+
+    result = await recommend_module._async_recommend(
+        node_ids=[], relation_ids=[], trace_id="trace-1"
+    )
+
+    assert result == _no_op_result(contradiction_candidates_checked=1)
+
+
+async def test_async_recommend_contradiccion_sin_match_no_revisa_nada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_insert(engine: Any, **kwargs: Any) -> None:
+        raise AssertionError("sin match en la banda no debe invocar al LLM ni crear nada")
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    seed = _seed_chunk()
+
+    async def fake_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [seed]
+
+    async def fake_band(engine: Any, embedding: Any, **kwargs: Any) -> list[SearchHit]:
+        return []
+
+    _patch_infra(monkeypatch)
+    monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
+    monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
+    monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+
+    result = await recommend_module._async_recommend(
+        node_ids=[], relation_ids=[], trace_id="trace-1"
+    )
+
+    assert result == _no_op_result()
+
+
+async def test_async_recommend_contradiccion_par_ya_pendiente_no_llama_al_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_insert(engine: Any, **kwargs: Any) -> None:
+        raise AssertionError("un par ya pendiente no debe reinsertarse")
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    seed = _seed_chunk()
+    match = _match_hit()
+
+    async def fake_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [seed]
+
+    async def fake_band(engine: Any, embedding: Any, **kwargs: Any) -> list[SearchHit]:
+        return [match]
+
+    async def fake_has_pending(engine: Any, **kwargs: Any) -> bool:
+        return True
+
+    class _FailingLLM:
+        async def generate(self, prompt: str, *, system: str | None = None) -> str:
+            raise AssertionError("un par ya pendiente no debe llegar a llamar al LLM")
+
+        async def aclose(self) -> None:
+            return None
+
+    _patch_infra(monkeypatch)
+    monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
+    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
+    monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+    monkeypatch.setattr(recommend_module, "OllamaLLMClient", lambda settings: _FailingLLM())
+
+    result = await recommend_module._async_recommend(
+        node_ids=[], relation_ids=[], trace_id="trace-1"
+    )
+
+    assert result == _no_op_result()
 
 
 def test_las_tasks_estan_registradas_con_nombre_de_evento() -> None:
