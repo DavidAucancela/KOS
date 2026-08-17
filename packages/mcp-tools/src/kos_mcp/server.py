@@ -32,9 +32,12 @@ from kos_core.observability import configure_logging
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
 from kos_mcp.tools import docs as docs_tools
+from kos_mcp.tools import github as github_tools
 from kos_mcp.tools import graph as graph_tools
 from kos_mcp.tools import memory as memory_tools
+from kos_mcp.tools import obsidian as obsidian_tools
 from kos_mcp.tools import vector as vector_tools
+from kos_mcp.tools import web as web_tools
 
 
 @dataclass
@@ -85,6 +88,9 @@ def create_server(app_context: AppContext | None = None) -> MCPServer:
     vector_tools.register(server)
     docs_tools.register(server)
     memory_tools.register(server)
+    github_tools.register(server)
+    web_tools.register(server)
+    obsidian_tools.register(server)
     return server
 
 

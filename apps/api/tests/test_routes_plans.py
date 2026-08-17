@@ -41,6 +41,18 @@ def _plan_row(**overrides: Any) -> dict[str, Any]:
                 "cost": None,
             },
         ],
+        "post": [
+            {
+                "id": "post-learning",
+                "agent": "learning",
+                "task": "registrar interacción",
+                "inputs": {},
+                "depends_on": [],
+                "evidence_count": None,
+                "confidence": None,
+                "cost": None,
+            }
+        ],
         "degraded": False,
         "degraded_reason": None,
         "elapsed_ms": 42.0,
@@ -67,6 +79,7 @@ def test_get_plan_devuelve_200_con_datos(monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["plan_id"] == str(row["plan_id"])
     assert body["query"] == "¿qué es KOS?"
     assert [s["id"] for s in body["steps"]] == ["s1", "s2"]
+    assert [s["id"] for s in body["post"]] == ["post-learning"]
     assert body["degraded"] is False
     assert body["degraded_reason"] is None
     assert body["elapsed_ms"] == 42.0

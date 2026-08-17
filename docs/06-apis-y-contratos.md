@@ -143,6 +143,38 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > el usuario teclea el comando exacto, típicamente copiado de una respuesta previa
 > del sistema (ver "detección de intención de plantilla" más abajo).
 >
+> **Decisión de alcance (Sprint 20, 2026-08-16)**: la migración de
+> `obsidian.create_note` a herramienta MCP real sigue pendiente — decisión
+> explícita del usuario al planificar este sprint, para no mezclar "conectar
+> el mundo exterior" con "reescribir un camino que ya funciona". Sprint 20 se
+> queda con las 4 herramientas externas de la tabla de arriba
+> (`github.search_repos`, `github.search_commits`, `web.search`, `web.open`),
+> todas de **lectura** — no le suman superficie nueva a `permissions.py`
+> (`WRITE_TOOLS` no cambia este sprint). Sin sprint asignado todavía para la
+> migración de `obsidian.create_note`; ver `docs/deuda-tecnica.md`.
+>
+> **Proveedores externos (Sprint 20)**: `github.*` usa la API pública de
+> GitHub (sin token para uso liviano; `GITHUB_TOKEN` opcional en `.env` para
+> más cuota — doc 09 §5). `web.*` usa la Brave Search API vía
+> `BRAVE_SEARCH_API_KEY` (`.env`, sin default: si falta, `web.search`/
+> `web.open` devuelven un error claro en vez de fallar silenciosamente).
+> Mismo principio de ADR-0006 (cloud opt-in por tarea): estas llamadas salen
+> a internet solo cuando el plan decide usar `research`, nunca como parte de
+> la ingesta o del pipeline de embeddings.
+>
+> **Migración a MCP real (2026-08-16)**: `obsidian.create_note` ya existe como herramienta MCP
+> real (`packages/mcp-tools/src/kos_mcp/tools/obsidian.py`), con `confirm=true` requerido y gate
+> real en `permissions.py` (`WRITE_TOOLS` ahora incluye `"obsidian.create_note"`, mismo patrón que
+> `memory.store`). La lógica de renderizado/escritura (antes solo en
+> `apps/api/.../notes_service.py`) se promovió a `packages/core/src/kos_core/notes.py` — `kos_mcp`
+> no puede depender de `apps/api` (import-linter). Convive con la ruta directa de la API: el
+> comando `/crear-nota` del chat sigue llamando la lógica promovida directo (su propia aprobación
+> ya la satisface el usuario tecleando el comando, como documenta la nota de Sprint 7 más arriba);
+> la tool MCP es la vía que un agente (`WritingAgent`, doc 03 §2: "crea/modifica notas") podrá usar
+> más adelante, pasando siempre por el gate de aprobación explícita. `obsidian.read_note`,
+> `obsidian.update_note`, `obsidian.create_folder` siguen sin implementar — sin caso de uso real
+> que los pida todavía, ver `docs/deuda-tecnica.md`.
+>
 > Además, `POST /v1/query` gana un paso `s0` (dentro del pipeline fijo, no un
 > planner nuevo — ver regla 3 de CLAUDE.md) que detecta con una heurística
 > determinista (palabras clave, sin LLM) cuando la pregunta del usuario implica

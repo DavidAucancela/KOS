@@ -71,6 +71,37 @@ Reglas:
    > que hubiera preferido, pero respondió con lo que sí pudo"). Sprint 19 extiende esta misma
    > señal a los presupuestos de tiempo/pasos por ejecución (no solo a la generación del plan).
 
+   > **Catálogo ampliado (Sprint 20, decidido 2026-08-16):** `research` se suma a
+   > `retrieval`/`graph`/`writing` en el catálogo del Planner — el LLM lo elige cuando la pregunta
+   > pide algo que el vault no puede tener (código/documentación de un proyecto externo, estado
+   > actual de una librería). Vía las herramientas MCP `github.search_repos`,
+   > `github.search_commits`, `web.search`, `web.open` (doc 06 §4) — todas de lectura, sin gate de
+   > `permissions.py` nuevo. `memory` sigue fuera del catálogo (Sprint 21).
+
+   > **Planificado — Sprint 21, "Aprender del plan" (decidido 2026-08-16, doc 08)**: `memory` se
+   > suma al catálogo de evidencia del Planner, mismo patrón que `research` en Sprint 20 — el LLM
+   > decide cuándo una pregunta se beneficia de memoria previa (`MemoryAgent.recall`, construido
+   > standalone desde Sprint 17), en vez de una heurística casera. Y el `post:` de este mismo
+   > ejemplo deja de ser solo un dibujo en el doc: el paso `learning` se dispara siempre
+   > (determinístico, no elegido por el LLM — mismo comportamiento incondicional que
+   > `kos.memory_learn` ya tiene desde Sprint 12, doc 04 §3 paso 1) al final de cada `/v1/query`
+   > respondida, nunca bloqueando la respuesta al usuario (doc 04: "la UI nunca espera al
+   > aprendizaje"). Se mantiene en Celery (no se vuelve una tarea en el proceso de la API): la
+   > tarea `kos.memory_learn` pasa a construir un `LearningAgent` real y llamarlo vía un servidor
+   > MCP embebido en el worker (mismo patrón que `apps/api` usa desde Sprint 17,
+   > `kos_mcp.server.create_server`/`EmbeddedToolCaller`, uno nuevo por invocación de la tarea —
+   > igual que el engine/driver ya se crean y cierran por tarea en `apps/workers`), en vez de
+   > llamar `kos_core.memory_learn.learn_from_query_answer` directo. El `LearningAgent` pasa
+   > `confirm=true` a `memory.store` por su cuenta: es el propio sistema completando un paso ya
+   > decidido de antemano (aprender de cada interacción, doc 04 §3), no un agente/LLM decidiendo
+   > escribir algo nuevo de forma autónoma — mismo espíritu que la excepción ya documentada para
+   > `/crear-nota` en doc 06 §4. `Plan.post: list[PlanStep]` (nuevo campo, doc 03 §3) registra que
+   > el paso se disparó, sin esperar su resultado (fire-and-forget, igual que hoy).
+   >
+   > Consumir el evento `graph.updated` (deuda desde Sprint 9, ver `docs/deuda-tecnica.md`) queda
+   > **fuera de este sprint**: el objetivo es la ruta query→aprendizaje→recall, no la reacción a
+   > cambios del grafo — se revisa en un sprint futuro sin bloquear este.
+
 ## 4. Coordinación mediante MCP
 
 - Cada agente consume herramientas **solo** vía MCP ([ADR-0005](adr/0005-mcp-como-protocolo-de-herramientas.md)); los agentes no importan clientes de BD directamente — usan las herramientas registradas (`graph.query`, `vector.search`, `memory.recall`, `obsidian.write_note`…).

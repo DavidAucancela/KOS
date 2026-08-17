@@ -9,9 +9,21 @@ from typing import Any
 
 import pytest
 
+from kos_core.config import Settings
+from kos_core.storage import neo4j as neo4j_module
 from kos_core.storage import postgres as postgres_module
 from kos_workers.celery_app import app
 from kos_workers.tasks import memory as memory_module
+
+
+class _FakeEmbedder:
+    """Duck-typed: `AppContext.embedding_client` no valida tipo en runtime
+    (`@dataclass` sin Pydantic) — mismo criterio que los demás fakes de este
+    archivo, sin pegarle a Ollama real."""
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
 
 _NOW = datetime.now(UTC)
 
@@ -35,29 +47,33 @@ def _memory(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-async def test_learn_core_guarda_memoria_episodica(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_learn_via_agent_core_guarda_memoria_episodica(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sprint 21: pasa por `LearningAgent`/MCP embebido, no por
+    `kos_core.memory_learn` directo — pero termina escribiendo por el mismo
+    camino de storage (`postgres_storage.insert_memory`), monkeypateado acá
+    igual que en `packages/mcp-tools/tests/test_memory_tools.py`."""
     inserted: list[dict[str, Any]] = []
 
     async def fake_insert(engine: Any, **kwargs: Any) -> None:
         inserted.append(kwargs)
 
-    async def fake_embed(texts: list[str]) -> list[list[float]]:
-        assert len(texts) == 1
-        return [[0.1, 0.2, 0.3]]
-
-    async def fake_resolve_entities(doc_ids: list[str]) -> list[str]:
+    async def fake_resolve_entities(driver: Any, doc_ids: list[str]) -> list[str]:
         return []
 
     monkeypatch.setattr(postgres_module, "insert_memory", fake_insert)
+    monkeypatch.setattr(neo4j_module, "find_node_ids_by_sources", fake_resolve_entities)
 
-    result = await memory_module._learn_core(
+    result = await memory_module._learn_via_agent_core(
         None,
+        None,
+        _FakeEmbedder(),
+        Settings(),
         query="¿qué es KOS?",
         answer="un motor de conocimiento",
         sources=["doc-a"],
         confidence=0.9,
-        embed=fake_embed,
-        resolve_entities=fake_resolve_entities,
     )
 
     assert uuid.UUID(result["memory_id"])
@@ -71,34 +87,35 @@ async def test_learn_core_guarda_memoria_episodica(monkeypatch: pytest.MonkeyPat
     assert call["entities"] == []
 
 
-async def test_learn_core_resuelve_entities_por_sources_compartidas(
+async def test_learn_via_agent_core_resuelve_entities_por_sources_compartidas(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sprint 13 (doc 04 §2): entities[] sale de nodos que ya comparten sources[]
-    con la memoria — sin extracción LLM nueva."""
+    con la memoria — sin extracción LLM nueva. Sigue funcionando igual tras
+    Sprint 21 (la lógica de `learn_from_query_answer` no cambió, solo quién la
+    llama)."""
     inserted: list[dict[str, Any]] = []
     resolve_calls: list[list[str]] = []
 
     async def fake_insert(engine: Any, **kwargs: Any) -> None:
         inserted.append(kwargs)
 
-    async def fake_embed(texts: list[str]) -> list[list[float]]:
-        return [[0.1, 0.2, 0.3]]
-
-    async def fake_resolve_entities(doc_ids: list[str]) -> list[str]:
+    async def fake_resolve_entities(driver: Any, doc_ids: list[str]) -> list[str]:
         resolve_calls.append(doc_ids)
         return ["node-fastapi", "node-railway"]
 
     monkeypatch.setattr(postgres_module, "insert_memory", fake_insert)
+    monkeypatch.setattr(neo4j_module, "find_node_ids_by_sources", fake_resolve_entities)
 
-    await memory_module._learn_core(
+    await memory_module._learn_via_agent_core(
         None,
+        None,
+        _FakeEmbedder(),
+        Settings(),
         query="¿qué uso para deploy?",
         answer="Railway",
         sources=["doc-a", "doc-b"],
         confidence=0.9,
-        embed=fake_embed,
-        resolve_entities=fake_resolve_entities,
     )
 
     assert resolve_calls == [["doc-a", "doc-b"]]

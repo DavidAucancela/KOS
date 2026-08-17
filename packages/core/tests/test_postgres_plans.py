@@ -38,6 +38,7 @@ async def test_insert_y_get_plan_round_trip() -> None:
                 PlanStep(id="s1", agent="retrieval", task="buscar", confidence=0.6),
                 PlanStep(id="s2", agent="writing", task="redactar", depends_on=["s1"]),
             ],
+            post=[PlanStep(id="post-learning", agent="learning", task="registrar interacción")],
             degraded=False,
             trace_id="trace-plans-1",
             elapsed_ms=123.4,
@@ -48,6 +49,7 @@ async def test_insert_y_get_plan_round_trip() -> None:
         assert fetched is not None
         assert fetched["query"] == "¿qué es KOS?"
         assert [s["id"] for s in fetched["steps"]] == ["s1", "s2"]
+        assert [s["id"] for s in fetched["post"]] == ["post-learning"]
         assert fetched["degraded"] is False
         assert fetched["degraded_reason"] is None
         assert fetched["elapsed_ms"] == pytest.approx(123.4)
@@ -75,6 +77,7 @@ async def test_insert_plan_con_degraded_reason() -> None:
         assert fetched is not None
         assert fetched["degraded"] is True
         assert fetched["degraded_reason"] == "budget_timeout"
+        assert fetched["post"] == []
     finally:
         await _cleanup(engine, [plan_id])
         await engine.dispose()

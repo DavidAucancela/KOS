@@ -16,7 +16,14 @@ Catálogo de agentes de este sprint: `retrieval` (búsqueda sobre las notas) y
 nombre primero (`query` con `template=most_connected|nodes_by_type`) —
 `get_node`/`find_path` necesitarían un paso previo de resolución de entidades
 por nombre, fuera de alcance de este sprint (deuda anotada en la retro).
-`memory` queda deliberadamente fuera del catálogo hasta Sprint 21."""
+
+Sprint 21 suma `memory` al catálogo de evidencia (mismo patrón que `research`
+en Sprint 20: el LLM decide, no una heurística) y arma `Plan.post` con un
+paso `learning` fijo — determinístico, no elegido por el LLM, mismo
+comportamiento incondicional que `kos.memory_learn` ya tiene desde Sprint 12
+(doc 03 §3, doc 04 §1.1). El Planner solo *declara* ese post-paso en la
+traza; quien lo dispara de verdad sigue siendo `apps/api` (Celery, sin
+bloquear la respuesta) — `kos_agents` no puede depender de Celery."""
 
 from __future__ import annotations
 
@@ -39,6 +46,16 @@ _CATALOG = (
     'agent="graph": consulta el grafo de conocimiento sin necesitar un id de nodo '
     "específico (nodos más conectados, o nodos de un tipo dado). "
     'inputs: {"template": "most_connected"|"nodes_by_type", "node_type"?: str, "limit"?: int}.\n'
+    'agent="research": busca FUERA del vault (código/documentación real, no lo que el '
+    "usuario ya escribió) — úsalo solo cuando la pregunta pida algo que las notas no "
+    "pueden tener (un proyecto de GitHub, el estado actual de una librería). "
+    'inputs: {"operation": "github_repos"|"github_commits"|"web_search"|"web_open", '
+    '"query"?: str (repos/commits/web_search), "url"?: str (web_open), "limit"?: int}.\n'
+    'agent="memory": recupera memoria previa (episódica/semántica/preferencias) sobre '
+    "temas ya conversados con el usuario — úsalo cuando la pregunta se beneficia de "
+    "contexto de conversaciones anteriores, no del contenido del vault en sí. "
+    'inputs: {"operation": "recall", "q"?: str, "type"?: '
+    '"episodic"|"semantic"|"procedural"|"temporal"|"preference", "limit"?: int}.\n'
     'agent="writing": redacta la respuesta final citando la evidencia de los pasos '
     "de los que depende. Siempre debe existir exactamente un paso `writing` al final "
     "del plan, dependiendo de todos los pasos de evidencia que uses."
@@ -56,7 +73,7 @@ _PLANNER_SYSTEM = (
 )
 
 _MAX_ATTEMPTS = 2
-_ALLOWED_AGENTS = frozenset({"retrieval", "graph", "writing"})
+_ALLOWED_AGENTS = frozenset({"retrieval", "graph", "research", "memory", "writing"})
 
 
 def _fixed_plan_steps(query: str, *, mode: str, limit: int) -> list[PlanStep]:
@@ -118,6 +135,36 @@ def parse_plan_response(raw_json: str, *, query: str) -> list[PlanStep] | None:
     return _validate_steps(parsed, query=query)
 
 
+def _build_post_steps(
+    steps: list[PlanStep], responses: dict[str, AgentResponse], *, query: str
+) -> list[PlanStep]:
+    """Registro declarativo (doc 03 §3, Sprint 21) de que el post-paso de
+    aprendizaje se va a disparar — no lo ejecuta (`kos_agents` no depende de
+    Celery, ver docstring del módulo). Solo si el paso `writing` de verdad
+    respondió: sin respuesta no hay nada que aprender."""
+    writing_step = next((step for step in steps if step.agent == "writing"), None)
+    if writing_step is None:
+        return []
+    writing_response = responses.get(writing_step.id)
+    if writing_response is None:
+        return []
+    sources = sorted({str(ev.doc_id) for ev in writing_response.evidence if ev.doc_id is not None})
+    return [
+        PlanStep(
+            id="post-learning",
+            agent="learning",
+            task="registrar interacción en memoria (post-paso, doc 04 §3)",
+            inputs={
+                "query": query,
+                "answer": str(writing_response.outputs.get("answer", "")),
+                "sources": sources,
+                "confidence": writing_response.confidence,
+            },
+            depends_on=[writing_step.id],
+        )
+    ]
+
+
 class Planner:
     def __init__(
         self,
@@ -126,6 +173,8 @@ class Planner:
         retrieval_agent: Agent,
         graph_agent: Agent,
         writing_agent: Agent,
+        research_agent: Agent | None = None,
+        memory_agent: Agent | None = None,
     ) -> None:
         self._llm = llm
         self._registry: dict[str, Agent] = {
@@ -133,6 +182,10 @@ class Planner:
             "graph": graph_agent,
             "writing": writing_agent,
         }
+        if research_agent is not None:
+            self._registry["research"] = research_agent
+        if memory_agent is not None:
+            self._registry["memory"] = memory_agent
 
     async def _generate_steps(self, request: PlanRequest) -> tuple[list[PlanStep], bool]:
         """Intenta generar un plan dinámico hasta `_MAX_ATTEMPTS` veces; si
@@ -144,7 +197,9 @@ class Planner:
                 prompt if last_error is None else f"{prompt}\n\nError anterior: {last_error}"
             )
             try:
-                raw = await self._llm.generate(full_prompt, system=_PLANNER_SYSTEM)
+                raw = await self._llm.generate(
+                    full_prompt, system=_PLANNER_SYSTEM, timeout=request.constraints.timeout_s
+                )
             except Exception as exc:  # cualquier fallo del LLM dispara fallback
                 last_error = str(exc)
                 continue
@@ -213,10 +268,13 @@ class Planner:
         elif step_degraded:
             degraded_reason = "step_failure"
 
+        post = _build_post_steps(steps, responses, query=request.query)
+
         plan = Plan(
             plan_id=uuid.uuid4(),
             query=request.query,
             steps=enriched,
+            post=post,
             degraded=degraded or step_degraded or budget_timeout,
             degraded_reason=degraded_reason,
             trace_id=request.trace_id,

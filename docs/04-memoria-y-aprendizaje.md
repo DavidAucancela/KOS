@@ -25,6 +25,14 @@ reescritura"*):
   (`MemoryItem`, herramientas MCP `memory.recall`/`memory.store` ya listadas en doc 06 §4) — un
   refactor de orquestación, no una reescritura del modelo de datos ni de las reglas de este doc.
 
+  > **Planificado — Sprint 21** (doc 08, decidido 2026-08-16): `kos.memory_learn` sigue siendo la
+  > task de Celery que dispara la escritura (no bloquea `/v1/query`, sigue siendo asíncrona), pero
+  > pasa a construir un `LearningAgent` real y llamarlo vía un servidor MCP embebido en el worker
+  > en vez de llamar `learn_from_query_answer` directo — el "refactor de orquestación" que este
+  > párrafo prometía, sin tocar el modelo de datos. `MemoryAgent.recall` (Sprint 17, standalone)
+  > se conecta por primera vez al Planner: la "Recuperación" del §3 deja de ser solo un paso del
+  > diagrama sin dueño real.
+
 ## 2. Los cinco tipos de memoria
 
 | Tipo | Contenido | Ejemplo | Escrita por |

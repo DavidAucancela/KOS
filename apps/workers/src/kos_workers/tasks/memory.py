@@ -1,8 +1,15 @@
-"""Tasks de memoria (Sprint 12, doc 04): pipeline fijo de Celery, no agentes
-reales todavía (doc 04 §1.1, Fase 4 no existe). `kos.memory_learn` destila una
+"""Tasks de memoria (Sprint 12, doc 04): `kos.memory_learn` destila una
 consulta ya respondida en una memoria episódica; `kos.memory_consolidate`
 (Celery beat, doc 04 §3 paso 2) agrupa episódicas repetidas en una semántica.
-"""
+
+Sprint 21: `kos.memory_learn` deja de llamar `kos_core.memory_learn` directo
+— construye un `LearningAgent` real (`packages/agents`) y lo invoca vía un
+servidor MCP embebido en el worker (mismo patrón que `apps/api` usa desde
+Sprint 17: `AppContext`/`create_server`/`EmbeddedToolCaller`, uno nuevo por
+invocación de la task — igual que el engine/driver ya se creaban y cerraban
+por task acá). Sigue siendo Celery, sigue sin bloquear `/v1/query` (doc 04:
+"la UI nunca espera al aprendizaje") — el cambio es de orquestación interna,
+no de comportamiento observable (doc 04 §1.1, la promesa de Fase 4)."""
 
 from __future__ import annotations
 
@@ -13,14 +20,18 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from kos_core.config import get_settings
+from kos_agents.learning import LearningAgent
+from kos_agents.memory import MemoryAgent
+from kos_core.config import Settings, get_settings
 from kos_core.llm.ollama import OllamaEmbeddingClient
 from kos_core.memory_learn import INITIAL_SALIENCE as INITIAL_SALIENCE
-from kos_core.memory_learn import AsyncEmbed, AsyncResolveEntities
-from kos_core.memory_learn import learn_from_query_answer as _learn_from_query_answer
+from kos_core.schemas.agents import AgentRequest
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage.postgres import create_engine
+from kos_mcp.client import EmbeddedToolCaller
+from kos_mcp.server import AppContext as MCPAppContext
+from kos_mcp.server import create_server as create_mcp_server
 from kos_workers.celery_app import app
 
 # Mismo criterio que entity resolution del grafo (Sprint 6, graph_sync.py):
@@ -40,29 +51,41 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-async def _learn_core(
+async def _learn_via_agent_core(
     engine: AsyncEngine,
+    driver: Any,
+    embedder: OllamaEmbeddingClient,
+    settings: Settings,
     *,
     query: str,
     answer: str,
     sources: list[str],
     confidence: float,
-    embed: AsyncEmbed,
-    resolve_entities: AsyncResolveEntities,
 ) -> dict[str, Any]:
-    """Wrapper delgado sobre `kos_core.memory_learn.learn_from_query_answer`
-    (Sprint 16, promovido para que la vía Celery y la herramienta MCP
-    `memory.store` compartan la misma lógica ya testeada)."""
-    memory_id = await _learn_from_query_answer(
-        engine,
-        query=query,
-        answer=answer,
-        sources=sources,
-        confidence=confidence,
-        embed=embed,
-        resolve_entities=resolve_entities,
+    """Construye el `LearningAgent` real sobre un servidor MCP embebido
+    (Sprint 21) y lo invoca — reemplaza la llamada directa a
+    `kos_core.memory_learn.learn_from_query_answer` que este módulo tenía
+    hasta Sprint 20."""
+    mcp_context = MCPAppContext(
+        settings=settings, postgres_engine=engine, neo4j_driver=driver, embedding_client=embedder
     )
-    return {"memory_id": str(memory_id)}
+    server = create_mcp_server(mcp_context)
+    async with EmbeddedToolCaller(server) as caller:
+        learning_agent = LearningAgent(MemoryAgent(caller))
+        response = await learning_agent(
+            AgentRequest(
+                task="registrar interacción en memoria episódica (doc 04 §3 paso 1)",
+                inputs={
+                    "query": query,
+                    "answer": answer,
+                    "sources": sources,
+                    "confidence": confidence,
+                },
+                trace_id=str(uuid.uuid4()),
+            )
+        )
+    memory_id = response.outputs.get("memory_id")
+    return {"memory_id": str(memory_id) if memory_id is not None else None}
 
 
 async def _async_memory_learn(
@@ -73,18 +96,16 @@ async def _async_memory_learn(
     embedder = OllamaEmbeddingClient(settings)
     driver = neo4j_storage.create_driver(settings)
 
-    async def resolve_entities(doc_ids: list[str]) -> list[str]:
-        return await neo4j_storage.find_node_ids_by_sources(driver, doc_ids)
-
     try:
-        return await _learn_core(
+        return await _learn_via_agent_core(
             engine,
+            driver,
+            embedder,
+            settings,
             query=query,
             answer=answer,
             sources=sources,
             confidence=confidence,
-            embed=embedder.embed,
-            resolve_entities=resolve_entities,
         )
     finally:
         await embedder.aclose()

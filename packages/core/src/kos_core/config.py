@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Fuentes de conocimiento
     obsidian_vault_path: str = ""
 
+    # Herramientas externas (ResearchAgent, doc 06 §4, Sprint 20)
+    github_token: str = ""
+    brave_search_api_key: str = ""
+
     # Aplicación
     kos_env: str = "development"
     kos_log_level: str = "INFO"

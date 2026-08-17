@@ -51,6 +51,45 @@ async def test_generate_envia_system_y_opciones() -> None:
     assert body["options"] == {"temperature": 0.2, "num_predict": 32}
 
 
+async def test_generate_pasa_timeout_a_la_llamada_http(monkeypatch: Any) -> None:
+    """Auditoría de cierre v0.5 (2026-08-16): `timeout` (ej. de
+    `Constraints.timeout_s`) debe llegar al `post()` real, no quedar
+    desacoplado del `_DEFAULT_TIMEOUT` fijo del cliente."""
+    settings = Settings(_env_file=None)
+    captured: dict[str, Any] = {}
+
+    class _FakeHttpClient:
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            captured.update(kwargs)
+            response = httpx.Response(200, json={"response": "ok"})
+            response.request = httpx.Request("POST", "http://localhost:11434" + url)
+            return response
+
+    client = OllamaLLMClient(settings, client=_FakeHttpClient())  # type: ignore[arg-type]
+    await client.generate("hola", timeout=5.0)
+
+    assert captured["timeout"] == 5.0
+
+
+async def test_generate_sin_timeout_no_lo_manda_explicito() -> None:
+    """Sin `timeout`, no se pasa `timeout=None` (que en httpx significa 'sin
+    límite') — se omite el kwarg para que el cliente use su default real."""
+    settings = Settings(_env_file=None)
+    captured: dict[str, Any] = {}
+
+    class _FakeHttpClient:
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            captured.update(kwargs)
+            response = httpx.Response(200, json={"response": "ok"})
+            response.request = httpx.Request("POST", "http://localhost:11434" + url)
+            return response
+
+    client = OllamaLLMClient(settings, client=_FakeHttpClient())  # type: ignore[arg-type]
+    await client.generate("hola")
+
+    assert "timeout" not in captured
+
+
 def test_implementaciones_cumplen_los_protocolos() -> None:
     settings = Settings(_env_file=None)
     assert isinstance(OllamaEmbeddingClient(settings), EmbeddingClient)

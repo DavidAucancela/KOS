@@ -10,7 +10,7 @@ KOS construye una **representación digital de tu conocimiento**: ingesta cualqu
 
 ## Estado del proyecto
 
-**v0.4 — Memoria y aprendizaje en curso, Sprint 12 cerrado** (2026-08-01, ver [`docs/sprints/`](docs/sprints/)). La API, la web y los workers funcionan end-to-end contra el vault real: ingesta, búsqueda semántica, consulta con evidencia, lectura/corrección/visualización del grafo, propagación del tombstone al grafo, y un pipeline de memoria (episódica → semántica) que audita qué aprendió el sistema. Detalle en [Servicios funcionales](#servicios-funcionales) más abajo y progreso sprint a sprint en [doc 08](docs/08-plan-de-sprints.md).
+**v0.5 — Orquestación de agentes, cerrado** (2026-08-16, Sprints 16–21, ver [`docs/sprints/`](docs/sprints/)). `/v1/query` ya no corre un pipeline fijo: un **Planner** real (LLM) genera un plan dinámico eligiendo entre los agentes `Retrieval`, `Graph`, `Research` (GitHub/web), `Memory` y `Writing`, ejecuta los pasos sin dependencias entre sí en paralelo, y dispara un post-paso de `Learning` que aprende de cada interacción — todo vía un servidor MCP real (`packages/mcp-tools`, 12 herramientas) con gate de aprobación para las de escritura. Si el LLM no puede generar un plan válido, degrada a un pipeline fijo en vez de fallar (`degraded: true`, auditable en `GET /v1/plans/{id}`). Detalle en [Servicios funcionales](#servicios-funcionales) más abajo y progreso sprint a sprint en [doc 08](docs/08-plan-de-sprints.md).
 
 ## Documentación de arquitectura
 
@@ -43,8 +43,8 @@ kos/
 ├── packages/
 │   ├── core/             # Modelo de dominio, ontología, contratos internos
 │   ├── connectors/       # Conectores de ingesta (Obsidian, PDF, Git…)
-│   ├── agents/           # Planner, Retrieval, Graph, Memory… (Fase 4, aún sin código)
-│   └── mcp-tools/        # Servidores MCP de herramientas (aún sin código)
+│   ├── agents/           # Planner, Retrieval, Graph, Research, Memory, Writing, Learning (activo)
+│   └── mcp-tools/        # Servidor MCP: 12 herramientas + gate de permisos (activo)
 ├── infra/                # Configuración de servicios (init de Postgres, etc.)
 ├── docker-compose.yml    # Infraestructura local completa
 └── Makefile              # Atajos de desarrollo
@@ -101,16 +101,22 @@ Aplicación:
 
 `make down` detiene todo; `make clean` además borra los volúmenes de datos locales.
 
+El `ResearchAgent` (`github.*`/`web.*`) funciona sin configuración extra para GitHub (cuota liviana
+anónima); `web.search`/`web.open` necesitan `BRAVE_SEARCH_API_KEY` en `.env` — sin ella, esos pasos
+degradan en vez de romper la respuesta. `GITHUB_TOKEN` es opcional, solo sube la cuota.
+
 ## Servicios funcionales
 
-Estado real a la fecha (Sprint 12 cerrado), no aspiracional — detalle sprint a sprint en [`docs/sprints/`](docs/sprints/):
+Estado real a la fecha (v0.5 cerrado), no aspiracional — detalle sprint a sprint en [`docs/sprints/`](docs/sprints/):
 
-- **API (`apps/api`)** — `GET /health` (Postgres/Neo4j/Redis), `/metrics` (Prometheus), `sources` (alta y sincronización de fuentes), `notes` (crear notas desde el chat), `documents` (listado/detalle/chunks), `search` (búsqueda semántica sobre pgvector), `query` (consulta con evidencia, mediada por el planner/pipeline), `graph` (lectura de nodos/vecindario/camino más corto y corrección manual de nodos y relaciones vía `PATCH`/`DELETE`), `memory` (auditoría de memoria vía `GET`/`DELETE /v1/memory`).
-- **Web (`apps/web`)** — tres vistas: **Chat** (con panel de citas/evidencia), **Grafo** (visualización de fuerzas del grafo con toggle a tabla de nodos, detalle con vecindario, corrección y rechazo de relaciones) y **Estado** (salud de servicios en vivo).
-- **Workers (`apps/workers`)** — ingesta del conector Obsidian, sincronización automática por polling, detección de `doc_type` e intención de plantilla, retiro de evidencia del grafo cuando un documento se tumba (`kos.graph_retire_document`), y el pipeline de memoria (`kos.memory_learn` por consulta respondida, `kos.memory_consolidate` periódico agrupando episódicas repetidas en semánticas).
+- **API (`apps/api`)** — `GET /health` (Postgres/Neo4j/Redis), `/metrics` (Prometheus), `sources` (alta y sincronización de fuentes), `notes` (crear notas desde el chat), `documents` (listado/detalle/chunks), `search` (búsqueda semántica sobre pgvector), `query` (consulta con evidencia, mediada por el Planner real), `graph` (lectura de nodos/vecindario/camino más corto y corrección manual de nodos y relaciones vía `PATCH`/`DELETE`), `memory` (auditoría de memoria vía `GET`/`DELETE /v1/memory`), `plans` (`GET /v1/plans/{id}`: traza completa del plan ejecutado, incluido el post-paso de aprendizaje).
+- **Agentes (`packages/agents`)** — `Planner` (LLM genera un plan JSON dinámico, con reintento y fallback a un plan fijo si no valida), `RetrievalAgent`/`GraphAgent`/`ResearchAgent`/`MemoryAgent` como pasos de evidencia elegidos por el LLM según lo que la pregunta necesite, `WritingAgent` para la síntesis final con citas, y `LearningAgent` como post-paso fijo (no elegido por el LLM) que registra cada interacción en memoria episódica. Presupuestos de tiempo/pasos por plan (`Constraints`) se hacen cumplir de verdad, con degradación observable (`degraded_reason`).
+- **Herramientas MCP (`packages/mcp-tools`)** — 12 herramientas reales tras un único servidor: `vector.search`, `docs.read_document`, `graph.get_node`/`find_path`/`query`, `memory.recall`/`store`, `obsidian.create_note`, `github.search_repos`/`search_commits`, `web.search`/`open`. Las de escritura (`memory.store`, `obsidian.create_note`) exigen `confirm=true` vía un gate real (`permissions.py`), auditado en logs estructurados.
+- **Web (`apps/web`)** — cuatro vistas: **Chat** (con panel de citas/evidencia), **Grafo** (visualización de fuerzas con toggle a tabla de nodos, detalle con vecindario, corrección y rechazo de relaciones), **Trazas** (inspección de un plan ejecutado por `plan_id`) y **Estado** (salud de servicios en vivo).
+- **Workers (`apps/workers`)** — ingesta del conector Obsidian, sincronización automática por polling, detección de `doc_type` e intención de plantilla, retiro de evidencia del grafo cuando un documento se tumba, y el pipeline de memoria: `kos.memory_learn` construye un `LearningAgent` real sobre un servidor MCP embebido por invocación (no llama al storage directo), `kos.memory_consolidate` agrupa episódicas repetidas en semánticas.
 - **Infraestructura** — Postgres+pgvector, Neo4j (con APOC), Redis, MinIO y Ollama funcionando localmente; un vigía (`make guardian-watch`, activable con `KOS_GUARDIAN_ENABLED=true`) apaga y enciende la infraestructura Docker según uso real.
 
-Pendiente (deuda visible, no en progreso): herramientas MCP de lectura del grafo, consumidores del evento `graph.updated`, recálculo de confianza al perder una fuente (doc 04 §5), zoom/pan y caminos resaltados en la visualización del grafo, entity-linking y búsqueda semántica en memoria (`entities[]` vacío, `GET /v1/memory?q=` es texto simple), memoria sin influir todavía en `/v1/query`, y todo `packages/agents` (Fase 4) en adelante (v0.5 Agentes, v1.0).
+Pendiente (deuda visible, ver [`docs/deuda-tecnica.md`](docs/deuda-tecnica.md)): consumidores del evento `graph.updated` (Learning agent como post-paso real ya existe, pero no reacciona a cambios del grafo), recálculo de confianza al perder una fuente en memoria semántica compuesta, zoom/pan y caminos resaltados en la visualización del grafo, búsqueda semántica en memoria (`GET /v1/memory?q=` sigue siendo texto simple), catálogo del Planner para grafo acotado a plantillas sin `node_id` explícito, herramientas MCP de escritura de Obsidian más allá de `create_note` (`read_note`/`update_note`/`create_folder`).
 
 ## Principios
 

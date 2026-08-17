@@ -6,12 +6,16 @@ requires-python = ">=3.12"
 dependencies = [
     "kos-core",
     "kos-connectors",
+    "kos-mcp-tools",
+    "kos-agents",
     "celery[redis]>=5.5",
 ]
 
 [tool.uv.sources]
 kos-core = { workspace = true }
 kos-connectors = { workspace = true }
+kos-mcp-tools = { workspace = true }
+kos-agents = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -270,9 +270,9 @@ semántica nueva). Retro de cierre de v0.4.
 | 16 | Servidor MCP real: 7 herramientas de lectura/escritura envolviendo lo ya existente | ✅ Cerrado 2026-08-15 |
 | 17 | Los agentes existen: Retrieval/Graph/Memory reales consumiendo las herramientas MCP | ✅ Cerrado 2026-08-15 |
 | 18 | El planner decide: planes dinámicos con LLM, ejecución paralela, Writing agent | ✅ Cerrado 2026-08-15 |
-| 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | 🟡 Planificado |
-| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | 🟡 Planificado |
-| 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | 🟡 Planificado |
+| 19 | El plan se audita: `GET /v1/plans/{id}`, presupuestos y degradación, UI de inspección | ✅ Cerrado 2026-08-16 |
+| 20 | El mundo entra: Research agent (MCP externo) + `permissions.py` real para escritura | ✅ Cerrado 2026-08-16 (`obsidian.create_note` a MCP: pospuesto en el sprint, retomado el mismo día vía addendum) |
+| 21 | Aprender del plan: Learning agent como post-paso real; memoria empieza a leerse, no solo escribirse | ✅ Cerrado 2026-08-16 |
 
 Estimación original de doc 07 (6-8 semanas): revisada a 6 sprints (~12 semanas) al planificar
 Sprint 16 — no había ni una línea de código de MCP/agentes, la estimación asumía más base
@@ -348,6 +348,137 @@ romper la respuesta.
 > contra infra real (3 escenarios: plan con grafo, plan factual, fallback). 287 tests unitarios +
 > 30 de integración, ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
 > `docs/sprints/sprint-18.md`.
+
+### Sprint 19 — "El plan se audita"
+
+**Objetivo:** cerrar la deuda explícita de Sprint 18 — presupuestos (`Constraints.timeout_s`/
+`max_steps`) exigidos de verdad, y el plan generado persistido y auditable vía `GET
+/v1/plans/{id}`.
+
+**Demo:** una consulta real a `/v1/query` persiste su plan y `GET /v1/plans/{plan_id}` devuelve
+los mismos `steps`/`degraded`; un `plan_id` inexistente da 404; forzar `timeout_s`/`max_steps`
+bajos corta la ejecución con `degraded=true` y un `degraded_reason` específico, sin perder las
+oleadas ya completadas.
+
+> **Sprint 19 cerrado 2026-08-16**: tabla `kos.plans` (migración `0007_plans.py`) +
+> `save_plan`/`get_plan` (`packages/core/.../storage/postgres.py`) + `GET /v1/plans/{plan_id}`
+> (`apps/api/.../routes/plans.py`, doc 06 línea 59). `executor.py` exige `timeout_s` (corta al
+> tope de una oleada, no cancela tareas en curso) y `max_steps` de verdad —
+> `degraded_reason="budget_timeout"`/`"budget_max_steps"`, mismo campo `degraded` que
+> `QueryResult` usa desde Sprint 4. Tercera pestaña en `apps/web` (`TracesPage`) para inspeccionar
+> un plan por `plan_id`. Verificado con `scripts/demo_sprint19.py` contra infra real (API real,
+> `make up`): persistencia, 404, y ambos tipos de degradación por presupuesto. 294 tests
+> unitarios + 34 de integración (33 pasan; el fallo restante es el preexistente ya registrado en
+> `docs/deuda-tecnica.md`, sin relación con este sprint), ruff, `mypy --strict` (core) e
+> import-linter limpios. Retro completa en `docs/sprints/sprint-19.md`.
+
+### Sprint 20 — "El mundo entra"
+
+**Objetivo:** `ResearchAgent` real, conectado al Planner, buscando fuera del vault vía MCP
+externo (`github.*`, `web.*`, doc 06 §4) cuando una pregunta lo necesita.
+
+> **Decisión de alcance (2026-08-16)**: la migración de `obsidian.create_note` a herramienta MCP
+> con `permissions.py` (la otra mitad del objetivo original de este sprint en la fila de arriba)
+> se pospone — decisión explícita del usuario, para no mezclar "conectar el mundo exterior" con
+> "reescribir un camino que ya funciona sin bloquear nada". Queda como deuda sin sprint asignado
+> todavía (`docs/deuda-tecnica.md`). Fuentes elegidas: GitHub (API pública, sin key para uso
+> liviano) y Brave Search (`BRAVE_SEARCH_API_KEY`) para `web.*` — ver doc 06 §4 para el detalle.
+
+- `packages/mcp-tools/src/kos_mcp/tools/github.py`: `github.search_repos`, `github.search_commits`
+  contra la API pública de GitHub (`GITHUB_TOKEN` opcional para más cuota).
+- `packages/mcp-tools/src/kos_mcp/tools/web.py`: `web.search`, `web.open` contra Brave Search API
+  (`BRAVE_SEARCH_API_KEY` requerido — sin key, la tool devuelve un error claro, no falla en
+  silencio).
+- `packages/agents/src/kos_agents/research.py`: `ResearchAgent` (mismo contrato `Agent` que
+  Retrieval/Graph/Writing), evidencia con `source_id`=URL, `connector="github"|"web"`.
+- `Planner` suma `research` a su catálogo (doc 03 §3); `executor.py`/`query_service.py` lo
+  registran junto a los demás agentes.
+
+**Demo:** una pregunta que necesita contexto externo (ej. "¿qué cambió recientemente en la
+librería X que uso?") genera un plan con un paso `research`, con evidencia citando resultados
+reales de GitHub/web; una pregunta puramente sobre el vault no lo incluye (el LLM decide, no una
+heurística); sin `BRAVE_SEARCH_API_KEY` configurada, un plan que necesita `web.search` degrada en
+vez de romper la respuesta.
+
+> **Sprint 20 cerrado 2026-08-16**: `packages/mcp-tools/src/kos_mcp/tools/{github,web}.py`
+> (`github.search_repos`/`search_commits` contra la API pública; `web.search` vía Brave Search
+> API, `web.open` con extracción de texto por regex) + `ResearchAgent` (`packages/agents`) +
+> `Planner`/`query.py` conectándolo al catálogo real. Verificado con `scripts/demo_sprint20.py`
+> contra internet real (sin mocks de red): 3 repos reales de GitHub, fetch real de
+> `fastapi.tiangolo.com`, y `POST /v1/query` real donde el LLM (llama3.2 local) eligió `research`
+> por su cuenta para una pregunta que lo necesitaba — degradó (`degraded=true`) porque el LLM
+> omitió `operation` en los inputs del paso, y `executor.py` (Sprint 18) lo absorbió sin romper
+> la respuesta, sin necesitar ningún cambio de código nuevo. Un bug encontrado y arreglado
+> (tools MCP que devuelven una lista top-level llegan envueltas en `{"result": [...]}`, distinto
+> de como devuelven las tools de grafo) — ver `docs/deuda-tecnica.md` y la retro. La migración de
+> `obsidian.create_note` a MCP se pospuso por decisión explícita del usuario. 309 tests unitarios
+> (25 nuevos), ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
+> `docs/sprints/sprint-20.md`.
+
+### Fuera de plan (pedido directo del usuario, 2026-08-16): migrar `obsidian.create_note` a MCP
+
+Lo que Sprint 20 pospuso por decisión explícita. `obsidian.create_note` pasa a ser una herramienta
+MCP real con gate de aprobación en `permissions.py` (`WRITE_TOOLS`), en vez de vivir solo como
+lógica directa en `apps/api`. La lógica de renderizado/escritura se promueve a
+`packages/core/src/kos_core/notes.py` (`kos_mcp` no puede depender de `apps/api`, doc 09 §2). El
+comando `/crear-nota` del chat sigue funcionando igual (convive con la tool, doc 06 §4).
+
+> **Cerrado 2026-08-16**: `packages/core/src/kos_core/notes.py` (promovido desde
+> `apps/api/.../notes_service.py`, que queda como re-export delgado para no romper los call sites
+> existentes) + `obsidian.create_note` (`packages/mcp-tools/src/kos_mcp/tools/obsidian.py`,
+> `confirm=true` requerido) + `WRITE_TOOLS` suma `"obsidian.create_note"` (mismo gate real que
+> `memory.store`). Verificado contra el vault real (`/Users/david/Documents/Obsidian Vault`, no
+> mockeado): sin `confirm` no escribió nada; con `confirm=true` creó una nota real desde la
+> plantilla `Concepto` con contenido renderizado correcto; un segundo intento sobre el mismo
+> título falló como se esperaba (nunca sobreescribe); limpieza verificada, sin residuo en el
+> vault. 316 tests unitarios (7 nuevos), ruff, `mypy --strict` (core) e import-linter limpios.
+> Retro (addendum) en `docs/sprints/sprint-20.md`.
+
+### Sprint 21 — "Aprender del plan"
+
+**Objetivo:** el Learning agent pasa a ser un post-paso real del plan (`Plan.post`, doc 03 §3);
+la memoria empieza a leerse en `/v1/query`, no solo a escribirse.
+
+> **Decisiones de alcance (2026-08-16)**: (1) el post-paso de aprendizaje sigue corriendo en
+> Celery — no se mueve a una tarea en el proceso de la API — pero la tarea `kos.memory_learn`
+> pasa a construir un `LearningAgent` real y llamarlo vía un servidor MCP embebido en el worker
+> (mismo patrón que `apps/api` desde Sprint 17), en vez de llamar `kos_core.memory_learn`
+> directo. Mantiene la propiedad clave de hoy (no bloquea la respuesta, es durable si el worker
+> se cae) y cumple la promesa de doc 04 §1.1 de exponer esto como agente real en Fase 4. (2)
+> `memory` se suma al catálogo del Planner con el mismo patrón que `research` (Sprint 20): el LLM
+> decide cuándo una pregunta se beneficia de memoria previa, no una heurística fija. Consumir el
+> evento `graph.updated` (deuda desde Sprint 9) queda fuera de este sprint — ver doc 03 §3 y
+> `docs/deuda-tecnica.md`.
+
+- `packages/core/src/kos_core/schemas/plan.py`: `Plan.post: list[PlanStep]` (nuevo campo).
+- `packages/agents/src/kos_agents/learning.py` (nuevo): `LearningAgent`, mismo contrato `Agent`
+  que los demás — llama `memory.store` con `confirm=true` (el sistema completando un paso ya
+  decidido de antemano, doc 03 §3, no un agente decidiendo escribir algo nuevo por su cuenta).
+- `Planner` suma `memory` a su catálogo de evidencia (`MemoryAgent.recall`, ya existe desde
+  Sprint 17, standalone) y arma `Plan.post` con un paso `learning` fijo (determinístico, no
+  elegido por el LLM — mismo comportamiento incondicional que `kos.memory_learn` ya tiene desde
+  Sprint 12) al final de cada plan.
+- `apps/workers/src/kos_workers/tasks/memory.py::memory_learn`: en vez de llamar
+  `kos_core.memory_learn.learn_from_query_answer` directo, construye un `AppContext`/
+  `create_server`/`EmbeddedToolCaller` por invocación (mismo patrón de recursos por-tarea que ya
+  usa este módulo) y llama al `LearningAgent` real.
+- `apps/workers/pyproject.toml` suma `kos-mcp-tools` y `kos-agents` como dependencias nuevas.
+
+**Demo:** una pregunta que se beneficia de memoria previa (ej. una consulta repetida sobre un
+tema ya conversado) genera un plan con un paso `memory` real, visible en `GET /v1/plans/{id}`;
+tras responder, `GET /v1/memory` muestra una memoria episódica nueva creada por el `LearningAgent`
+real (no por la llamada directa a storage de antes) — verificado contra infra real, sin mocks.
+
+> **Sprint 21 cerrado 2026-08-16 — v0.5 cerrado**: `Plan.post` (migración `0008_plan_post.py`) +
+> `LearningAgent` (reusa `MemoryAgent.store`, fuerza `confirm=true`) + `Planner` suma `memory` al
+> catálogo y arma `Plan.post` de forma declarativa + `kos.memory_learn` (worker) pasa a llamar al
+> `LearningAgent` real vía un servidor MCP embebido, en vez de `kos_core.memory_learn` directo.
+> Verificado con `scripts/demo_sprint21.py` contra infra real (API + worker de Celery real, sin
+> mocks): un `POST /v1/query` real dejó `Plan.post` declarado y, tras esperar al worker real
+> (~13s, latencia normal de Ollama), una memoria episódica nueva visible en `GET /v1/memory`; una
+> pregunta sobre "conversaciones previas" hizo que el LLM local eligiera `memory` por su cuenta
+> como paso de evidencia. 320 tests unitarios (14 nuevos), ruff, `mypy --strict` (core) e
+> import-linter limpios. Retro completa en `docs/sprints/sprint-21.md`.
 
 ## Gestión
 
