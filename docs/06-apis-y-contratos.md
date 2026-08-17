@@ -1,6 +1,6 @@
 # 06 — Especificación de APIs y contratos entre servicios
 
-**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-25
+**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-08-16
 
 ## 1. Principios
 
@@ -58,6 +58,7 @@ query arbitraria.
 | `DELETE` | `/v1/memory/{id}` | Olvidar (archivado, no borrado físico) | 3 |
 | `GET` | `/v1/plans/{id}` | Traza completa de un plan ejecutado | 4 |
 | `GET` | `/v1/recommendations` | Lagunas, contradicciones, sugerencias | 5 |
+| `PATCH` | `/v1/recommendations/{id}` | Aceptar/descartar una recomendación (doc 11 §8) | 5 |
 
 ### Convenciones HTTP
 
@@ -101,6 +102,12 @@ Estos contratos se usan desde la Fase 1 (aunque el "planner" sea un pipeline fij
 | `document.parsed` | Parser | Grafo, Aprendizaje | `doc_id`, `pipeline_version` |
 | `document.deleted` | Ingesta | Grafo, Aprendizaje | `doc_id` |
 | `graph.updated` | Entity Resolution | Aprendizaje, Recomendador | `node_ids[]`, `edge_ids[]` |
+
+> **Entrega real (doc 11 §3, planificado Sprint 22):** `graph.updated` no se entrega vía
+> suscripción al canal pub/sub `kos:events` — un consumidor que se suscribiera directo perdería
+> eventos publicados mientras no está corriendo. Se entrega vía tasks de Celery encadenados
+> (`kos.graph_sync` → `kos.recommend_from_graph_update`), mismo patrón que doc 04 §1.1 ya usa para
+> aprendizaje. La semántica del evento no cambia, solo el mecanismo de entrega.
 | `conversation.completed` | API | Learning Agent | `conversation_id` |
 | `memory.written` | Learning Agent | Recomendador | `memory_id`, `type` |
 
@@ -120,6 +127,9 @@ Toda capacidad con efectos u acceso a datos se expone como herramienta MCP ([ADR
 | `github.search_repos`, `github.search_commits` | lectura externa | 4 |
 | `web.search`, `web.open` | lectura externa | 4 |
 | `roadmap.create`, `roadmap.update` | escritura | 5 |
+
+> `roadmap.create`/`roadmap.update` no se construyen en los Sprints 22-26 (v1.0) — "roadmaps
+> personalizados" queda diferido a una iteración posterior de Fase 5 (doc 11 §4).
 
 Reglas: las herramientas de escritura requieren aprobación del usuario por defecto; toda invocación se registra con `trace_id` del plan que la causó.
 

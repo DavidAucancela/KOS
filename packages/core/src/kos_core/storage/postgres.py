@@ -123,6 +123,30 @@ memory_items_table = Table(
     ),
 )
 
+recommendations_table = Table(
+    "recommendations",
+    metadata,
+    Column("recommendation_id", UUID(as_uuid=True), primary_key=True),
+    Column("type", Text, nullable=False, index=True),
+    Column("title", Text, nullable=False),
+    Column("description", Text, nullable=False, server_default=text("''")),
+    Column("evidence", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("target_entities", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("confidence", Float, nullable=False, server_default=text("0.0")),
+    Column("priority", Integer, nullable=False, server_default=text("0")),
+    Column("status", Text, nullable=False, server_default=text("'pending'"), index=True),
+    Column("dismissed_reason", Text),
+    Column("source_event_id", Text),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    ),
+    Column("resolved_at", DateTime(timezone=True)),
+)
+
 plans_table = Table(
     "plans",
     metadata,
@@ -499,6 +523,101 @@ async def mark_superseded(
             .values(superseded_by=superseded_by)
         )
         return result.rowcount
+
+
+async def insert_recommendation(
+    engine: AsyncEngine,
+    *,
+    recommendation_id: uuid_lib.UUID,
+    type: str,
+    title: str,
+    description: str,
+    evidence: list[dict[str, Any]],
+    target_entities: list[str],
+    confidence: float,
+    priority: int,
+    status: str,
+    source_event_id: str | None,
+) -> None:
+    """Escribe una `Recommendation` (doc 11 §2/§6, Sprint 22); `recommendations.store`
+    (MCP) es el único llamador — el `RecommenderAgent` nunca importa esto
+    directo (ADR-0005: los agentes solo hablan MCP)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            recommendations_table.insert().values(
+                recommendation_id=recommendation_id,
+                type=type,
+                title=title,
+                description=description,
+                evidence=evidence,
+                target_entities=target_entities,
+                confidence=confidence,
+                priority=priority,
+                status=status,
+                source_event_id=source_event_id,
+            )
+        )
+
+
+async def has_pending_recommendation(
+    engine: AsyncEngine, *, type: str, target_entities: list[str]
+) -> bool:
+    """Guardarraíl contra duplicados (Sprint 23, doc 11 §8): sin esto, cada
+    `graph.updated` volvería a insertar la misma laguna. El dedup completo por
+    descarte (misma firma tras `dismissed`) es Sprint 25 — esto solo evita
+    acumular filas `pending` repetidas mientras tanto."""
+    sorted_entities = sorted(target_entities)
+    query = select(recommendations_table.c.recommendation_id).where(
+        recommendations_table.c.status == "pending",
+        recommendations_table.c.type == type,
+        recommendations_table.c.target_entities == sorted_entities,
+    )
+    async with engine.connect() as conn:
+        return (await conn.execute(query)).first() is not None
+
+
+_RECOMMENDATION_COLUMNS = [
+    recommendations_table.c.recommendation_id,
+    recommendations_table.c.type,
+    recommendations_table.c.title,
+    recommendations_table.c.description,
+    recommendations_table.c.evidence,
+    recommendations_table.c.target_entities,
+    recommendations_table.c.confidence,
+    recommendations_table.c.priority,
+    recommendations_table.c.status,
+    recommendations_table.c.dismissed_reason,
+    recommendations_table.c.source_event_id,
+    recommendations_table.c.created_at,
+    recommendations_table.c.resolved_at,
+]
+
+
+async def list_recommendations(
+    engine: AsyncEngine,
+    *,
+    type: str | None = None,
+    status: str | None = None,
+    cursor: uuid_lib.UUID | None = None,
+    limit: int = 20,
+) -> tuple[list[dict[str, Any]], uuid_lib.UUID | None]:
+    """`GET /v1/recommendations?type=&status=` (doc 06 §2, Sprint 23) — mismo
+    patrón de cursor que `list_memories`."""
+    query = (
+        select(*_RECOMMENDATION_COLUMNS)
+        .order_by(recommendations_table.c.recommendation_id)
+        .limit(limit)
+    )
+    if type is not None:
+        query = query.where(recommendations_table.c.type == type)
+    if status is not None:
+        query = query.where(recommendations_table.c.status == status)
+    if cursor is not None:
+        query = query.where(recommendations_table.c.recommendation_id > cursor)
+    async with engine.connect() as conn:
+        rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
+    next_cursor = rows[-1]["recommendation_id"] if len(rows) == limit else None
+    return rows, next_cursor
 
 
 async def insert_plan(engine: AsyncEngine, plan: Plan) -> None:

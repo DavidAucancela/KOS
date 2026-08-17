@@ -8,8 +8,9 @@ from neo4j import AsyncDriver
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
-from kos_api.deps import neo4j_driver, redis_client
+from kos_api.deps import neo4j_driver, redis_client, settings_dep
 from kos_api.services import graph_service
+from kos_core.config import Settings
 from kos_core.schemas.events import GraphUpdated
 from kos_core.schemas.graph import (
     GraphNode,
@@ -138,6 +139,7 @@ async def patch_node(
     request: Request,
     driver: AsyncDriver = Depends(neo4j_driver),
     redis: Redis = Depends(redis_client),
+    settings: Settings = Depends(settings_dep),
 ) -> GraphNode:
     try:
         updated = await graph_service.correct_node(
@@ -153,6 +155,9 @@ async def patch_node(
         raise HTTPException(status_code=404, detail="Nodo no encontrado")
     trace_id: str | None = getattr(request.state, "trace_id", None)
     await publish_event(redis, GraphUpdated(node_ids=[node_id], trace_id=trace_id))
+    graph_service.enqueue_recommend(
+        settings, node_ids=[node_id], relation_ids=[], trace_id=trace_id
+    )
     return GraphNode.model_validate(updated)
 
 
@@ -163,6 +168,7 @@ async def patch_relation(
     request: Request,
     driver: AsyncDriver = Depends(neo4j_driver),
     redis: Redis = Depends(redis_client),
+    settings: Settings = Depends(settings_dep),
 ) -> GraphRelation:
     try:
         updated = await graph_service.correct_relation(
@@ -174,6 +180,9 @@ async def patch_relation(
         raise HTTPException(status_code=404, detail="Relación no encontrada")
     trace_id: str | None = getattr(request.state, "trace_id", None)
     await publish_event(redis, GraphUpdated(relation_ids=[relation_id], trace_id=trace_id))
+    graph_service.enqueue_recommend(
+        settings, node_ids=[], relation_ids=[relation_id], trace_id=trace_id
+    )
     return GraphRelation.model_validate(updated)
 
 
@@ -183,9 +192,13 @@ async def delete_relation(
     request: Request,
     driver: AsyncDriver = Depends(neo4j_driver),
     redis: Redis = Depends(redis_client),
+    settings: Settings = Depends(settings_dep),
 ) -> None:
     rejected = await graph_service.reject_relation(driver, relation_id)
     if not rejected:
         raise HTTPException(status_code=404, detail="Relación no encontrada")
     trace_id: str | None = getattr(request.state, "trace_id", None)
     await publish_event(redis, GraphUpdated(relation_ids=[relation_id], trace_id=trace_id))
+    graph_service.enqueue_recommend(
+        settings, node_ids=[], relation_ids=[relation_id], trace_id=trace_id
+    )

@@ -1,6 +1,6 @@
 # 04 — Modelo de memoria y aprendizaje continuo
 
-**Estado:** 🔵 En revisión · **Última actualización:** 2026-07-31 · **Habilita:** Fase 3
+**Estado:** 🔵 En revisión · **Última actualización:** 2026-08-16 · **Habilita:** Fase 3
 
 ## 1. Principio
 
@@ -109,6 +109,8 @@ Actualizar roadmap          (si cambió el mapa de skills)                      
   ↓
 Actualizar conocimiento     (recalcular lagunas, contradicciones, sugerencias)      [Fase 5, fuera de v0.4]
 ```
+
+> Estos dos últimos pasos se formalizan en [11 — Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) (planificado 2026-08-16, v1.0).
 
 Propiedades del pipeline:
 

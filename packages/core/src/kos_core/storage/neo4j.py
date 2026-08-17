@@ -379,6 +379,34 @@ async def subgraph_relations(driver: AsyncDriver, node_ids: list[str]) -> list[R
         return [RelationRecord(record) async for record in result]
 
 
+# doc 02 §4 regla 4: mismo umbral que ya usa la UI para decidir qué mostrar
+# (≥0.5) — reusado acá como proxy de "débilmente evidenciado" (Sprint 23,
+# doc 11 §4: sin nodo Person/KNOWS real todavía, ver docs/deuda-tecnica.md).
+GAP_CONFIDENCE_THRESHOLD = 0.5
+
+
+async def gaps_by_prerequisite(
+    driver: AsyncDriver, *, confidence_threshold: float = GAP_CONFIDENCE_THRESHOLD, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Candidatos de laguna de conocimiento (doc 11 §4/§5, Sprint 23): nodos que
+    son `PREREQUISITE_OF` algo pero cuya propia `confidence` está por debajo del
+    umbral de visualización — sin `KNOWS`/`Person` real (deuda documentada,
+    docs/deuda-tecnica.md), es el proxy más simple que ya existe en el grafo
+    para "esto está poco evidenciado en tu vault"."""
+    query = (
+        "MATCH (prereq)-[r:PREREQUISITE_OF]->(dependent) "
+        "WHERE NOT coalesce(r.rejected, false) "
+        "AND coalesce(prereq.confidence, 1.0) < $threshold "
+        "WITH prereq, collect(DISTINCT dependent.name) AS blocks "
+        "RETURN prereq.id AS node_id, prereq.canonical_name AS canonical_name, "
+        "prereq.name AS name, coalesce(prereq.confidence, 1.0) AS confidence, blocks "
+        "ORDER BY confidence ASC LIMIT $limit"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"threshold": confidence_threshold, "limit": limit})
+        return [dict(record) async for record in result]
+
+
 async def _retire_document_relations(driver: AsyncDriver, doc_id: str) -> int:
     """Saca `doc_id` de `sources[]` de toda relación que lo mencione y recalcula
     `confidence` con lo que sobrevive (doc 04 §5, fórmula decidida 2026-08-13:
