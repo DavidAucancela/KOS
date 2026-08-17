@@ -17,6 +17,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 08 | [Plan de sprints](08-plan-de-sprints.md) | Planificación | 🟡 Borrador |
 | 09 | [Guía de desarrollo y despliegue](09-guia-desarrollo-y-despliegue.md) | Todas | 🟢 Aprobado |
 | 10 | [Estructura del proyecto](10-estructura-del-proyecto.md) | Todas | 🟢 Aprobado |
+| 11 | [Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) | Fase 5 | 🟡 Borrador |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado
 

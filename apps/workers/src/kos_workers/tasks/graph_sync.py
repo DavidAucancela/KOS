@@ -287,6 +287,7 @@ async def _sync_graph(
         "synced": True,
         "entities": len(normalized),
         "relations": relations_written,
+        "node_ids": list(node_ids.values()),
     }
 
 
@@ -328,5 +329,18 @@ async def _async_graph_sync(doc_id: uuid.UUID) -> dict[str, Any]:
 
 @app.task(name="kos.graph_sync")
 def graph_sync(doc_id: str) -> dict[str, Any]:
-    """Extrae entidades/relaciones y las sincroniza a Neo4j (idempotente por MERGE)."""
-    return asyncio.run(_async_graph_sync(uuid.UUID(doc_id)))
+    """Extrae entidades/relaciones y las sincroniza a Neo4j (idempotente por MERGE).
+
+    Encadena `kos.recommend_from_graph_update` (Sprint 22, doc 11 §3) cuando
+    sincronizó algo real: hasta este sprint, `GraphUpdated` solo se emitía
+    desde correcciones manuales de grafo — el camino automático (esta task)
+    nunca lo disparaba pese a que su propio docstring lo prometía
+    (`kos_core.schemas.events.GraphUpdated`)."""
+    result = asyncio.run(_async_graph_sync(uuid.UUID(doc_id)))
+    if result.get("synced") and result.get("node_ids"):
+        # Import diferido: evita un ciclo de import a nivel de módulo entre
+        # graph_sync.py y recommend.py (ambos se registran en celery_app.py).
+        from kos_workers.tasks.recommend import recommend_from_graph_update
+
+        recommend_from_graph_update.delay(node_ids=result["node_ids"], relation_ids=[])
+    return result

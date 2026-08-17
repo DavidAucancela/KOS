@@ -1,6 +1,6 @@
 # 10 — Estructura del proyecto y organización de archivos
 
-**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-07-14
+**Estado:** 🟢 Aprobado (2026-07-14) · **Última actualización:** 2026-08-16
 
 Este documento fija **dónde vive cada cosa**: el árbol objetivo del monorepo, qué contiene cada directorio y en qué sprint se crea. Es el mapa que evita que el código aterrice "donde caiga". Si un archivo nuevo no encaja en esta estructura, primero se actualiza este documento.
 
@@ -89,6 +89,7 @@ apps/workers/
 │   │   │   └── kos.sync_all_sources #  polling automático (doc 05 §2)   Sprint 7
 │   │   ├── embed.py              #   lotes de embeddings             Sprint 3
 │   │   ├── graph_sync.py         #   document.parsed → grafo         Sprint 6
+│   │   │   └── kos.recommend_from_graph_update #  graph.updated → Recomendador (doc 11 §3) Sprint 22
 │   │   ├── learning.py           #   pipeline de aprendizaje         Fase 3
 │   │   └── consolidate.py        #   consolidación de memoria        Fase 3
 │   └── pipeline/                 # LAS 9 ETAPAS DEL PARSER (doc 05 §3)
@@ -121,7 +122,8 @@ apps/web/
 │   │   ├── chat/                 #   centro: conversación + citas    Sprint 4
 │   │   ├── explorer/             #   izquierda: fuentes/entidades    Sprint 4
 │   │   ├── graph/                #   derecha: grafo interactivo      Fase 2
-│   │   └── traces/               #   abajo: planes y herramientas    Fase 4
+│   │   ├── traces/               #   abajo: planes y herramientas    Fase 4
+│   │   └── recommendations/      #   superficie mínima (badge/lista, doc 11 §7) — panel exacto a decidir en Sprint 25
 │   ├── components/               # shadcn/ui + componentes compartidos
 │   └── lib/                      # utilidades sin estado
 └── tests/                        # vitest
@@ -189,7 +191,8 @@ packages/agents/
 │   ├── retrieval.py · graph.py · memory.py     # Sprint 17
 │   ├── writing.py                              # Sprint 18
 │   ├── research.py                             # Sprint 20
-│   └── learning.py                             # Sprint 21
+│   ├── learning.py                             # Sprint 21
+│   └── recommender.py                          # Sprint 22, doc 11 §5
 └── tests/
 ```
 

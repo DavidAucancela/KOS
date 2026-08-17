@@ -22,7 +22,9 @@ logger = logging.getLogger("kos_mcp.permissions")
 
 # Registro de herramientas de escritura: `roadmap.*` (Sprints posteriores) se
 # suma acá sin tocar los call sites de `gate()`.
-WRITE_TOOLS: frozenset[str] = frozenset({"memory.store", "obsidian.create_note"})
+WRITE_TOOLS: frozenset[str] = frozenset(
+    {"memory.store", "obsidian.create_note", "recommendations.store"}
+)
 
 
 class ApprovalRequired(Exception):

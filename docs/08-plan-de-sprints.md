@@ -1,8 +1,8 @@
 # 08 — Plan de implementación por sprints
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-26
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16
 
-Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan detalla v0.1 y v0.2; los sprints de versiones posteriores se planifican al cerrar la versión anterior, con lo aprendido.
+Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan detalla v0.1 → v0.5 (cerradas) y v1.0 (planificada, sin ejecutar); v1.1 se planifica al cerrar v1.0, con lo aprendido.
 
 ## Cadencia y reglas
 
@@ -479,6 +479,128 @@ real (no por la llamada directa a storage de antes) — verificado contra infra 
 > pregunta sobre "conversaciones previas" hizo que el LLM local eligiera `memory` por su cuenta
 > como paso de evidencia. 320 tests unitarios (14 nuevos), ruff, `mypy --strict` (core) e
 > import-linter limpios. Retro completa en `docs/sprints/sprint-21.md`.
+
+## v1.0 — Recomendador (Fase 5)
+
+Planificado 2026-08-16, tras cerrar v0.5. Documento habilitante:
+[11 — Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) (🟡
+Borrador). Ver `docs/07-roadmap-versiones.md` para la nota de división v1.0/v1.1.
+
+Cinco sprints — no tres o cuatro optimistas: el patrón histórico de v0.3/v0.4/v0.5 corrió 2x lo
+estimado cada vez, y esta vez el alcance ya está recortado a 2 de los 5 tipos de recomendación
+originales (doc 11 §4).
+
+| Sprint | Tema | Estado |
+|---|---|---|
+| 22 | `graph.updated` deja de ser huérfano: emisión real desde sync automático + entrega vía Celery encadenado + tabla `recommendations` + `RecommenderAgent` esqueleto | ✅ Cerrado 2026-08-17 |
+| 23 | Lagunas de conocimiento: primer tipo de recomendación real | ✅ Cerrado 2026-08-17 |
+| 24 | Contradicciones: segundo tipo de recomendación real | Planificado |
+| 25 | Feedback loop: aceptar/descartar + UI mínima | Planificado |
+| 26 | Cierre de construcción: verificación en vivo + arranque de la ventana de uso real | Planificado |
+
+### Sprint 22 — "El grafo avisa de verdad"
+
+**Objetivo:** cerrar la deuda fundacional (`docs/deuda-tecnica.md`, "nadie consume el evento
+`graph.updated`") antes de construir nada del Recomendador sobre ella — y el hallazgo real de doc
+11 §3.1: el camino automático (`kos.graph_sync`) nunca emitió el evento, no solo que nadie lo
+escuchaba.
+
+- `kos.graph_sync` encadena `kos.recommend_from_graph_update` (task nuevo) al terminar una
+  sincronización exitosa; las correcciones manuales de grafo (`PATCH`/`DELETE /v1/graph/*`)
+  encadenan el mismo task.
+- Debounce/agrupamiento de `node_ids` en una ventana corta (evita una pasada por nodo en una
+  resincronización grande del vault).
+- Migración Alembic: tabla `recommendations` (esquema doc 11 §2/§6) — sin lógica de generación
+  todavía.
+- `RecommenderAgent` esqueleto (`packages/agents/src/kos_agents/recommender.py`): contrato
+  `Agent`, sin reglas de negocio.
+
+**Demo:** una sincronización real del vault (o una corrección manual de grafo) dispara el task
+nuevo de punta a punta contra infra real, que escribe una fila mínima de prueba en
+`recommendations` — probando el cableado disparador→agente antes de construir tipos reales.
+
+> **Sprint 22 cerrado 2026-08-17**: hallazgo real al construir — `GraphUpdated` decía en su propio
+> docstring "emitido por `kos.graph_sync`", pero la task nunca lo publicaba (solo lo hacían las
+> correcciones manuales de grafo desde Sprint 9). `kos.graph_sync` ahora encadena
+> `kos.recommend_from_graph_update`; las correcciones manuales (`PATCH`/`DELETE /v1/graph/*`)
+> encadenan el mismo task vía `graph_service.enqueue_recommend` (encola por nombre, la API no
+> importa `kos_workers`, doc 09 §2). Debounce con token en Redis: cada disparo reemplaza el token
+> vigente, solo el `flush` cuyo token sigue siendo el último programado ejecuta de verdad.
+> `RecommenderAgent` (nuevo, `packages/agents`) persiste vía la herramienta MCP nueva
+> `recommendations.store` (gate de `permissions.py`, `confirm=True` forzado por el propio agente).
+> Verificado contra infra real (migración `0009` aplicada, `recommend_from_graph_update`/
+> `recommend_flush` invocados directo con un node_id sintético): escribió una fila real en
+> `recommendations`, confirmada por SELECT y luego eliminada (era un smoke test). 349 tests
+> unitarios (16 nuevos), ruff, `mypy --strict` (core) e import-linter limpios. Retro completa en
+> `docs/sprints/sprint-22.md`.
+
+### Sprint 23 — "Lagunas de conocimiento"
+
+**Objetivo:** primer tipo de recomendación real, generado por reglas sobre el grafo existente.
+
+- Nueva plantilla de `graph.query` (doc 06 §2) para candidatos de laguna vía
+  `PREREQUISITE_OF`/`KNOWS`.
+- `RecommenderAgent` genera `Recommendation(type="gap")` reales sobre el vault real.
+- `GET /v1/recommendations?type=gap&status=`.
+
+**Demo:** una laguna real del vault (`PREREQUISITE_OF` sin `KNOWS` correspondiente) aparece como
+recomendación real vía `GET /v1/recommendations`.
+
+> **Sprint 23 cerrado 2026-08-17**: hallazgo real al planificar — nunca existió un nodo `Person`
+> que represente al usuario ni ninguna arista `KNOWS` (Sprint 22 pensaba usarla, doc 11 §4). Se
+> redefinió "laguna" como nodo `PREREQUISITE_OF` con `confidence < 0.5` (mismo umbral que doc 02
+> §4 regla 4 ya usa para decidir qué mostrar) — sin `KNOWS`, decisión explícita, deuda documentada.
+> `kos_core.storage.neo4j.gaps_by_prerequisite()` (no una plantilla pública de `graph.query`: el
+> único consumidor real llama a `kos_core.storage.neo4j` directo, mismo patrón que
+> `kos.memory_learn`) + `has_pending_recommendation()`/`list_recommendations()` en `postgres.py` +
+> `_async_recommend` reemplaza el placeholder de Sprint 22 por candidatos reales (tope de 5 por
+> pasada) + `GET /v1/recommendations?type=&status=` nuevo. Verificado contra infra real (dos nodos
+> `Concept` reales en Neo4j, uno con `confidence=0.2`): generó 1 recomendación real
+> (`confidence=0.8`, `priority=1`), confirmada por SELECT y luego eliminada junto a los nodos de
+> prueba. 356 tests unitarios + 6 de integración nuevos, ruff, `mypy --strict` (core) e
+> import-linter limpios. Retro completa en `docs/sprints/sprint-23.md`.
+
+### Sprint 24 — "Contradicciones"
+
+**Objetivo:** segundo tipo — más costoso que lagunas porque no reutiliza una relación existente
+tal cual; requiere comparar afirmaciones, no solo recorrer el grafo.
+
+- Mecanismo de detección de `CONTRADICTS` (doc 11 §5: reglas + paso LLM opcional de redacción, no
+  un loop de planificación completo).
+- `Recommendation(type="contradiction")` reales sobre el vault.
+
+**Demo:** dos notas reales con afirmaciones contradictorias sobre el mismo concepto generan una
+recomendación real.
+
+> Sprint con más riesgo de dividirse en dos (mismo patrón que memoria: Sprint 12 planificado como
+> uno terminó necesitando Sprints 13-15) — si la detección de contradicciones no converge en dos
+> semanas, cerrar con lo que haya y mover el resto a un sprint 24b, no estirar el sprint.
+
+### Sprint 25 — "Aceptar o descartar"
+
+**Objetivo:** cerrar el loop de feedback (doc 11 §8) y dar visibilidad mínima en la UI.
+
+- `PATCH /v1/recommendations/{id}` (`accepted`/`dismissed` + razón).
+- Deduplicación: no regenerar una recomendación descartada con la misma firma
+  (`type` + `target_entities`).
+- Superficie mínima en `apps/web` (badge/lista, no panel nuevo — doc 11 §7).
+
+**Demo:** descartar una recomendación real evita que la misma laguna/contradicción reaparezca en
+la siguiente pasada del Recomendador.
+
+### Sprint 26 — cierre de construcción + inicio de la ventana de uso real
+
+**Objetivo:** verificar en vivo, no en tests, y arrancar la medición del criterio de salida.
+
+- Registro manual de recomendaciones reales generadas/aceptadas/descartadas (mismo patrón que
+  `docs/eval/` para búsqueda).
+- Revisión de deuda y actualización de doc 07/08 con lo aprendido, de cara a planificar v1.1.
+
+**Demo:** retro de cierre de construcción. El criterio de salida de v1.0 (≥1 recomendación
+útil/semana durante un mes) **no se cumple en este sprint** — arranca a partir de acá y se
+verifica con calendario real, no con una demo de sprint. Cerrar v1.0 requiere ~4 semanas
+adicionales de calendario después de este sprint antes de poder declarar el criterio cumplido,
+aunque el código esté terminado antes.
 
 ## Gestión
 

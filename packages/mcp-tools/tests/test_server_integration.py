@@ -33,9 +33,15 @@ async def _cleanup(driver: object, canonical_names: list[str]) -> None:
 
 
 async def test_list_tools_expone_las_herramientas_registradas() -> None:
-    """12 herramientas al cierre de v0.5 (Sprint 21): las 7 de Sprint 16
-    (lectura/escritura sobre datos propios) + `github.*`/`web.*` (Sprint 20,
-    lectura externa) + `obsidian.create_note` (Sprint 20 addendum, escritura)."""
+    """13 herramientas al cierre de v1.0-Sprint 22 (doc 08): las 12 de v0.5
+    (7 de Sprint 16, lectura/escritura sobre datos propios + `github.*`/`web.*`
+    de Sprint 20, lectura externa + `obsidian.create_note` de Sprint 20
+    addendum, escritura) + `recommendations.store` (Sprint 22, escritura).
+
+    Este mismo test ya se rompió en silencio una vez (Sprint 20 sumó 5 tools
+    sin que nadie lo notara hasta la auditoría de cierre de v0.5, 2026-08-16,
+    docs/deuda-tecnica.md) — por eso Sprint 22/23 lo actualizan en el momento
+    en que agregan una tool nueva, no después."""
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
@@ -53,6 +59,7 @@ async def test_list_tools_expone_las_herramientas_registradas() -> None:
         "web.search",
         "web.open",
         "obsidian.create_note",
+        "recommendations.store",
     }
 
 
