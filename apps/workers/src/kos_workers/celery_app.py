@@ -37,6 +37,7 @@ def create_celery() -> Celery:
             "kos_workers.tasks.graph_sync",
             "kos_workers.tasks.graph_retire",
             "kos_workers.tasks.memory",
+            "kos_workers.tasks.recommend",
         ],
     )
     celery.conf.update(

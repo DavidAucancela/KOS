@@ -3,16 +3,41 @@ consulta y corrección manual (doc 06 §2 Grafo, Sprint 9)."""
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
+from celery import Celery
 from neo4j import AsyncDriver
 
+from kos_core.config import Settings
 from kos_core.ontology import canonicalize
 from kos_core.storage import neo4j as neo4j_storage
 
 # Plantillas seguras de POST /v1/graph/query (doc 06 §2): nada de Cypher libre
 # desde el body, solo estas funciones ya validadas.
 QUERY_TEMPLATES = ("nodes_by_type", "neighbors_by_type", "most_connected", "subgraph")
+
+# La API no importa kos_workers: encola por nombre de task (doc 09 §2), mismo
+# patrón que `source_service.enqueue_sync`.
+RECOMMEND_TASK_NAME = "kos.recommend_from_graph_update"
+
+
+@lru_cache(maxsize=4)
+def _celery_client(redis_url: str) -> Celery:
+    return Celery(broker=redis_url)
+
+
+def enqueue_recommend(
+    settings: Settings, *, node_ids: list[str], relation_ids: list[str], trace_id: str | None
+) -> None:
+    """Encadena el Recomendador (doc 11 §3) tras una corrección manual de
+    grafo — mismo disparador que `kos.graph_sync` usa para el camino
+    automático (Sprint 22)."""
+    _celery_client(settings.redis_url).send_task(
+        RECOMMEND_TASK_NAME,
+        kwargs={"node_ids": node_ids, "relation_ids": relation_ids, "trace_id": trace_id},
+        queue="default",
+    )
 
 
 async def get_node_with_neighborhood(

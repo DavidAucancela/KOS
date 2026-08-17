@@ -92,6 +92,21 @@ def _no_real_redis_publish(monkeypatch: pytest.MonkeyPatch) -> list[GraphUpdated
     return published
 
 
+@pytest.fixture(autouse=True)
+def _no_real_celery_enqueue(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """`graph_service.enqueue_recommend` (Sprint 22, doc 11 §3) intentaría
+    publicar una task real a Celery/Redis; se captura igual que `publish_event`."""
+    enqueued: list[dict[str, Any]] = []
+
+    def fake_enqueue(
+        settings: Any, *, node_ids: list[str], relation_ids: list[str], trace_id: Any
+    ) -> None:
+        enqueued.append({"node_ids": node_ids, "relation_ids": relation_ids, "trace_id": trace_id})
+
+    monkeypatch.setattr(graph_routes.graph_service, "enqueue_recommend", fake_enqueue)
+    return enqueued
+
+
 def test_get_node_devuelve_nodo_y_vecinos(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_get_node(driver: Any, node_id: str) -> dict[str, Any]:
         return _node(id=node_id)
@@ -224,7 +239,9 @@ def test_query_subgraph_devuelve_nodos_y_relaciones_inducidas(
 
 
 def test_patch_node_corrige_y_publica_evento(
-    monkeypatch: pytest.MonkeyPatch, _no_real_redis_publish: list[GraphUpdated]
+    monkeypatch: pytest.MonkeyPatch,
+    _no_real_redis_publish: list[GraphUpdated],
+    _no_real_celery_enqueue: list[dict[str, Any]],
 ) -> None:
     async def fake_update_node(
         driver: Any,
@@ -246,6 +263,10 @@ def test_patch_node_corrige_y_publica_evento(
     assert response.json()["locked"] is True
     assert len(_no_real_redis_publish) == 1
     assert _no_real_redis_publish[0].node_ids == ["node-1"]
+    [enqueued] = _no_real_celery_enqueue
+    assert enqueued["node_ids"] == ["node-1"]
+    assert enqueued["relation_ids"] == []
+    assert enqueued["trace_id"] == _no_real_redis_publish[0].trace_id
 
 
 def test_patch_node_404(monkeypatch: pytest.MonkeyPatch) -> None:

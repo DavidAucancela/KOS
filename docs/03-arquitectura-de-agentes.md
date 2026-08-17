@@ -1,6 +1,6 @@
 # 03 — Arquitectura de agentes y coordinación
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-11 · **Habilita:** Fase 4
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16 · **Habilita:** Fase 4
 
 ## 1. Principio
 
@@ -138,5 +138,11 @@ sequenceDiagram
 | Fase 2 | Se añade el paso de grafo al pipeline fijo |
 | Fase 4 | Planner real: planes dinámicos, agentes como procesos separados, trazas completas |
 | Fase 5 | El Recomendador genera planes proactivos sin consulta del usuario |
+
+> **Precisión (doc 11, planificado 2026-08-16):** el primer corte de Fase 5 (v1.0) no genera
+> `Plan`/`PlanStep` vía el Planner — "planes proactivos" se lee como "acción proactiva". La
+> generación de recomendaciones (gaps, contradicciones) es determinística: reglas y consultas de
+> grafo, con un paso LLM opcional solo para redactar título/descripción — no un loop de
+> planificación LLM completo. Ver [11 — Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) §5.
 
 Empezar con el pipeline fijo y extraer los agentes después evita construir orquestación antes de tener nada que orquestar — pero los **contratos** (`AgentRequest/Response`) se usan desde la Fase 1, de modo que la extracción sea un refactor, no una reescritura.

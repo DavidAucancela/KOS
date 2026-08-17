@@ -241,7 +241,56 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     assert result["relations"] == 1
     assert len(relations_written) == 1
     assert relations_written[0]["relation_type"] == "USES"
+    assert sorted(result["node_ids"]) == ["node-1", "node-2"]
 
 
 def test_la_task_esta_registrada_con_nombre_de_evento() -> None:
     assert "kos.graph_sync" in app.tasks
+
+
+def test_graph_sync_task_encadena_recomendador_si_sincronizo_algo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sprint 22, doc 11 §3.1: hasta este sprint, `kos.graph_sync` nunca
+    disparaba `graph.updated` pese a que su propio evento decía que sí — acá
+    se prueba que la task encadena `kos.recommend_from_graph_update` cuando
+    sincronizó nodos reales."""
+
+    async def fake_async_graph_sync(doc_id: uuid.UUID) -> dict[str, object]:
+        return {"doc_id": str(doc_id), "synced": True, "node_ids": ["node-1", "node-2"]}
+
+    monkeypatch.setattr(graph_sync_module, "_async_graph_sync", fake_async_graph_sync)
+
+    from kos_workers.tasks import recommend as recommend_module
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        recommend_module.recommend_from_graph_update,
+        "delay",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    result = graph_sync_module.graph_sync(str(uuid.uuid4()))
+
+    assert result["synced"] is True
+    [call] = calls
+    assert sorted(call["node_ids"]) == ["node-1", "node-2"]
+    assert call["relation_ids"] == []
+
+
+def test_graph_sync_task_no_encadena_si_no_sincronizo(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_async_graph_sync(doc_id: uuid.UUID) -> dict[str, object]:
+        return {"doc_id": str(doc_id), "synced": False}
+
+    monkeypatch.setattr(graph_sync_module, "_async_graph_sync", fake_async_graph_sync)
+
+    from kos_workers.tasks import recommend as recommend_module
+
+    def fail_delay(**kwargs: object) -> None:
+        raise AssertionError("no debe encadenar el Recomendador si no sincronizó nada")
+
+    monkeypatch.setattr(recommend_module.recommend_from_graph_update, "delay", fail_delay)
+
+    result = graph_sync_module.graph_sync(str(uuid.uuid4()))
+
+    assert result["synced"] is False

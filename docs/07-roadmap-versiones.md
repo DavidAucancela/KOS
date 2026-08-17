@@ -1,12 +1,12 @@
 # 07 — Roadmap por versiones (v0.1 → v1.0)
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-07-11
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16
 
 Cada versión corresponde a una fase de la arquitectura y termina en algo **usable**, no en infraestructura suelta. Las duraciones asumen dedicación parcial tipo side-project intenso; son estimaciones, no compromisos.
 
 ```
-v0.1 ──► v0.2 ──► v0.3 ──► v0.4 ──► v0.5 ──► v1.0
-Fund.    Core     Grafo    Memoria  Agentes  Proactivo+Plataforma
+v0.1 ──► v0.2 ──► v0.3 ──► v0.4 ──► v0.5 ──► v1.0 ──► v1.1
+Fund.    Core     Grafo    Memoria  Agentes  Recomend. Plataforma
 ```
 
 ## v0.1 — Fundaciones (Fase 0) · 2–3 semanas
@@ -87,18 +87,45 @@ Fund.    Core     Grafo    Memoria  Agentes  Proactivo+Plataforma
 
 **Criterio de salida:** una consulta compleja produce un plan multi-paso inspeccionable que combina vector + grafo + memoria + web.
 
-## v1.0 — Inteligencia proactiva + base de plataforma (Fases 5–6 parciales) · 8–10 semanas
+## v1.0 — Recomendador (Fase 5) · sin estimar todavía
 
-**Meta:** *el sistema genera valor sin que le hagas preguntas.*
+**Meta:** *el sistema genera valor sin que le hagas preguntas: al menos una recomendación útil por
+semana, disparada por cambios reales en tu conocimiento — no por un cron.*
 
-- Recomendador: lagunas de conocimiento, roadmaps personalizados, contradicciones, relaciones descubiertas, reorganización de Obsidian propuesta
+- `RecommenderAgent` (`packages/agents`), disparado por `graph.updated` vía Celery encadenado
+  ([doc 11](11-recomendador-e-inteligencia-proactiva.md) §3)
+- Primer corte: lagunas de conocimiento + contradicciones (los dos tipos con soporte de ontología
+  ya reservado: `KNOWS`, `CONTRADICTS`, doc 02 §3.2). Relaciones descubiertas, roadmaps
+  personalizados y reorganización de Obsidian quedan para iteración posterior de la Fase 5 (doc 11 §4)
+- Modelo `Recommendation` + tabla Postgres nueva; feedback loop de aceptar/descartar análogo a la
+  corrección de nodos del grafo (doc 02 regla 5)
+- `GET`/`PATCH /v1/recommendations` (doc 06 §2)
+
+**Criterio de salida:** ≥1 recomendación útil (gap o contradicción, aceptada o no descartada por
+el usuario) no solicitada por semana durante un mes de uso real.
+
+> **Nota de alcance (2026-08-16):** v1.0 cubría originalmente Recomendador + SDK de conectores +
+> API pública `/v1` + empaquetado (ver historial de este doc). Se divide: empaquetar cuatro
+> iniciativas distintas en una versión repetía, a mayor escala, el mismo patrón que ya hizo correr
+> v0.3/v0.4/v0.5 al doble de lo estimado. SDK + API + empaquetado pasan a **v1.1 — Plataforma**,
+> con documento de diseño propio a escribir al planificarla (no diseñado todavía). Ver también
+> [doc 11](11-recomendador-e-inteligencia-proactiva.md) §1.
+
+## v1.1 — Plataforma (Fase 6, parcial) · sin estimar todavía
+
+**Meta:** *un tercero puede extender KOS sin tocar el núcleo.*
+
 - SDK mínimo de conectores (un tercero puede escribir uno sin tocar el núcleo)
 - API pública estable `/v1` + documentación
 - Empaquetado: instalación reproducible en una máquina nueva en <30 min
 
-**Criterio de salida:** ≥1 recomendación útil no solicitada por semana durante un mes de uso real; un conector externo de ejemplo (p.ej. carpeta de HTML) escrito solo contra el SDK.
+**Criterio de salida:** un conector externo de ejemplo (p.ej. carpeta de HTML) escrito solo contra
+el SDK.
 
-## Después de v1.0 (no comprometido)
+> Separada de v1.0 el 2026-08-16. Sin documento de diseño propio todavía — se escribe al
+> planificar esta versión, siguiendo la misma regla del roadmap (§ "Reglas del roadmap" #2).
+
+## Después de v1.0/v1.1 (no comprometido)
 
 Multi-usuario y workspaces, permisos, marketplace MCP, panel de administración, más conectores (Notion, Gmail, Slack, Discord, Jira, Confluence, WhatsApp, transcripciones, vídeo/audio, SQL, APIs), Kubernetes, Temporal.
 
