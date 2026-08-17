@@ -608,6 +608,23 @@ recomendación real.
 **Demo:** descartar una recomendación real evita que la misma laguna/contradicción reaparezca en
 la siguiente pasada del Recomendador.
 
+> **Sprint 25 cerrado 2026-08-17**: `PATCH /v1/recommendations/{id}` (`{status: accepted|dismissed,
+> reason?}`) nuevo, idempotente contra doble-click (solo actúa sobre `pending`, mismo criterio que
+> `archive_memory`). Dedup real: `has_pending_recommendation` (Sprint 23) se renombró a
+> `has_active_recommendation` y pasó a bloquear también `accepted`/`dismissed` (antes solo
+> `pending` — un descarte dejaba la firma libre para que la siguiente pasada la volviera a
+> proponer, bug real de Sprint 23/24 nunca ejercitado hasta ahora). Superficie mínima en
+> `apps/web`: `RecommendationsPanel` (nuevo, `features/recommendations/`) embebido en
+> `StatusPage` — sin panel/pestaña nueva en el nav, como decidía doc 11 §7 — lista de pendientes
+> con Aceptar/Descartar (razón opcional). Verificado contra infra real (API + Postgres reales, sin
+> mocks): insertar una recomendación real, `GET` la muestra en `pending`, `PATCH dismissed` con
+> razón la resuelve (`resolved_at` seteado) y la saca de la lista de pendientes. 367 tests
+> unitarios (4 nuevos: ruta `PATCH`) + 46 de integración (5 nuevos: dedup ampliado +
+> `update_recommendation_status`; el único fallo sigue siendo el preexistente
+> `test_busqueda_lexica_vectorial_e_hibrida`) + 4 de componente React (`RecommendationsPanel`,
+> vitest), ruff, `mypy --strict` (core), import-linter y eslint limpios. Retro completa en
+> `docs/sprints/sprint-25.md`.
+
 ### Sprint 26 — cierre de construcción + inicio de la ventana de uso real
 
 **Objetivo:** verificar en vivo, no en tests, y arrancar la medición del criterio de salida.

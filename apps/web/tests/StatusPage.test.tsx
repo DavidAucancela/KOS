@@ -25,6 +25,22 @@ function jsonResponse(body: unknown): Response {
   } as unknown as Response;
 }
 
+// La página también dispara GET /v1/recommendations (RecommendationsPanel,
+// Sprint 25) — sin lista vacía por defecto, el mock global de /health se
+// devolvería para esa URL también y el hook recibiría un body sin `items`.
+function mockFetchByUrl(healthBody: unknown): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("/v1/recommendations")) {
+        return Promise.resolve(jsonResponse({ items: [], next_cursor: null }));
+      }
+      return Promise.resolve(jsonResponse(healthBody));
+    }),
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -32,7 +48,7 @@ afterEach(() => {
 
 describe("StatusPage", () => {
   it("muestra los cinco servicios y el estado global operativo", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(healthResponse())));
+    mockFetchByUrl(healthResponse());
 
     render(<StatusPage />);
 
@@ -51,7 +67,7 @@ describe("StatusPage", () => {
       latency_ms: 3001.0,
       detail: "connection refused",
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
+    mockFetchByUrl(body);
 
     render(<StatusPage />);
 

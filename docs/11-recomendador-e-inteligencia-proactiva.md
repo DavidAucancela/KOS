@@ -174,6 +174,14 @@ Análogo a la corrección de nodos del grafo (doc 02 regla 5): `PATCH /v1/recomm
   (`type` + `target_entities`) — necesita una clave de deduplicación, mismo espíritu que la
   detección de duplicados de doc 04 §6.
 
+> **Implementado en Sprint 25 (2026-08-17):** `PATCH /v1/recommendations/{id}` (idempotente contra
+> doble-click — solo actúa sobre `pending`, mismo criterio que `archive_memory`). Hallazgo real: el
+> guardarraíl de dedup de Sprint 23 (`has_pending_recommendation`) solo miraba `pending` — un
+> descarte real dejaba la firma libre para la siguiente pasada. Renombrado a
+> `has_active_recommendation`, ahora bloquea también `accepted`/`dismissed`. Superficie mínima:
+> `RecommendationsPanel` (`apps/web/src/features/recommendations/`) embebido en `StatusPage`, sin
+> pestaña nueva en el nav.
+
 ## 9. Relación con `LearningAgent` / `MemoryAgent`
 
 | | `LearningAgent` | `RecommenderAgent` |

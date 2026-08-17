@@ -282,6 +282,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recommendations */
+        get: operations["list_recommendations_v1_recommendations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recommendations/{recommendation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Recommendation
+         * @description Aceptar/descartar (doc 11 §8): nunca escribe al grafo ni al vault —
+         *     solo cambia el estado de la `Recommendation`. Descartar además evita que
+         *     la misma laguna/contradicción reaparezca en la próxima pasada del
+         *     Recomendador (`has_active_recommendation`, `postgres.py`).
+         */
+        patch: operations["update_recommendation_v1_recommendations__recommendation_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -676,6 +716,16 @@ export interface components {
             /** Aliases */
             aliases?: string[] | null;
         };
+        /** PatchRecommendationRequest */
+        PatchRecommendationRequest: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "dismissed";
+            /** Reason */
+            reason?: string | null;
+        };
         /** PatchRelationRequest */
         PatchRelationRequest: {
             /** Relation Type */
@@ -694,6 +744,8 @@ export interface components {
             query: string;
             /** Steps */
             steps: components["schemas"]["PlanStep"][];
+            /** Post */
+            post: components["schemas"]["PlanStep"][];
             /** Degraded */
             degraded: boolean;
             /** Degraded Reason */
@@ -767,6 +819,64 @@ export interface components {
             trace_id: string;
             /** Plan Id */
             plan_id: string;
+        };
+        /** Recommendation */
+        Recommendation: {
+            /**
+             * Recommendation Id
+             * Format: uuid
+             */
+            recommendation_id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "gap" | "contradiction" | "related_relation" | "roadmap" | "reorganization";
+            /** Title */
+            title: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Evidence */
+            evidence?: components["schemas"]["EvidenceRef"][];
+            /** Target Entities */
+            target_entities?: string[];
+            /**
+             * Confidence
+             * @default 0
+             */
+            confidence: number;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Status
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "dismissed" | "expired" | "superseded";
+            /** Dismissed Reason */
+            dismissed_reason?: string | null;
+            /** Source Event Id */
+            source_event_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+        };
+        /** RecommendationPage */
+        RecommendationPage: {
+            /** Items */
+            items: components["schemas"]["Recommendation"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /**
          * SearchHitOut
@@ -1505,6 +1615,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recommendations_v1_recommendations_get: {
+        parameters: {
+            query?: {
+                type?: ("gap" | "contradiction" | "related_relation" | "roadmap" | "reorganization") | null;
+                status?: ("pending" | "accepted" | "dismissed" | "expired" | "superseded") | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_recommendation_v1_recommendations__recommendation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recommendation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchRecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recommendation"];
                 };
             };
             /** @description Validation Error */

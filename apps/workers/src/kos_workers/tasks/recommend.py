@@ -180,7 +180,7 @@ async def _run_gap_recommendations(
         if len(created) >= MAX_GAP_RECOMMENDATIONS_PER_RUN:
             break
         target_entities = [candidate["node_id"]]
-        if await postgres_storage.has_pending_recommendation(
+        if await postgres_storage.has_active_recommendation(
             engine, type="gap", target_entities=target_entities
         ):
             continue
@@ -214,7 +214,7 @@ async def _run_contradiction_recommendations(
             continue
         match = matches[0]
         target_entities = sorted([str(seed["chunk_id"]), str(match.chunk_id)])
-        if await postgres_storage.has_pending_recommendation(
+        if await postgres_storage.has_active_recommendation(
             engine, type="contradiction", target_entities=target_entities
         ):
             continue

@@ -1,5 +1,5 @@
 """Tests de /v1/recommendations sin Postgres real (storage mockeado, doc 06 §2,
-doc 11, Sprint 23)."""
+doc 11, Sprint 23/25)."""
 
 from __future__ import annotations
 
@@ -84,4 +84,68 @@ def test_list_recommendations_tipo_invalido_es_422() -> None:
 def test_list_recommendations_status_invalido_es_422() -> None:
     with TestClient(create_app()) as client:
         response = client.get("/v1/recommendations", params={"status": "no-existe"})
+    assert response.status_code == 422
+
+
+def test_patch_recommendation_descarta(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = _recommendation(status="dismissed", dismissed_reason="ya lo sabía")
+
+    async def fake_update(
+        engine: Any, recommendation_id: uuid.UUID, *, status: str, dismissed_reason: str | None
+    ) -> dict[str, Any]:
+        assert status == "dismissed"
+        assert dismissed_reason == "ya lo sabía"
+        return item
+
+    monkeypatch.setattr(postgres_storage, "update_recommendation_status", fake_update)
+    with TestClient(create_app()) as client:
+        response = client.patch(
+            f"/v1/recommendations/{item['recommendation_id']}",
+            json={"status": "dismissed", "reason": "ya lo sabía"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "dismissed"
+    assert body["dismissed_reason"] == "ya lo sabía"
+
+
+def test_patch_recommendation_acepta_sin_razon(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = _recommendation(status="accepted")
+
+    async def fake_update(
+        engine: Any, recommendation_id: uuid.UUID, *, status: str, dismissed_reason: str | None
+    ) -> dict[str, Any]:
+        assert status == "accepted"
+        assert dismissed_reason is None
+        return item
+
+    monkeypatch.setattr(postgres_storage, "update_recommendation_status", fake_update)
+    with TestClient(create_app()) as client:
+        response = client.patch(
+            f"/v1/recommendations/{item['recommendation_id']}", json={"status": "accepted"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+
+
+def test_patch_recommendation_404_si_no_existe_o_ya_resuelta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_update(
+        engine: Any, recommendation_id: uuid.UUID, *, status: str, dismissed_reason: str | None
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(postgres_storage, "update_recommendation_status", fake_update)
+    with TestClient(create_app()) as client:
+        response = client.patch(f"/v1/recommendations/{uuid.uuid4()}", json={"status": "dismissed"})
+
+    assert response.status_code == 404
+
+
+def test_patch_recommendation_status_invalido_es_422() -> None:
+    with TestClient(create_app()) as client:
+        response = client.patch(f"/v1/recommendations/{uuid.uuid4()}", json={"status": "pending"})
     assert response.status_code == 422
