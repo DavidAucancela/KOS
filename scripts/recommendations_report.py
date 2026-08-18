@@ -15,10 +15,14 @@ sin importar cuánto tiempo pasó.
 Requisitos: `make up`, API corriendo (`make dev-api` o equivalente).
 
 Uso: `uv run python scripts/recommendations_report.py`
+Variable opcional: `KOS_API_URL` (default `http://localhost:8000`) — útil si
+la API corre en otro puerto (ej. varios proyectos compitiendo por el 8000
+en la misma máquina).
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +31,8 @@ import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_PATH = REPO_ROOT / "docs" / "eval" / "recomendaciones.md"
-API_URL = "http://localhost:8000/v1/recommendations"
+API_BASE_URL = os.environ.get("KOS_API_URL", "http://localhost:8000")
+API_URL = f"{API_BASE_URL}/v1/recommendations"
 USEFUL_WINDOW_DAYS = 7
 
 
@@ -41,17 +46,27 @@ class Recommendation:
     resolved_at: datetime | None
 
 
-def _parse(item: dict[str, object]) -> Recommendation:
-    return Recommendation(
-        recommendation_id=str(item["recommendation_id"]),
-        type=str(item["type"]),
-        title=str(item["title"]),
-        status=str(item["status"]),
-        created_at=datetime.fromisoformat(str(item["created_at"])),
-        resolved_at=(
-            datetime.fromisoformat(str(item["resolved_at"])) if item.get("resolved_at") else None
-        ),
-    )
+def _parse(item: dict[str, object]) -> Recommendation | None:
+    """`None` si el ítem no trae los campos mínimos o `created_at` no es una
+    fecha ISO válida — se salta esa fila en vez de tirar abajo todo el
+    reporte (doc 11 §10: esto es un snapshot de lectura, no debe romper si
+    un dato puntual viene raro)."""
+    try:
+        return Recommendation(
+            recommendation_id=str(item["recommendation_id"]),
+            type=str(item["type"]),
+            title=str(item["title"]),
+            status=str(item["status"]),
+            created_at=datetime.fromisoformat(str(item["created_at"])),
+            resolved_at=(
+                datetime.fromisoformat(str(item["resolved_at"]))
+                if item.get("resolved_at")
+                else None
+            ),
+        )
+    except (KeyError, ValueError) as exc:
+        print(f"advertencia: se salta un ítem con forma inesperada ({exc}): {item!r}")
+        return None
 
 
 def _fetch_all() -> list[Recommendation]:
@@ -60,11 +75,21 @@ def _fetch_all() -> list[Recommendation]:
     with httpx.Client(timeout=10.0) as client:
         while True:
             params = {"limit": 100} | ({"cursor": cursor} if cursor else {})
-            response = client.get(API_URL, params=params)
-            response.raise_for_status()
-            body = response.json()
-            items.extend(_parse(item) for item in body["items"])
-            cursor = body["next_cursor"]
+            try:
+                response = client.get(API_URL, params=params)
+                response.raise_for_status()
+                body = response.json()
+            except httpx.HTTPError as exc:
+                raise SystemExit(
+                    f"no se pudo consultar {API_URL} ({exc}) — ¿está la API corriendo? "
+                    "(`make dev-api` o equivalente; KOS_API_URL para otro puerto/host)"
+                ) from exc
+            if not isinstance(body, dict) or "items" not in body:
+                raise SystemExit(
+                    f"respuesta inesperada de {API_URL}: falta 'items' en el body ({body!r})"
+                )
+            items.extend(parsed for item in body["items"] if (parsed := _parse(item)) is not None)
+            cursor = body.get("next_cursor")
             if cursor is None:
                 break
     return items
@@ -116,6 +141,7 @@ def _render(recs: list[Recommendation], *, now: datetime) -> str:
 def main() -> None:
     recs = _fetch_all()
     now = datetime.now(UTC)
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(_render(recs, now=now), encoding="utf-8")
     print(f"{len(recs)} recomendaciones — escrito en {OUTPUT_PATH.relative_to(REPO_ROOT)}")
 
