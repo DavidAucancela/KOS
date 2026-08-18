@@ -1,6 +1,6 @@
 # 07 — Roadmap por versiones (v0.1 → v1.0)
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-18
 
 Cada versión corresponde a una fase de la arquitectura y termina en algo **usable**, no en infraestructura suelta. Las duraciones asumen dedicación parcial tipo side-project intenso; son estimaciones, no compromisos.
 
@@ -111,6 +111,14 @@ el usuario) no solicitada por semana durante un mes de uso real.
 > con documento de diseño propio a escribir al planificarla (no diseñado todavía). Ver también
 > [doc 11](11-recomendador-e-inteligencia-proactiva.md) §1.
 
+> **Construcción completa 2026-08-18 (Sprints 22-26), ventana de medición en curso:** los cinco
+> sprints de construcción cerraron — `graph.updated` real, dos tipos de recomendación (lagunas,
+> contradicciones), feedback loop completo. El criterio de salida **todavía no está cumplido**:
+> se evalúa con calendario real entre 2026-08-18 y 2026-09-18 corriendo
+> `scripts/recommendations_report.py` (ver `docs/eval/recomendaciones.md`). Riesgo identificado en
+> el cierre de construcción (`docs/sprints/sprint-26.md`): el veredicto de contradicción es
+> conservador con el modelo local — el ritmo real puede depender casi enteramente de lagunas.
+
 ## v1.1 — Plataforma (Fase 6, parcial) · sin estimar todavía
 
 **Meta:** *un tercero puede extender KOS sin tocar el núcleo.*
@@ -124,6 +132,15 @@ el SDK.
 
 > Separada de v1.0 el 2026-08-16. Sin documento de diseño propio todavía — se escribe al
 > planificar esta versión, siguiendo la misma regla del roadmap (§ "Reglas del roadmap" #2).
+
+> **Lecciones de v1.0 para tener en cuenta al planificar (2026-08-18,
+> `docs/sprints/sprint-26.md`):** las redefiniciones operables (Sprint 23/24: proxy de
+> `confidence` en vez de `KNOWS`/`Person`; banda de similitud de chunks en vez de un nodo `Claim`)
+> resultaron más útiles que el diseño original — al planificar v1.1, revisar qué partes de este
+> doc asumen infraestructura (SDK, contratos) que en la práctica podría no hacer falta. Verificar
+> en vivo siguió encontrando bugs reales que ningún mock encontraba — un SDK de conectores de
+> terceros es exactamente el tipo de superficie donde eso importa más, no menos. La cadena de PRs
+> stackeados sin mergear (Sprints 22-26) conviene revisarla y mergerla en orden antes de arrancar.
 
 ## Después de v1.0/v1.1 (no comprometido)
 

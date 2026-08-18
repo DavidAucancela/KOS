@@ -241,7 +241,7 @@ async def test_async_recommend_crea_una_recomendacion_por_candidato_nuevo(
         return False
 
     monkeypatch.setattr(postgres_module, "insert_recommendation", fake_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
     _patch_infra(monkeypatch)
 
@@ -272,7 +272,7 @@ async def test_async_recommend_salta_candidatos_ya_pendientes(
         return True
 
     monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
     _patch_infra(monkeypatch)
 
@@ -297,7 +297,7 @@ async def test_async_recommend_respeta_el_tope_por_pasada(monkeypatch: pytest.Mo
         return False
 
     monkeypatch.setattr(postgres_module, "insert_recommendation", fake_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
     _patch_infra(monkeypatch)
 
@@ -423,7 +423,7 @@ async def test_async_recommend_contradiccion_confirmada_crea_recomendacion(
 
     _patch_infra(monkeypatch)
     monkeypatch.setattr(postgres_module, "insert_recommendation", fake_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
     monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
@@ -469,7 +469,7 @@ async def test_async_recommend_contradiccion_no_confirmada_no_crea_nada(
 
     _patch_infra(monkeypatch)  # OllamaLLMClient fake responde contradicts=false por defecto
     monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
     monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
@@ -541,7 +541,7 @@ async def test_async_recommend_contradiccion_par_ya_pendiente_no_llama_al_llm(
 
     _patch_infra(monkeypatch)
     monkeypatch.setattr(postgres_module, "insert_recommendation", fail_insert)
-    monkeypatch.setattr(postgres_module, "has_pending_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
     monkeypatch.setattr(postgres_module, "recent_seed_chunks", fake_seed_chunks)
     monkeypatch.setattr(search_module, "similarity_band_chunks", fake_band)
     monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
