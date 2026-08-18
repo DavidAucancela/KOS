@@ -54,6 +54,8 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | Ítem | Origen |
 |---|---|
 | Sin UI de auditoría de memoria en `apps/web` (solo API) | [Sprint 12](sprints/sprint-12.md), reafirmado en [Sprint 15](sprints/sprint-15.md) — decisión explícita del usuario de dejarla fuera del cierre de v0.4 |
+| `RecommendationsPanel` solo muestra `pending` — sin historial de aceptadas/descartadas en la UI (solo vía API, `GET /v1/recommendations?status=`) | [Sprint 25](sprints/sprint-25.md) — alcance explícito, mismo criterio que la deuda de memoria de arriba |
+| Sin badge de conteo de recomendaciones pendientes en el nav — la visibilidad depende de entrar a "Estado" | [Sprint 25](sprints/sprint-25.md) |
 | Grafo: sin animación de layout en vivo, sin zoom/pan, sin resaltado de caminos en el canvas | [Sprint 10](sprints/sprint-10.md) |
 
 ## Calidad / ajuste fino — sin sprint asignado
@@ -70,3 +72,4 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 |---|---|
 | `test_search_integration.py::test_busqueda_lexica_vectorial_e_hibrida` falla contra el vault real actual | Encontrado en la sesión de Sprints 13-15 (2026-08-15); reproducido también en el commit base, no es una regresión de esos sprints — sin investigar todavía |
 | Sin corrección manual de memoria (`locked`, análogo a la corrección de nodos del grafo de Sprint 9) | [Sprint 14](sprints/sprint-14.md) — sin caso de uso real que lo haya pedido todavía |
+| `pnpm --filter kos-web build` (`tsc -b`) falla en `TracesPage.test.tsx`: `PlanStep.post` incompatible entre el tipo esperado y el generado — no bloquea `eslint`/`vitest` (que sí pasan) ni corre en CI hoy | Encontrado en Sprint 25 verificando `apps/web`; confirmado preexistente (el diff de `schema.d.ts` de este sprint es puramente aditivo, no toca esas líneas) — sin investigar todavía |

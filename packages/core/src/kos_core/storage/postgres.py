@@ -585,21 +585,61 @@ async def recent_seed_chunks(engine: AsyncEngine, *, limit: int) -> list[dict[st
         return [dict(row) for row in (await conn.execute(query)).mappings().all()]
 
 
-async def has_pending_recommendation(
+async def has_active_recommendation(
     engine: AsyncEngine, *, type: str, target_entities: list[str]
 ) -> bool:
-    """Guardarraíl contra duplicados (Sprint 23, doc 11 §8): sin esto, cada
-    `graph.updated` volvería a insertar la misma laguna. El dedup completo por
-    descarte (misma firma tras `dismissed`) es Sprint 25 — esto solo evita
-    acumular filas `pending` repetidas mientras tanto."""
+    """Guardarraíl contra duplicados (Sprint 23) y contra reaparición
+    inmediata tras un descarte (Sprint 25, doc 11 §8): bloquea la
+    regeneración mientras exista cualquier recomendación con la misma firma
+    (`type` + `target_entities`) en estado `pending`, `accepted` o
+    `dismissed` — solo `expired`/`superseded` no bloquean. Antes de Sprint 25
+    (`has_pending_recommendation`) solo miraba `pending`; un descarte dejaba
+    la firma libre para que la siguiente pasada la volviera a proponer."""
     sorted_entities = sorted(target_entities)
     query = select(recommendations_table.c.recommendation_id).where(
-        recommendations_table.c.status == "pending",
+        recommendations_table.c.status.in_(["pending", "accepted", "dismissed"]),
         recommendations_table.c.type == type,
         recommendations_table.c.target_entities == sorted_entities,
     )
     async with engine.connect() as conn:
         return (await conn.execute(query)).first() is not None
+
+
+async def update_recommendation_status(
+    engine: AsyncEngine,
+    recommendation_id: uuid_lib.UUID,
+    *,
+    status: str,
+    dismissed_reason: str | None,
+) -> dict[str, Any] | None:
+    """`PATCH /v1/recommendations/{id}` (doc 06 §2, doc 11 §8, Sprint 25):
+    aceptar/descartar. Fija `resolved_at`; solo actúa sobre recomendaciones
+    todavía `pending` (idempotente contra doble-click, no reescribe una ya
+    resuelta) — mismo criterio que `archive_memory` (no reabre lo ya
+    archivado)."""
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            recommendations_table.update()
+            .where(
+                recommendations_table.c.recommendation_id == recommendation_id,
+                recommendations_table.c.status == "pending",
+            )
+            .values(status=status, dismissed_reason=dismissed_reason, resolved_at=func.now())
+        )
+        if result.rowcount == 0:
+            return None
+        row = (
+            (
+                await conn.execute(
+                    select(*_RECOMMENDATION_COLUMNS).where(
+                        recommendations_table.c.recommendation_id == recommendation_id
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
 
 
 _RECOMMENDATION_COLUMNS = [
