@@ -60,16 +60,23 @@ URL en vez de responder lo mismo a cualquier `fetch`.
 `update_recommendation_status`; el único fallo sigue siendo el preexistente
 `test_busqueda_lexica_vectorial_e_hibrida`, sin relación) + 28 tests de `apps/web` (4 nuevos,
 `RecommendationsPanel`), ruff, `mypy --strict` (core), import-linter y eslint limpios. `tsc -b`
-tiene un error preexistente en `TracesPage.test.tsx` (tipo de `PlanStep.post` incompatible,
-confirmado por diff que no toca ninguna línea existente de `schema.d.ts` — ya estaba en `main`
-antes de este sprint, no es una regresión).
+falló en `TracesPage.test.tsx` (tipo de `PlanStep.post` incompatible) — ver corrección más abajo.
+
+> **Corrección (Sprint 26, 2026-08-18):** este retro afirmaba que el fallo de `tsc -b` era
+> "preexistente... ya estaba en `main` antes de este sprint, no es una regresión", basado en que
+> el diff de `schema.d.ts` no borraba ninguna línea existente. Ese razonamiento estaba mal:
+> `tsc -b` corrido directo contra `main` (antes de este sprint) pasaba limpio. La causa real:
+> `PlanOut.post` es un campo requerido en la API desde Sprint 21, pero `schema.d.ts` nunca se
+> había regenerado desde entonces — el tipo generado viejo ni siquiera tenía ese campo, así que
+> `TracesPage.test.tsx` nunca necesitó incluirlo. Al regenerar `schema.d.ts` en este sprint (para
+> los tipos de `Recommendation`), `post` apareció de golpe como requerido y rompió el build. Era
+> una regresión real de este sprint, no deuda preexistente — corregida en Sprint 26
+> (`docs/sprints/sprint-26.md`, `docs/deuda-tecnica.md`).
 
 ## Qué se recorta (deuda visible)
 
 - Sin UI de historial de recomendaciones resueltas (`accepted`/`dismissed`) — la superficie mínima
   solo muestra `pending`. Suficiente para el criterio de éxito de v1.0, no para auditoría completa.
-- El `tsc -b` preexistente sobre `TracesPage.test.tsx`/`PlanStep.post` sigue sin arreglarse — fuera
-  de alcance de este sprint (no relacionado con recomendaciones), queda como deuda visible.
 - Sin badge de conteo en el nav — la visibilidad depende de entrar a "Estado".
 
 ## Qué se aprendió

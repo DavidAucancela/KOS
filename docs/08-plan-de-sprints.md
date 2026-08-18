@@ -647,8 +647,11 @@ aunque el código esté terminado antes.
 > de deuda acumulada (Sprints 22-25) contra el criterio de salida: ningún ítem lo bloquea, pero se
 > identificó un riesgo real — el veredicto de contradicción conservador (`llama3.2`, deuda ya
 > documentada en Sprint 24) puede dejar que el ritmo de "≥1 útil/semana" dependa casi enteramente
-> de lagunas, no de ambos tipos por igual. Ventana de medición: 2026-08-18 → 2026-09-18. Retro
-> completa con lecciones para v1.1 en `docs/sprints/sprint-26.md`.
+> de lagunas, no de ambos tipos por igual. Ventana de medición: 2026-08-18 → 2026-09-18. De paso,
+> corrige una regresión real de CI que Sprint 25 había diagnosticado mal como "preexistente"
+> (`tsc -b` roto por `PlanOut.post` requerido tras regenerar `schema.d.ts`, nunca ejercitado antes
+> porque el tipo generado viejo no tenía el campo) — ver `docs/deuda-tecnica.md`. Retro completa
+> con lecciones para v1.1 en `docs/sprints/sprint-26.md`.
 
 ## Gestión
 

@@ -9,8 +9,9 @@ arranca hoy.
 Sprints 22-25 dejaron el Recomendador construido de punta a punta: el evento `graph.updated`
 dejó de ser huérfano (Sprint 22), dos tipos reales de recomendación generándose (lagunas Sprint
 23, contradicciones Sprint 24), y el feedback loop completo (Sprint 25). Este sprint no agrega
-funcionalidad nueva — cierra la fase de construcción, deja el mecanismo de medición manual listo,
-y revisa la deuda acumulada de cara a planificar v1.1.
+funcionalidad nueva al Recomendador — cierra la fase de construcción, deja el mecanismo de
+medición manual listo, y revisa la deuda acumulada de cara a planificar v1.1. Sí corrige una
+regresión real de CI encontrada al verificar (ver más abajo).
 
 ## Qué se construye
 
@@ -23,6 +24,17 @@ y revisa la deuda acumulada de cara a planificar v1.1.
   script de lectura, el registro real vive en Postgres, esto solo lo hace legible.
 - **`docs/eval/recomendaciones.md`** (nuevo): el registro en sí, regenerado por el script — arranca
   en 0 recomendaciones (estado real del vault a hoy).
+- **Fix real de CI** (`apps/web/tests/TracesPage.test.tsx`): `pnpm --filter kos-web build` (`tsc
+  -b`) fallaba desde el PR de Sprint 25 (#10) — visible en los checks de CI de esa PR, no detectado
+  antes de mergear. Sprint 25 había investigado el fallo y concluyó, incorrectamente, que era
+  deuda preexistente ("el diff de `schema.d.ts` no borra líneas"). Al abrir este sprint, correr
+  `tsc -b` directo contra `main` (sin el regen de Sprint 25) confirmó que pasaba limpio — la
+  conclusión anterior estaba mal. Causa real: `PlanOut.post` es un campo requerido en la API desde
+  Sprint 21, pero `schema.d.ts` nunca se había regenerado desde entonces (el tipo generado viejo
+  ni siquiera tenía ese campo). Al regenerarlo en Sprint 25 (para los tipos de `Recommendation`),
+  `post` apareció de golpe como requerido y `TracesPage.test.tsx` (que nunca lo incluía, porque
+  nunca hizo falta) rompió el build. Corregido acá: `post: []` agregado al fixture de prueba.
+  Retro de Sprint 25 y `docs/deuda-tecnica.md` actualizados con la corrección.
 
 ## Revisión de deuda acumulada (Sprints 22-25)
 
@@ -83,10 +95,16 @@ de este sprint: `uv sync` corrido sin `UV_PROJECT_ENVIRONMENT` creó un `.venv` 
 del repo (la trampa de iCloud ya documentada en la memoria del entorno) — se removió y se confirmó
 que el entorno real (`~/.venvs/kos`) seguía intacto, `pytest` volvió a 367 tests verdes.
 
+Revisando los checks de CI de la PR de Sprint 25 (algo que no se había hecho al cerrar ese sprint)
+apareció `pnpm --filter kos-web build` en rojo. Se confirmó con `tsc -b` corrido directo contra
+`main` (sin el regen de `schema.d.ts` de Sprint 25) que el build pasaba limpio antes — la
+conclusión de Sprint 25 ("preexistente") estaba mal. Corregido: `post: []` en el fixture de
+`TracesPage.test.tsx`. `tsc -b`, `eslint` y `vitest` (28 tests) verdes después del fix.
+
 ## Qué se recorta (deuda visible)
 
-Ninguna nueva — este sprint no agrega funcionalidad, solo cierra construcción y revisa lo
-acumulado (ver tabla arriba).
+Ninguna nueva sobre el Recomendador — este sprint no le agrega funcionalidad, solo cierra
+construcción y revisa lo acumulado (ver tabla arriba). El fix de CI cierra deuda, no la agrega.
 
 ## Qué se aprendió
 
@@ -100,3 +118,10 @@ acumulado (ver tabla arriba).
   con ritmos de generación muy distintos (lagunas determinística vs. contradicciones con veredicto
   LLM conservador) pueden hacer que el criterio dependa de uno solo de los dos, no de ambos por
   igual.
+- **Concluir "es preexistente" a partir de un diff que no borra líneas fue un error de
+  razonamiento, no solo de suerte.** Agregar un campo *requerido* a un tipo existente es tan
+  rompedor para quien ya lo consume como borrar algo — la única forma confiable de saber si un
+  fallo de CI es una regresión es correr el chequeo contra el estado anterior de verdad, no inferirlo
+  del diff. Los checks de CI de la propia PR de Sprint 25 (#10) ya mostraban `tsc -b` en rojo antes
+  de mergear — la lección más simple era la que no se aplicó: revisar los checks de la PR antes de
+  darla por cerrada, no solo correr la suite local.

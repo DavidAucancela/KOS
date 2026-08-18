@@ -30,6 +30,7 @@ function plan(overrides: Partial<PlanOut> = {}): PlanOut {
         cost: null,
       },
     ],
+    post: [],
     degraded: false,
     degraded_reason: null,
     elapsed_ms: 42,
