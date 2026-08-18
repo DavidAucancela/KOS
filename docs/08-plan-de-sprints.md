@@ -576,6 +576,26 @@ recomendación real.
 > uno terminó necesitando Sprints 13-15) — si la detección de contradicciones no converge en dos
 > semanas, cerrar con lo que haya y mover el resto a un sprint 24b, no estirar el sprint.
 
+> **Sprint 24 cerrado 2026-08-17**: a diferencia de lagunas (consulta de grafo pura), no hay forma
+> determinística de saber si dos textos se contradicen — candidatos por similitud de embedding
+> entre chunks de documentos distintos en una banda intermedia (`similarity_band_chunks`, nuevo en
+> `kos_core.storage.search`: piso 0.75, techo 0.92 = mismo valor que `DUPLICATE_THRESHOLD`, por
+> encima ya es "duplicado" no contradicción) + veredicto final de un LLM sobre el texto real de
+> los dos chunks (`_default_contradiction_verdict`, mismo patrón DI que `_default_merge_verdict`
+> de entity resolution — falla a `False` ante ambigüedad, doc 11 §4). Semillas: los `N` chunks más
+> recientes con embedding (`recent_seed_chunks`, nuevo en `postgres.py`), misma deuda que
+> `gaps_by_prerequisite` (Sprint 23): no acotado por el disparo real que debounceó. Verificado
+> contra infra real: chunks reales con afirmaciones opuestas insertados a mano, `_async_recommend`
+> real los encontró como candidatos en la banda correcta y llamó al LLM real (Ollama/llama3.2) con
+> el texto real — el modelo local, sin embargo, fue conservador y no confirmó la contradicción ni
+> siquiera en un caso obvio ("el cielo es azul" vs. "el cielo nunca es azul"), devolviendo JSON
+> válido con `contradicts: false` y una explicación real (no un fallo de parseo). El camino
+> "sí contradice → crea Recommendation" se verificó con el LLM mockeado (tests unitarios) dado que
+> el modelo local no lo disparó en el smoke test — limitación de precisión del modelo chico local,
+> no un bug del mecanismo (deuda documentada). 363 tests unitarios + 41 de integración (el único
+> fallo es el preexistente `test_busqueda_lexica_vectorial_e_hibrida`, sin relación), ruff,
+> `mypy --strict` (core) e import-linter limpios. Retro completa en `docs/sprints/sprint-24.md`.
+
 ### Sprint 25 — "Aceptar o descartar"
 
 **Objetivo:** cerrar el loop de feedback (doc 11 §8) y dar visibilidad mínima en la UI.

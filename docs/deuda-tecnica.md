@@ -45,6 +45,9 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | Catálogo `memory` del Planner solo cubre `recall` — `MemoryAgent.store` elegido por el LLM (más allá del aprendizaje automático de cada interacción) queda fuera de alcance | [Sprint 21](sprints/sprint-21.md) — alcance explícito, sin caso de uso real todavía |
 | No existe ningún nodo que represente "el usuario" ni ninguna arista `KNOWS` real (doc 02 §3.2) — `gaps_by_prerequisite` usa `confidence` del propio nodo como proxy de "poco evidenciado" en vez de la ausencia de `KNOWS` que el diseño original proponía | [Sprint 23](sprints/sprint-23.md) — decisión explícita al planificar, sin caso de uso real que justifique crear el nodo todavía |
 | `gaps_by_prerequisite` recorre el grafo completo en cada pasada, sin acotar por `node_ids`/`relation_ids` del disparo que la debounceó — aceptable para el volumen de un vault de un solo usuario, no diseñado para escala mayor | [Sprint 23](sprints/sprint-23.md) — alcance explícito |
+| El veredicto de contradicción (`_default_contradiction_verdict`) con `llama3.2` (modelo chico local) es conservador — no confirmó contradicciones ni en casos obviamente contradictorios durante la verificación en vivo de Sprint 24; consistente con el diseño fail-safe, pero puede tardar en generar la primera recomendación real de este tipo | [Sprint 24](sprints/sprint-24.md) | Ajuste fino (¿modelo más capaz para este paso? ¿prompt distinto?), sin sprint asignado |
+| `recent_seed_chunks` no acota por el disparo real (`node_ids`/`relation_ids`) — mismo patrón de deuda que `gaps_by_prerequisite`; además, con pocos chunks recientes puede comparar el mismo par en ambas direcciones (dos llamadas al LLM por un solo par candidato) | [Sprint 24](sprints/sprint-24.md) — alcance explícito |
+| Banda de similitud de contradicción (0.75–0.92) sin tuning contra uso real | [Sprint 24](sprints/sprint-24.md) |
 
 ## UI/UX — baja prioridad, sin sprint asignado
 

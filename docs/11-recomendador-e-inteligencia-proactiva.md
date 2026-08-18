@@ -104,6 +104,20 @@ Los tres tipos diferidos no se prometen en v1.0. Quedan como iteración posterio
 > caso de uso concreto (ej. una UI de "marcar como sabido"). Implementado en
 > `kos_core.storage.neo4j.gaps_by_prerequisite()`.
 
+> **Precisión de "contradicciones" (Sprint 24, decidido 2026-08-17):** el nodo `Claim` que doc 02
+> §6 imagina para esto ("afirmaciones atómicas... para memoria semántica y contradicciones") sigue
+> sin existir — diferido a una revisión futura de la ontología, no bloqueó el sprint. A diferencia
+> de lagunas (consulta de grafo pura), no hay forma determinística de detectar contradicciones:
+> candidatos = chunks de documentos distintos con similitud de embedding en una banda intermedia
+> `(0.75, 0.92)` — el techo es el mismo valor que `DUPLICATE_THRESHOLD` (doc 04 §6): por encima de
+> eso ya es "duplicado/mismo contenido", no contradicción — más un veredicto final de un LLM sobre
+> el texto real de los dos chunks (falla a "no contradice" ante ambigüedad, doc 11 §5 abajo). En
+> la verificación en vivo, el modelo local (`llama3.2`) fue conservador y no confirmó
+> contradicciones ni en casos obvios — limitación de calidad del modelo, no del mecanismo, deuda
+> documentada (`docs/deuda-tecnica.md`). Implementado en
+> `kos_core.storage.search.similarity_band_chunks()` +
+> `kos_workers.tasks.recommend._default_contradiction_verdict()`.
+
 ## 5. Cómo se generan
 
 `RecommenderAgent` nuevo en `packages/agents`, sobre el mismo contrato `AgentRequest`/

@@ -346,6 +346,49 @@ async def vector_search(
     return [_hit_from_row(row, score=float(row["score"]), source="vector") for row in rows]
 
 
+_SIMILARITY_BAND_SQL = sql_text(
+    """
+    SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
+           d.title, d.connector, d.source_id, d.doc_type,
+           1 - (c.embedding <=> CAST(:qvec AS vector)) AS score
+    FROM chunks AS c
+    JOIN documents AS d ON d.doc_id = c.doc_id
+    WHERE c.embedding IS NOT NULL
+      AND c.doc_id != :exclude_doc_id
+      AND 1 - (c.embedding <=> CAST(:qvec AS vector)) BETWEEN :floor AND :ceiling
+    ORDER BY score DESC, c.chunk_id
+    LIMIT :limit
+    """
+)
+
+
+async def similarity_band_chunks(
+    engine: AsyncEngine,
+    embedding: Sequence[float],
+    *,
+    exclude_doc_id: uuid.UUID,
+    floor: float,
+    ceiling: float,
+    limit: int = 1,
+) -> list[SearchHit]:
+    """Chunks de OTROS documentos cuya similitud con `embedding` cae en
+    `(floor, ceiling)` — temáticamente relacionados sin ser casi-duplicados
+    (Sprint 24, doc 11 §4: candidatos de contradicción). Por encima de
+    `ceiling` es terreno de "duplicado/mismo contenido" (doc 04 §6); por
+    debajo de `floor` ya no comparten tema con claridad."""
+    params = {
+        "qvec": _format_vector(embedding),
+        "exclude_doc_id": exclude_doc_id,
+        "floor": floor,
+        "ceiling": ceiling,
+        "limit": limit,
+    }
+    async with engine.connect() as conn:
+        result = await conn.execute(_SIMILARITY_BAND_SQL, params)
+        rows = result.mappings().all()
+    return [_hit_from_row(row, score=float(row["score"]), source="vector") for row in rows]
+
+
 def rrf_fuse(
     rankings: Sequence[Sequence[uuid.UUID]], *, k: int = RRF_K
 ) -> list[tuple[uuid.UUID, float]]:
