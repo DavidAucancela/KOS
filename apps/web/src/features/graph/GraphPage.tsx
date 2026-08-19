@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { PageContainer, PageHeader } from "@/components/page";
 import { GraphCanvas } from "./GraphCanvas";
 import { useGraph } from "./useGraph";
 import { NODE_TYPE_COLORS, NODE_TYPES, RELATION_TYPES, type NodeType, type RelationType } from "./types";
@@ -32,18 +35,14 @@ export function GraphPage() {
   }, [graph.selected]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-6 py-10">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">KOS — Grafo de conocimiento</h1>
-        <p className="text-muted-foreground text-sm">
-          Corrección manual (doc 02 §4 regla 5): lo que edites acá queda protegido de la
-          próxima sincronización.
-        </p>
-      </header>
+    <PageContainer wide>
+      <PageHeader
+        title="KOS — Grafo de conocimiento"
+        description="Corrección manual (doc 02 §4 regla 5): lo que edites acá queda protegido de la próxima sincronización."
+      />
 
       <section className="flex items-center gap-2">
-        <select
-          className="border-border bg-background h-9 rounded-md border px-3 text-sm"
+        <Select
           value={typeFilter}
           onChange={(event) => setTypeFilter(event.target.value as NodeType | "")}
           aria-label="Filtrar por tipo de nodo"
@@ -54,7 +53,7 @@ export function GraphPage() {
               {type}
             </option>
           ))}
-        </select>
+        </Select>
         <Button onClick={() => void graph.search(typeFilter || null)} disabled={graph.nodesLoading}>
           {graph.nodesLoading ? "Buscando…" : "Buscar"}
         </Button>
@@ -95,7 +94,7 @@ export function GraphPage() {
       )}
 
       {graph.nodesError && (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
           {graph.nodesError}
         </p>
       )}
@@ -162,7 +161,7 @@ export function GraphPage() {
           <CardContent className="space-y-4">
             {graph.selectedLoading && <p className="text-muted-foreground text-sm">Cargando…</p>}
             {graph.selectedError && (
-              <p className="text-sm text-red-400">{graph.selectedError}</p>
+              <p className="text-destructive text-sm">{graph.selectedError}</p>
             )}
             {graph.selected && (
               <>
@@ -173,14 +172,14 @@ export function GraphPage() {
                     </label>
                     {graph.selected.node.locked && <Badge variant="outline">corregido</Badge>}
                   </div>
-                  <input
+                  <Input
                     id="canonical-name"
-                    className="border-border bg-background h-9 w-full rounded-md border px-3 text-sm"
+                    className="w-full"
                     value={nameDraft}
                     onChange={(event) => setNameDraft(event.target.value)}
                   />
-                  <select
-                    className="border-border bg-background h-9 w-full rounded-md border px-3 text-sm"
+                  <Select
+                    className="w-full"
                     value={typeDraft}
                     onChange={(event) => setTypeDraft(event.target.value as NodeType)}
                     aria-label="Tipo de nodo"
@@ -190,7 +189,7 @@ export function GraphPage() {
                         {type}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <Button
                     size="sm"
                     disabled={graph.mutating}
@@ -206,7 +205,7 @@ export function GraphPage() {
                 </div>
 
                 {graph.mutationError && (
-                  <p className="text-sm text-red-400">{graph.mutationError}</p>
+                  <p className="text-destructive text-sm">{graph.mutationError}</p>
                 )}
 
                 <div>
@@ -242,7 +241,7 @@ export function GraphPage() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </PageContainer>
   );
 }
 
@@ -266,8 +265,8 @@ function NeighborRow({
         {neighbor.node.canonical_name}
         <span className="text-muted-foreground ml-1 text-xs">({neighbor.node.node_type})</span>
       </span>
-      <select
-        className="border-border bg-background h-8 rounded-md border px-2 text-xs"
+      <Select
+        className="h-8 text-xs"
         value={relationDraft}
         onChange={(event) => setRelationDraft(event.target.value as RelationType)}
         aria-label="Tipo de relación"
@@ -277,7 +276,7 @@ function NeighborRow({
             {type}
           </option>
         ))}
-      </select>
+      </Select>
       <Button size="sm" variant="outline" disabled={busy} onClick={() => onCorrect(relationDraft)}>
         Corregir
       </Button>

@@ -119,4 +119,49 @@ describe("RecommendationsPanel", () => {
       reason: "ya lo sabía",
     });
   });
+
+  it("con recomendaciones resueltas pero ninguna pendiente, igual muestra el panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [recommendation({ status: "accepted" })],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    render(<RecommendationsPanel />);
+
+    expect(await screen.findByText("Recomendaciones")).toBeInTheDocument();
+    expect(screen.getByText("Sin recomendaciones pendientes por ahora.")).toBeInTheDocument();
+    // Sin pendientes: no se muestra el badge de conteo.
+    expect(screen.queryByText("1")).not.toBeInTheDocument();
+  });
+
+  it("el historial muestra el estado resuelto y no ofrece aceptar/descartar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [
+            recommendation({
+              status: "dismissed",
+              dismissed_reason: "ya lo sabía",
+            }),
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    render(<RecommendationsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Historial" }));
+
+    expect(await screen.findByText("Posible laguna: Docker")).toBeInTheDocument();
+    expect(screen.getByText("Descartada")).toBeInTheDocument();
+    expect(screen.getByText("Motivo: ya lo sabía")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Aceptar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Descartar" })).not.toBeInTheDocument();
+  });
 });

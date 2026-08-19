@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import type { Recommendation } from "./types";
 import { useRecommendations } from "./useRecommendations";
 
@@ -14,30 +15,47 @@ const TYPE_LABEL: Record<string, string> = {
   reorganization: "Reorganización",
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  accepted: "Aceptada",
+  dismissed: "Descartada",
+};
+
 function RecommendationCard({
   item,
   onResolve,
 }: {
   item: Recommendation;
-  onResolve: (status: "accepted" | "dismissed", reason?: string) => void;
+  onResolve?: (status: "accepted" | "dismissed", reason?: string) => void;
 }) {
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState("");
+  const resolved = item.status !== "pending";
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="flex items-center gap-2 text-sm">{item.title}</CardTitle>
-        <Badge variant="outline">{TYPE_LABEL[item.type] ?? item.type}</Badge>
+        <div className="flex items-center gap-1">
+          {resolved && (
+            <Badge variant={item.status === "accepted" ? "success" : "outline"}>
+              {STATUS_LABEL[item.status] ?? item.status}
+            </Badge>
+          )}
+          <Badge variant="outline">{TYPE_LABEL[item.type] ?? item.type}</Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {item.description && (
           <p className="text-muted-foreground text-xs">{item.description}</p>
         )}
-        {dismissing ? (
+        {resolved ? (
+          item.dismissed_reason && (
+            <p className="text-muted-foreground text-xs">Motivo: {item.dismissed_reason}</p>
+          )
+        ) : dismissing ? (
           <div className="flex items-center gap-2">
-            <input
-              className="border-border bg-background h-8 flex-1 rounded-md border px-2 text-xs"
+            <Input
+              className="h-8 flex-1 text-xs"
               placeholder="¿Por qué? (opcional)"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -47,8 +65,8 @@ function RecommendationCard({
             <Button
               size="sm"
               variant="outline"
-              className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              onClick={() => onResolve("dismissed", reason || undefined)}
+              className="border-destructive/30 text-destructive hover:bg-destructive/10"
+              onClick={() => onResolve?.("dismissed", reason || undefined)}
             >
               Confirmar
             </Button>
@@ -58,7 +76,7 @@ function RecommendationCard({
           </div>
         ) : (
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => onResolve("accepted")}>
+            <Button size="sm" onClick={() => onResolve?.("accepted")}>
               Aceptar
             </Button>
             <Button size="sm" variant="outline" onClick={() => setDismissing(true)}>
@@ -71,16 +89,24 @@ function RecommendationCard({
   );
 }
 
-// Superficie mínima de recomendaciones (doc 11 §7, Sprint 25): lista de
-// pendientes con aceptar/descartar, embebida en un panel existente — sin
-// pantalla propia nueva, el criterio de éxito de v1.0 no la exige.
+// Superficie mínima de recomendaciones (doc 11 §7, Sprint 25 + mejoras de
+// interfaz posteriores): lista de pendientes con aceptar/descartar, más un
+// historial de solo lectura de las ya resueltas — embebida en un panel
+// existente, sin pantalla propia nueva (doc 11 §7).
 export function RecommendationsPanel() {
   const { items, loading, error, resolve } = useRecommendations();
+  const [tab, setTab] = useState<"pending" | "history">("pending");
 
-  if (loading && items.length === 0) return null;
+  const pending = useMemo(() => items.filter((item) => item.status === "pending"), [items]);
+  const history = useMemo(() => items.filter((item) => item.status !== "pending"), [items]);
+  const visible = tab === "pending" ? pending : history;
+
+  if (loading && items.length === 0) {
+    return <p className="text-muted-foreground text-sm">Cargando recomendaciones…</p>;
+  }
   if (error) {
     return (
-      <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+      <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
         No se pudieron cargar las recomendaciones ({error}).
       </p>
     );
@@ -91,17 +117,46 @@ export function RecommendationsPanel() {
     <section className="space-y-3">
       <header className="flex items-center gap-2">
         <h2 className="text-sm font-semibold tracking-tight">Recomendaciones</h2>
-        <Badge>{items.length}</Badge>
+        {pending.length > 0 && <Badge>{pending.length}</Badge>}
+        <div className="ml-auto flex gap-1">
+          <Button
+            size="sm"
+            variant={tab === "pending" ? "default" : "outline"}
+            onClick={() => setTab("pending")}
+          >
+            Pendientes
+          </Button>
+          <Button
+            size="sm"
+            variant={tab === "history" ? "default" : "outline"}
+            onClick={() => setTab("history")}
+          >
+            Historial
+          </Button>
+        </div>
       </header>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {items.map((item) => (
-          <RecommendationCard
-            key={item.recommendation_id}
-            item={item}
-            onResolve={(status, reason) => void resolve(item.recommendation_id, status, reason)}
-          />
-        ))}
-      </div>
+
+      {visible.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          {tab === "pending"
+            ? "Sin recomendaciones pendientes por ahora."
+            : "Todavía no resolviste ninguna recomendación."}
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {visible.map((item) => (
+            <RecommendationCard
+              key={item.recommendation_id}
+              item={item}
+              onResolve={
+                tab === "pending"
+                  ? (status, reason) => void resolve(item.recommendation_id, status, reason)
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

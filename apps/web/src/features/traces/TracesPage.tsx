@@ -4,6 +4,8 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { PageContainer, PageHeader } from "@/components/page";
 import { usePlan } from "./usePlan";
 
 const DEGRADED_REASON_LABEL: Record<string, string> = {
@@ -30,14 +32,11 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
   }, [initialPlanId]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">KOS — Trazas de planes</h1>
-        <p className="text-muted-foreground text-sm">
-          Un plan es la unidad de depuración (doc 03 §3): qué pasos corrió, cuánto tardó cada
-          uno, y por qué se degradó si se degradó.
-        </p>
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="KOS — Trazas de planes"
+        description="Un plan es la unidad de depuración (doc 03 §3): qué pasos corrió, cuánto tardó cada uno, y por qué se degradó si se degradó."
+      />
 
       <form
         className="flex items-center gap-2"
@@ -46,8 +45,8 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
           void fetchPlan(draft);
         }}
       >
-        <input
-          className="border-border bg-background h-9 flex-1 rounded-md border px-3 text-sm"
+        <Input
+          className="flex-1"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder="plan_id"
@@ -59,7 +58,7 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
       </form>
 
       {error && (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
           {error}
         </p>
       )}
@@ -67,7 +66,7 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
       {plan && (
         <div className="space-y-4">
           {plan.degraded && (
-            <p className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <p className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
               <AlertTriangle className="size-4" aria-hidden />
               Plan degradado
               {plan.degraded_reason && (
@@ -121,6 +120,6 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
           Pegá un plan_id (o abrí uno desde una respuesta del chat) para ver su traza.
         </p>
       )}
-    </main>
+    </PageContainer>
   );
 }
