@@ -36,6 +36,7 @@ from kos_core.storage.postgres import (
     chunks_table,
     create_engine,
     documents_table,
+    set_chunk_entity_node_ids,
     similar_nodes,
     upsert_node_embedding,
 )
@@ -364,12 +365,25 @@ async def _sync_graph(
         )
 
     relations_written = await _sync_relations(driver, relations, node_ids, str(doc_id))
+
+    # doc 12 §4: persiste qué nodos salieron de cada chunk — EntityCandidate.chunk_ids
+    # es transitorio, esto es lo único que sobrevive para que la task de relaciones
+    # cross-documento sepa, más tarde, a qué entidades corresponde este chunk.
+    chunk_to_nodes: dict[uuid.UUID, list[str]] = {}
+    for entity in normalized:
+        node_id = node_ids[canonicalize(entity.name)]
+        for chunk_id in entity.chunk_ids:
+            chunk_to_nodes.setdefault(chunk_id, []).append(node_id)
+    for chunk_id, node_id_list in chunk_to_nodes.items():
+        await set_chunk_entity_node_ids(engine, chunk_id, list(dict.fromkeys(node_id_list)))
+
     return {
         "doc_id": str(doc_id),
         "synced": True,
         "entities": len(normalized),
         "relations": relations_written,
         "node_ids": list(node_ids.values()),
+        "chunk_ids": [str(chunk_id) for chunk_id, _ in chunks],
     }
 
 
@@ -425,4 +439,11 @@ def graph_sync(doc_id: str) -> dict[str, Any]:
         from kos_workers.tasks.recommend import recommend_from_graph_update
 
         recommend_from_graph_update.delay(node_ids=result["node_ids"], relation_ids=[])
+    if result.get("synced") and result.get("chunk_ids"):
+        # doc 12 §4: mismo motivo de import diferido que arriba.
+        from kos_workers.tasks.cross_doc_relations import discover_cross_document_relations
+
+        discover_cross_document_relations.delay(
+            doc_id=result["doc_id"], chunk_ids=result["chunk_ids"]
+        )
     return result

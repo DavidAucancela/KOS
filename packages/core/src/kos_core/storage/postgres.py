@@ -100,6 +100,7 @@ chunks_table = Table(
     Column("end_offset", Integer),
     Column("embedding", Vector(EMBEDDING_DIM)),
     Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("entity_node_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
 )
 
 memory_items_table = Table(
@@ -354,6 +355,37 @@ async def list_chunks(
         rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
     next_cursor = int(rows[-1]["position"]) if len(rows) == limit else None
     return rows, next_cursor
+
+
+async def get_chunk(engine: AsyncEngine, chunk_id: uuid_lib.UUID) -> dict[str, Any] | None:
+    """Un chunk individual con `embedding`/`entity_node_ids` (doc 12 §4): la
+    task de relaciones cross-documento re-carga chunks por id en una corrida
+    separada de la que los generó, no hay lista en memoria que reusar."""
+    query = select(
+        chunks_table.c.chunk_id,
+        chunks_table.c.doc_id,
+        chunks_table.c.text,
+        chunks_table.c.embedding,
+        chunks_table.c.entity_node_ids,
+    ).where(chunks_table.c.chunk_id == chunk_id)
+    async with engine.connect() as conn:
+        row = (await conn.execute(query)).mappings().first()
+        return dict(row) if row else None
+
+
+async def set_chunk_entity_node_ids(
+    engine: AsyncEngine, chunk_id: uuid_lib.UUID, node_ids: list[str]
+) -> None:
+    """Persiste qué nodos de Neo4j salieron de este chunk (doc 12 §4) — se
+    llama al final de cada `graph_sync`, para que una corrida posterior de
+    relaciones cross-documento sepa, dado el chunk_id de OTRO documento, a
+    qué entidades ya resueltas corresponde."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            chunks_table.update()
+            .where(chunks_table.c.chunk_id == chunk_id)
+            .values(entity_node_ids=node_ids)
+        )
 
 
 async def insert_memory(

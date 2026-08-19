@@ -36,6 +36,7 @@ def create_celery() -> Celery:
             "kos_workers.tasks.enrich",
             "kos_workers.tasks.graph_sync",
             "kos_workers.tasks.graph_retire",
+            "kos_workers.tasks.cross_doc_relations",
             "kos_workers.tasks.memory",
             "kos_workers.tasks.recommend",
         ],
