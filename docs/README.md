@@ -18,6 +18,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 09 | [Guía de desarrollo y despliegue](09-guia-desarrollo-y-despliegue.md) | Todas | 🟢 Aprobado |
 | 10 | [Estructura del proyecto](10-estructura-del-proyecto.md) | Todas | 🟢 Aprobado |
 | 11 | [Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) | Fase 5 | 🟡 Borrador |
+| 12 | [Calidad de extracción: entidades y relaciones cross-documento](12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Mejora sobre Fase 1 | 🟡 Borrador |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado
 
