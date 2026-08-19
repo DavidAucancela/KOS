@@ -66,6 +66,24 @@ async def fetch_nodes_by_type(driver: AsyncDriver, node_type: str) -> list[NodeR
         return [NodeRecord(record) async for record in result]
 
 
+async def fetch_nodes_by_ids(driver: AsyncDriver, node_ids: list[str]) -> list[NodeRecord]:
+    """Batch por `id` (doc 12 §4): arma la bolsa de entidades de dos documentos
+    distintos para el prompt de relaciones cross-documento sin una consulta
+    por id. `node_ids` puede traer duplicados (mismo nodo referenciado desde
+    varios chunks) — Neo4j los devuelve una sola vez, `IN` no repite filas."""
+    if not node_ids:
+        return []
+    query = (
+        "MATCH (n) WHERE n.id IN $node_ids "
+        "RETURN n.id AS id, n.canonical_name AS canonical_name, "
+        "n.name AS name, n.aliases AS aliases, n.confidence AS confidence, "
+        "n.sources AS sources"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"node_ids": node_ids})
+        return [NodeRecord(record) async for record in result]
+
+
 async def fetch_node_by_canonical_name(
     driver: AsyncDriver, node_type: str, canonical_name: str
 ) -> NodeRecord | None:

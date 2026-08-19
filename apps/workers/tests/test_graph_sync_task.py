@@ -255,6 +255,17 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     recording_nodes = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording_nodes)
 
+    chunk_entity_node_ids: dict[uuid.UUID, list[str]] = {}
+
+    async def fake_set_chunk_entity_node_ids(
+        engine: object, chunk_id_arg: uuid.UUID, node_ids: list[str]
+    ) -> None:
+        chunk_entity_node_ids[chunk_id_arg] = node_ids
+
+    monkeypatch.setattr(
+        graph_sync_module, "set_chunk_entity_node_ids", fake_set_chunk_entity_node_ids
+    )
+
     relations_written: list[dict[str, object]] = []
 
     async def fake_merge_relation(driver: object, **kwargs: object) -> None:
@@ -292,6 +303,8 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     assert len(relations_written) == 1
     assert relations_written[0]["relation_type"] == "USES"
     assert sorted(result["node_ids"]) == ["node-1", "node-2"]
+    assert result["chunk_ids"] == [str(chunk_id)]
+    assert sorted(chunk_entity_node_ids[chunk_id]) == ["node-1", "node-2"]
 
 
 def test_merge_entities_por_canonical_name_une_chunk_ids_y_toma_confianza_maxima() -> None:
@@ -446,3 +459,70 @@ def test_graph_sync_task_no_encadena_si_no_sincronizo(monkeypatch: pytest.Monkey
     result = graph_sync_module.graph_sync(str(uuid.uuid4()))
 
     assert result["synced"] is False
+
+
+def test_graph_sync_task_encadena_relaciones_cross_documento_si_sincronizo_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Doc 12 §4: además del Recomendador, `kos.graph_sync` encadena la task
+    de relaciones cross-documento cuando sincronizó al menos un chunk."""
+    doc_id = str(uuid.uuid4())
+    chunk_id = str(uuid.uuid4())
+
+    async def fake_async_graph_sync(_doc_id: uuid.UUID) -> dict[str, object]:
+        return {
+            "doc_id": doc_id,
+            "synced": True,
+            "node_ids": ["node-1"],
+            "chunk_ids": [chunk_id],
+        }
+
+    monkeypatch.setattr(graph_sync_module, "_async_graph_sync", fake_async_graph_sync)
+
+    from kos_workers.tasks import recommend as recommend_module
+
+    monkeypatch.setattr(
+        recommend_module.recommend_from_graph_update, "delay", lambda **kwargs: None
+    )
+
+    from kos_workers.tasks import cross_doc_relations as cross_doc_module
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        cross_doc_module.discover_cross_document_relations,
+        "delay",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    result = graph_sync_module.graph_sync(doc_id)
+
+    assert result["synced"] is True
+    [call] = calls
+    assert call["doc_id"] == doc_id
+    assert call["chunk_ids"] == [chunk_id]
+
+
+def test_graph_sync_task_no_encadena_cross_documento_sin_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_async_graph_sync(doc_id: uuid.UUID) -> dict[str, object]:
+        return {"doc_id": str(doc_id), "synced": True, "node_ids": [], "chunk_ids": []}
+
+    monkeypatch.setattr(graph_sync_module, "_async_graph_sync", fake_async_graph_sync)
+
+    from kos_workers.tasks import recommend as recommend_module
+
+    monkeypatch.setattr(
+        recommend_module.recommend_from_graph_update, "delay", lambda **kwargs: None
+    )
+
+    from kos_workers.tasks import cross_doc_relations as cross_doc_module
+
+    def fail_delay(**kwargs: object) -> None:
+        raise AssertionError("no debe encadenar sin chunk_ids")
+
+    monkeypatch.setattr(cross_doc_module.discover_cross_document_relations, "delay", fail_delay)
+
+    result = graph_sync_module.graph_sync(str(uuid.uuid4()))
+
+    assert result["synced"] is True
