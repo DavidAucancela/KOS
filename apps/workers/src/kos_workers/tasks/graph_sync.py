@@ -6,6 +6,9 @@ Corre s7 (entidades) → s8 (relaciones) → s9 (confianza) llamando al LLM real
 forma directamente asíncrona (igual que `tasks/enrich.py` hace con el resumen: no
 pasa por el factory `make_X_stage`, que es sync y solo existe para tests/pipeline
 puro — aquí se reutilizan `build_*_prompt`/`parse_*_response` directamente).
+s7/s8 corren una vez por chunk, no sobre el documento completo truncado (doc 12
+§5) — la misma entidad/relación propuesta por más de un chunk se mergea antes
+de la resolución (`_merge_entities_by_canonical_name`/`_merge_relations_by_triple`).
 
 Entity resolution (doc 05 §4, 5 pasos) resuelve cada entidad candidata contra lo
 que ya existe en Neo4j y persiste con `kos_core.storage.neo4j`. Idempotente por
@@ -54,8 +57,11 @@ AsyncEmbed = Callable[[list[str]], Awaitable[list[list[float]]]]
 MergeVerdict = Callable[[str, str], Awaitable[bool]]
 
 
-async def _load_document_text(engine: AsyncEngine, doc_id: uuid.UUID) -> tuple[str, str] | None:
-    """(title, texto concatenado de los chunks) — igual que `tasks/enrich.py`."""
+async def _load_document_chunks(
+    engine: AsyncEngine, doc_id: uuid.UUID
+) -> tuple[str, list[tuple[uuid.UUID, str]]] | None:
+    """(title, [(chunk_id, text), ...]) — doc 12 §5: cada chunk se extrae por
+    separado en vez de truncar el documento completo a 8000 caracteres."""
     async with engine.connect() as conn:
         row = (
             (
@@ -70,13 +76,13 @@ async def _load_document_text(engine: AsyncEngine, doc_id: uuid.UUID) -> tuple[s
             return None
         chunk_rows = (
             await conn.execute(
-                select(chunks_table.c.text)
+                select(chunks_table.c.chunk_id, chunks_table.c.text)
                 .where(chunks_table.c.doc_id == doc_id)
                 .order_by(chunks_table.c.position)
             )
         ).all()
-    text = "\n\n".join(chunk_row.text for chunk_row in chunk_rows)
-    return row["title"] or "", text
+    chunks = [(chunk_row.chunk_id, chunk_row.text) for chunk_row in chunk_rows]
+    return row["title"] or "", chunks
 
 
 async def _default_merge_verdict(generate: AsyncGenerate, name_a: str, name_b: str) -> bool:
@@ -238,24 +244,86 @@ async def _sync_relations(
     return written
 
 
+def _merge_entities_by_canonical_name(entities: list[EntityCandidate]) -> list[EntityCandidate]:
+    """La misma entidad puede aparecer en varios chunks del mismo documento
+    (doc 12 §5) — se mergea antes de pasar por `_resolve_entity` para no
+    embedear/consultar Neo4j una vez por mención repetida. `name` queda con
+    la primera mención vista; `aliases`/`chunk_ids` se unen; `confidence` es
+    el máximo entre menciones."""
+    merged: dict[tuple[str, str], EntityCandidate] = {}
+    for entity in entities:
+        key = (canonicalize(entity.name), entity.type)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = entity
+            continue
+        merged[key] = existing.model_copy(
+            update={
+                "aliases": list(dict.fromkeys([*existing.aliases, *entity.aliases])),
+                "confidence": max(existing.confidence, entity.confidence),
+                "chunk_ids": list(dict.fromkeys([*existing.chunk_ids, *entity.chunk_ids])),
+            }
+        )
+    return list(merged.values())
+
+
+def _merge_relations_by_triple(relations: list[RelationCandidate]) -> list[RelationCandidate]:
+    """Mismo criterio que `_merge_entities_by_canonical_name`, para relaciones
+    propuestas por más de un chunk (fuente/relación/destino canonicalizados)."""
+    merged: dict[tuple[str, str, str], RelationCandidate] = {}
+    for relation in relations:
+        key = (canonicalize(relation.source), relation.relation, canonicalize(relation.target))
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = relation
+            continue
+        merged[key] = existing.model_copy(
+            update={
+                "confidence": max(existing.confidence, relation.confidence),
+                "chunk_ids": list(dict.fromkeys([*existing.chunk_ids, *relation.chunk_ids])),
+            }
+        )
+    return list(merged.values())
+
+
+def _count_mentioned(text: str, entity_names: list[str]) -> int:
+    """Pre-filtro barato antes de pedirle relaciones al LLM (doc 12 §7): sin
+    NLP, solo substring case-insensitive — evita gastar una llamada en un
+    chunk que claramente no menciona a nadie conocido."""
+    lowered = text.lower()
+    return sum(1 for name in entity_names if name.lower() in lowered)
+
+
 async def _extract_entities_and_relations(
-    text: str, *, generate_entities: AsyncGenerate, generate_relations: AsyncGenerate
+    chunks: list[tuple[uuid.UUID, str]],
+    *,
+    generate_entities: AsyncGenerate,
+    generate_relations: AsyncGenerate,
 ) -> tuple[list[EntityCandidate], list[RelationCandidate]]:
-    """s7 → s8, llamando al LLM directamente (mismo estilo que `tasks/enrich.py`)."""
-    entities_prompt = build_entities_prompt(text)
-    entities = (
-        parse_entities(await generate_entities(entities_prompt))
-        if entities_prompt is not None
-        else []
-    )
+    """s7 → s8 por chunk (doc 12 §5), llamando al LLM directamente (mismo
+    estilo que `tasks/enrich.py`) — reemplaza la versión anterior que corría
+    una sola vez sobre el documento completo truncado a 8000 caracteres."""
+    all_entities: list[EntityCandidate] = []
+    for chunk_id, chunk_text in chunks:
+        entities_prompt = build_entities_prompt(chunk_text)
+        if entities_prompt is None:
+            continue
+        for entity in parse_entities(await generate_entities(entities_prompt)):
+            all_entities.append(entity.model_copy(update={"chunk_ids": [chunk_id]}))
+    entities = _merge_entities_by_canonical_name(all_entities)
 
     entity_names = [entity.name for entity in entities]
-    relations_prompt = build_relations_prompt(text, entity_names)
-    relations = (
-        parse_relations(await generate_relations(relations_prompt), entity_names)
-        if relations_prompt is not None
-        else []
-    )
+    all_relations: list[RelationCandidate] = []
+    for chunk_id, chunk_text in chunks:
+        if _count_mentioned(chunk_text, entity_names) < 2:
+            continue
+        relations_prompt = build_relations_prompt(chunk_text, entity_names)
+        if relations_prompt is None:
+            continue
+        for relation in parse_relations(await generate_relations(relations_prompt), entity_names):
+            all_relations.append(relation.model_copy(update={"chunk_ids": [chunk_id]}))
+    relations = _merge_relations_by_triple(all_relations)
+
     return entities, relations
 
 
@@ -270,13 +338,13 @@ async def _sync_graph(
     merge_verdict: MergeVerdict,
 ) -> dict[str, Any]:
     """Núcleo testeable con fakes (engine/driver/LLM inyectados)."""
-    loaded = await _load_document_text(engine, doc_id)
+    loaded = await _load_document_chunks(engine, doc_id)
     if loaded is None:
         return {"doc_id": str(doc_id), "synced": False}
-    _title, text = loaded
+    _title, chunks = loaded
 
     entities, relations = await _extract_entities_and_relations(
-        text, generate_entities=generate_entities, generate_relations=generate_relations
+        chunks, generate_entities=generate_entities, generate_relations=generate_relations
     )
     # s9: boost por alias ya aplicado en _resolve_entity/_boosted_confidence al
     # fusionar con lo existente; aquí solo se normalizan las candidatas nuevas.
