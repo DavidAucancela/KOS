@@ -161,7 +161,7 @@ export function GraphCanvas({
   }
 
   function handleSvgPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    if (draggingId.current) {
+    if (draggingId.current !== null) {
       const point = toWorldPoint(event.clientX, event.clientY);
       if (point) setPositions((current) => ({ ...current, [draggingId.current!]: point }));
       return;

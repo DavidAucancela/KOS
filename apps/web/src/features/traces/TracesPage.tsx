@@ -42,6 +42,7 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
         className="flex items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!draft.trim()) return;
           void fetchPlan(draft);
         }}
       >
