@@ -12,12 +12,20 @@ def _entity(name: str, type_: str = "Technology", confidence: float = 0.8) -> En
     return EntityCandidate(name=name, type=type_, confidence=confidence)
 
 
-async def _no_candidates(driver: object, node_type: str) -> list[neo4j_module.NodeRecord]:
+async def _no_exact_match(driver: object, node_type: str, canonical_name: str) -> None:
+    return None
+
+
+async def _no_similar(engine: object, vector: list[float], **kwargs: object) -> list[dict]:
     return []
 
 
 async def _no_merge_verdict(name_a: str, name_b: str) -> bool:
     raise AssertionError("no debe pedirse veredicto sin candidatos similares")
+
+
+async def _fake_embed(texts: list[str]) -> list[list[float]]:
+    return [[1.0, 0.0] for _ in texts]
 
 
 class _RecordingMerge:
@@ -31,53 +39,74 @@ class _RecordingMerge:
         return f"node-{len(self.calls)}"
 
 
+class _RecordingUpsertEmbedding:
+    """Fake de `postgres.upsert_node_embedding`: registra las llamadas."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def __call__(self, engine: object, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
 async def test_resolve_entity_crea_nodo_nuevo_sin_candidatos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(neo4j_module, "fetch_nodes_by_type", _no_candidates)
+    monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", _no_exact_match)
+    monkeypatch.setattr(graph_sync_module, "similar_nodes", _no_similar)
     recording = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording)
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        raise AssertionError("sin candidatos no debe embeberse nada")
+    upserts = _RecordingUpsertEmbedding()
+    monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", upserts)
 
     node_id = await graph_sync_module._resolve_entity(
-        None, _entity("FastAPI"), doc_id="doc-1", embed=embed, merge_verdict=_no_merge_verdict
+        None,
+        _entity("FastAPI"),
+        doc_id="doc-1",
+        engine=None,
+        embed=_fake_embed,
+        merge_verdict=_no_merge_verdict,
     )
 
     assert node_id == "node-1"
     assert recording.calls[0]["canonical_name"] == "fastapi"
     assert recording.calls[0]["sources"] == ["doc-1"]
     assert recording.calls[0]["source_confidences"] == [0.8]  # doc 04 §5
+    assert upserts.calls[0]["node_id"] == "node-1"
+    assert upserts.calls[0]["canonical_name"] == "fastapi"
 
 
 async def test_resolve_entity_match_exacto_fusiona(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def existing(driver: object, node_type: str) -> list[neo4j_module.NodeRecord]:
-        return [
-            neo4j_module.NodeRecord(
-                {
-                    "id": "node-existente",
-                    "canonical_name": "fastapi",
-                    "name": "FastAPI",
-                    "aliases": ["fast-api"],
-                    "confidence": 0.6,
-                    "sources": ["doc-viejo"],
-                }
-            )
-        ]
+    async def exact(driver: object, node_type: str, canonical_name: str) -> neo4j_module.NodeRecord:
+        return neo4j_module.NodeRecord(
+            {
+                "id": "node-existente",
+                "canonical_name": "fastapi",
+                "name": "FastAPI",
+                "aliases": ["fast-api"],
+                "confidence": 0.6,
+                "sources": ["doc-viejo"],
+            }
+        )
 
-    monkeypatch.setattr(neo4j_module, "fetch_nodes_by_type", existing)
+    monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", exact)
+
+    async def no_similar_search(
+        engine: object, vector: list[float], **kwargs: object
+    ) -> list[dict]:
+        raise AssertionError("match exacto no debe buscar candidatos por similitud")
+
+    monkeypatch.setattr(graph_sync_module, "similar_nodes", no_similar_search)
     recording = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording)
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        raise AssertionError("match exacto no debe pasar a embeddings")
+    monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
 
     await graph_sync_module._resolve_entity(
         None,
         _entity("FastAPI", confidence=0.9),
         doc_id="doc-nuevo",
-        embed=embed,
+        engine=None,
+        embed=_fake_embed,
         merge_verdict=_no_merge_verdict,
     )
 
@@ -98,26 +127,32 @@ async def test_resolve_entity_match_exacto_fusiona(monkeypatch: pytest.MonkeyPat
 async def test_resolve_entity_similitud_alta_pide_veredicto_y_fusiona(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def existing(driver: object, node_type: str) -> list[neo4j_module.NodeRecord]:
-        return [
-            neo4j_module.NodeRecord(
-                {
-                    "id": "node-existente",
-                    "canonical_name": "fastapi-framework",
-                    "name": "Fast API Framework",
-                    "aliases": [],
-                    "confidence": 0.5,
-                    "sources": ["doc-viejo"],
-                }
-            )
-        ]
+    async def similar(engine: object, vector: list[float], **kwargs: object) -> list[dict]:
+        return [{"node_id": "node-existente", "canonical_name": "fastapi-framework", "score": 0.8}]
 
-    monkeypatch.setattr(neo4j_module, "fetch_nodes_by_type", existing)
+    monkeypatch.setattr(graph_sync_module, "similar_nodes", similar)
+
+    calls: list[str] = []
+
+    async def fetch(driver: object, node_type: str, canonical_name: str) -> object:
+        calls.append(canonical_name)
+        if canonical_name == "fastapi":  # paso 2: match exacto, no hay
+            return None
+        return neo4j_module.NodeRecord(
+            {
+                "id": "node-existente",
+                "canonical_name": "fastapi-framework",
+                "name": "Fast API Framework",
+                "aliases": [],
+                "confidence": 0.5,
+                "sources": ["doc-viejo"],
+            }
+        )
+
+    monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", fetch)
     recording = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording)
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        return [[1.0, 0.0], [0.99, 0.01]]  # muy similares, coseno > 0.9
+    monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
 
     verdicts: list[tuple[str, str]] = []
 
@@ -126,7 +161,12 @@ async def test_resolve_entity_similitud_alta_pide_veredicto_y_fusiona(
         return True
 
     node_id = await graph_sync_module._resolve_entity(
-        None, _entity("FastAPI"), doc_id="doc-nuevo", embed=embed, merge_verdict=merge_verdict
+        None,
+        _entity("FastAPI"),
+        doc_id="doc-nuevo",
+        engine=None,
+        embed=_fake_embed,
+        merge_verdict=merge_verdict,
     )
 
     assert node_id == "node-1"
@@ -137,32 +177,40 @@ async def test_resolve_entity_similitud_alta_pide_veredicto_y_fusiona(
 async def test_resolve_entity_veredicto_negativo_crea_nodo_nuevo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def existing(driver: object, node_type: str) -> list[neo4j_module.NodeRecord]:
-        return [
-            neo4j_module.NodeRecord(
-                {
-                    "id": "otro",
-                    "canonical_name": "otraentidad",
-                    "name": "Otra Entidad",
-                    "aliases": [],
-                    "confidence": 0.5,
-                    "sources": ["doc-x"],
-                }
-            )
-        ]
+    async def similar(engine: object, vector: list[float], **kwargs: object) -> list[dict]:
+        return [{"node_id": "otro", "canonical_name": "otraentidad", "score": 0.8}]
 
-    monkeypatch.setattr(neo4j_module, "fetch_nodes_by_type", existing)
+    monkeypatch.setattr(graph_sync_module, "similar_nodes", similar)
+
+    async def fetch(driver: object, node_type: str, canonical_name: str) -> object:
+        if canonical_name == "fastapi":
+            return None
+        return neo4j_module.NodeRecord(
+            {
+                "id": "otro",
+                "canonical_name": "otraentidad",
+                "name": "Otra Entidad",
+                "aliases": [],
+                "confidence": 0.5,
+                "sources": ["doc-x"],
+            }
+        )
+
+    monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", fetch)
     recording = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording)
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        return [[1.0, 0.0], [0.99, 0.01]]
+    monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
 
     async def merge_verdict(name_a: str, name_b: str) -> bool:
         return False
 
     await graph_sync_module._resolve_entity(
-        None, _entity("FastAPI"), doc_id="doc-nuevo", embed=embed, merge_verdict=merge_verdict
+        None,
+        _entity("FastAPI"),
+        doc_id="doc-nuevo",
+        engine=None,
+        embed=_fake_embed,
+        merge_verdict=merge_verdict,
     )
 
     assert recording.calls[0]["canonical_name"] == "fastapi"  # nodo nuevo, no fusionado
@@ -198,7 +246,9 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
         return "Proyecto KOS", "KOS usa FastAPI."
 
     monkeypatch.setattr(graph_sync_module, "_load_document_text", fake_load)
-    monkeypatch.setattr(neo4j_module, "fetch_nodes_by_type", _no_candidates)
+    monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", _no_exact_match)
+    monkeypatch.setattr(graph_sync_module, "similar_nodes", _no_similar)
+    monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
     recording_nodes = _RecordingMerge()
     monkeypatch.setattr(neo4j_module, "merge_node", recording_nodes)
 
@@ -223,16 +273,13 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     async def generate_relations(prompt: str) -> str:
         return relations_json
 
-    async def embed(texts: list[str]) -> list[list[float]]:
-        raise AssertionError("sin candidatos existentes no debe embeberse")
-
     result = await graph_sync_module._sync_graph(
         doc_id,
         engine=None,
         driver=None,
         generate_entities=generate_entities,
         generate_relations=generate_relations,
-        embed=embed,
+        embed=_fake_embed,
         merge_verdict=_no_merge_verdict,
     )
 

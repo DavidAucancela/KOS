@@ -66,6 +66,26 @@ async def fetch_nodes_by_type(driver: AsyncDriver, node_type: str) -> list[NodeR
         return [NodeRecord(record) async for record in result]
 
 
+async def fetch_node_by_canonical_name(
+    driver: AsyncDriver, node_type: str, canonical_name: str
+) -> NodeRecord | None:
+    """Match exacto por `canonical_name` + tipo (doc 05 §4 paso 2, doc 12 §3): trae
+    un solo nodo en vez de todos los del tipo, a diferencia de `fetch_nodes_by_type`
+    — el camino barato de entity resolution no necesita más que esto."""
+    if not is_valid_node_type(node_type):
+        raise ValueError(f"Tipo de nodo desconocido: {node_type!r}")
+    query = (
+        f"MATCH (n:{node_type} {{canonical_name: $canonical_name}}) "
+        "RETURN n.id AS id, n.canonical_name AS canonical_name, "
+        "n.name AS name, n.aliases AS aliases, n.confidence AS confidence, "
+        "n.sources AS sources, n.source_confidences AS source_confidences"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, {"canonical_name": canonical_name})
+        record = await result.single()
+        return NodeRecord(record) if record is not None else None
+
+
 async def merge_node(
     driver: AsyncDriver,
     *,

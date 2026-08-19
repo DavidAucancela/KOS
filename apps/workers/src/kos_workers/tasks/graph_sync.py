@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -30,8 +29,13 @@ from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
 from kos_core.ontology import canonicalize
 from kos_core.schemas import EntityCandidate, ParsedDocument, RelationCandidate
 from kos_core.storage import neo4j as neo4j_storage
-from kos_core.storage.neo4j import NodeRecord
-from kos_core.storage.postgres import chunks_table, create_engine, documents_table
+from kos_core.storage.postgres import (
+    chunks_table,
+    create_engine,
+    documents_table,
+    similar_nodes,
+    upsert_node_embedding,
+)
 from kos_workers.celery_app import app
 from kos_workers.pipeline.s7_entities import ENTITIES_SYSTEM, build_entities_prompt
 from kos_workers.pipeline.s7_entities import parse_entities_response as parse_entities
@@ -39,7 +43,11 @@ from kos_workers.pipeline.s8_relations import RELATIONS_SYSTEM, build_relations_
 from kos_workers.pipeline.s8_relations import parse_relations_response as parse_relations
 from kos_workers.pipeline.s9_confidence import ALIAS_BOOST, apply_confidence_rules
 
-SIMILARITY_THRESHOLD = 0.9
+# Banda amplia para generar candidatos (doc 12 §3) — el veredicto final lo da
+# el LLM (`merge_verdict`), no este score solo; reemplaza el umbral único
+# `SIMILARITY_THRESHOLD = 0.9` que antes filtraba paráfrasis razonables antes
+# de siquiera llegar al veredicto.
+SIMILARITY_CANDIDATE_FLOOR = 0.75
 
 AsyncGenerate = Callable[[str], Awaitable[str]]
 AsyncEmbed = Callable[[list[str]], Awaitable[list[list[float]]]]
@@ -69,15 +77,6 @@ async def _load_document_text(engine: AsyncEngine, doc_id: uuid.UUID) -> tuple[s
         ).all()
     text = "\n\n".join(chunk_row.text for chunk_row in chunk_rows)
     return row["title"] or "", text
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 async def _default_merge_verdict(generate: AsyncGenerate, name_a: str, name_b: str) -> bool:
@@ -130,81 +129,91 @@ def _boosted_confidence(existing: float | None, entity: EntityCandidate) -> floa
     return min(1.0, max(existing or 0.0, entity.confidence) + ALIAS_BOOST)
 
 
+async def _merge_with_candidate(
+    driver: Any, candidate: dict[str, Any], entity: EntityCandidate, *, doc_id: str
+) -> str:
+    return await neo4j_storage.merge_node(
+        driver,
+        node_type=entity.type,
+        canonical_name=candidate["canonical_name"],
+        name=candidate.get("name") or entity.name,
+        aliases=_merge_aliases(candidate.get("aliases"), entity),
+        confidence=_boosted_confidence(candidate.get("confidence"), entity),
+        sources=_merge_sources(candidate.get("sources"), doc_id),
+        source_confidences=_merge_source_confidences(
+            candidate.get("sources"),
+            candidate.get("source_confidences"),
+            candidate.get("confidence") or 0.0,
+            doc_id,
+            entity.confidence,
+        ),
+    )
+
+
 async def _resolve_entity(
     driver: Any,
     entity: EntityCandidate,
     *,
     doc_id: str,
+    engine: AsyncEngine,
     embed: AsyncEmbed,
     merge_verdict: MergeVerdict,
 ) -> str:
-    """Entity resolution, los 5 pasos de doc 05 §4, en orden."""
+    """Entity resolution (doc 05 §4, doc 12 §3). Paso 2 (match exacto) sigue
+    igual; paso 3 (similitud) ahora es una búsqueda ANN indexada contra
+    `node_embeddings` (doc 12 §3) en vez de traer todos los nodos del tipo y
+    calcular coseno en memoria — el veredicto sigue siendo del LLM, no del
+    score de similitud solo."""
     canonical = canonicalize(entity.name)
-    candidates = await neo4j_storage.fetch_nodes_by_type(driver, entity.type)
+    [vector] = await embed([entity.name])
 
-    # Paso 2: match exacto por canonical_name + tipo.
-    exact = next((c for c in candidates if c["canonical_name"] == canonical), None)
+    # Paso 2: match exacto por canonical_name + tipo (barato, un solo nodo).
+    exact = await neo4j_storage.fetch_node_by_canonical_name(driver, entity.type, canonical)
     if exact is not None:
-        return await neo4j_storage.merge_node(
-            driver,
-            node_type=entity.type,
-            canonical_name=canonical,
-            name=exact.get("name") or entity.name,
-            aliases=_merge_aliases(exact.get("aliases"), entity),
-            confidence=_boosted_confidence(exact.get("confidence"), entity),
-            sources=_merge_sources(exact.get("sources"), doc_id),
-            source_confidences=_merge_source_confidences(
-                exact.get("sources"),
-                exact.get("source_confidences"),
-                exact.get("confidence") or 0.0,
-                doc_id,
-                entity.confidence,
-            ),
+        node_id = await _merge_with_candidate(driver, exact, entity, doc_id=doc_id)
+    else:
+        # Paso 3: candidatos por ANN (banda amplia) → veredicto del LLM decide.
+        # `node_embeddings` solo indexa canonical_name/embedding — el nodo
+        # completo (aliases/confidence/sources) se vuelve a pedir a Neo4j,
+        # que sigue siendo la fuente de verdad (ADR-0003).
+        candidates = await similar_nodes(
+            engine, vector, node_type=entity.type, floor=SIMILARITY_CANDIDATE_FLOOR
         )
+        matched = None
+        for candidate in candidates:
+            full = await neo4j_storage.fetch_node_by_canonical_name(
+                driver, entity.type, candidate["canonical_name"]
+            )
+            if full is None:
+                continue  # índice desincronizado (nodo borrado tras el último embed)
+            candidate_name = full.get("name") or full["canonical_name"]
+            if await merge_verdict(entity.name, candidate_name):
+                matched = full
+                break
 
-    # Paso 3: similitud de embeddings de nombre/alias > 0.9 → veredicto del LLM.
-    if candidates:
-        vectors = await embed([entity.name, *(c["name"] for c in candidates)])
-        query_vector, candidate_vectors = vectors[0], vectors[1:]
-        best_candidate: NodeRecord | None = None
-        best_similarity = 0.0
-        for candidate, vector in zip(candidates, candidate_vectors, strict=True):
-            similarity = _cosine_similarity(query_vector, vector)
-            if similarity > best_similarity:
-                best_similarity, best_candidate = similarity, candidate
-        if (
-            best_candidate is not None
-            and best_similarity > SIMILARITY_THRESHOLD
-            and await merge_verdict(entity.name, best_candidate["name"])
-        ):
-            return await neo4j_storage.merge_node(
+        if matched is not None:
+            node_id = await _merge_with_candidate(driver, matched, entity, doc_id=doc_id)
+        else:
+            # Paso 4: sin match — nodo nuevo con la evidencia de este documento.
+            node_id = await neo4j_storage.merge_node(
                 driver,
                 node_type=entity.type,
-                canonical_name=best_candidate["canonical_name"],
-                name=best_candidate.get("name") or entity.name,
-                aliases=_merge_aliases(best_candidate.get("aliases"), entity),
-                confidence=_boosted_confidence(best_candidate.get("confidence"), entity),
-                sources=_merge_sources(best_candidate.get("sources"), doc_id),
-                source_confidences=_merge_source_confidences(
-                    best_candidate.get("sources"),
-                    best_candidate.get("source_confidences"),
-                    best_candidate.get("confidence") or 0.0,
-                    doc_id,
-                    entity.confidence,
-                ),
+                canonical_name=canonical,
+                name=entity.name,
+                aliases=list(dict.fromkeys(entity.aliases)),
+                confidence=entity.confidence,
+                sources=[doc_id],
+                source_confidences=[entity.confidence],
             )
 
-    # Paso 4: sin match — nodo nuevo con la evidencia de este documento.
-    return await neo4j_storage.merge_node(
-        driver,
-        node_type=entity.type,
+    await upsert_node_embedding(
+        engine,
+        node_id=node_id,
         canonical_name=canonical,
-        name=entity.name,
-        aliases=list(dict.fromkeys(entity.aliases)),
-        confidence=entity.confidence,
-        sources=[doc_id],
-        source_confidences=[entity.confidence],
+        node_type=entity.type,
+        embedding=vector,
     )
+    return node_id
 
 
 async def _sync_relations(
@@ -278,7 +287,12 @@ async def _sync_graph(
     node_ids: dict[str, str] = {}
     for entity in normalized:
         node_ids[canonicalize(entity.name)] = await _resolve_entity(
-            driver, entity, doc_id=str(doc_id), embed=embed, merge_verdict=merge_verdict
+            driver,
+            entity,
+            doc_id=str(doc_id),
+            engine=engine,
+            embed=embed,
+            merge_verdict=merge_verdict,
         )
 
     relations_written = await _sync_relations(driver, relations, node_ids, str(doc_id))
