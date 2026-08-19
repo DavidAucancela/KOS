@@ -99,7 +99,7 @@ function AssistantTurn({
   }
   if (turn.error) {
     return (
-      <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+      <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
         {turn.error}
       </p>
     );
@@ -110,7 +110,7 @@ function AssistantTurn({
   return (
     <div className="space-y-3">
       {degraded && (
-        <p className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+        <p className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
           <AlertTriangle className="size-4" aria-hidden />
           Respuesta degradada: síntesis limitada por falta del modelo local.
         </p>
@@ -136,7 +136,7 @@ function AssistantTurn({
       )}
       {confidence < 0.4 ? (
         <p
-          className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400"
+          className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
           title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
         >
           <AlertTriangle className="size-4" aria-hidden />

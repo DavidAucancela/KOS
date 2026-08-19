@@ -3,6 +3,7 @@ import { Boxes, Brain, Database, HardDrive, Share2, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageContainer, PageHeader } from "@/components/page";
 import { RecommendationsPanel } from "../recommendations/RecommendationsPanel";
 import type { ServiceStatus } from "./types";
 import { useHealth } from "./useHealth";
@@ -36,7 +37,7 @@ function ServiceCard({ name, service }: { name: string; service: ServiceStatus }
       </CardHeader>
       <CardContent className="space-y-1">
         <p className="text-muted-foreground text-xs">latencia: {service.latency_ms.toFixed(1)} ms</p>
-        {service.detail && <p className="text-xs text-red-400">{service.detail}</p>}
+        {service.detail && <p className="text-destructive text-xs">{service.detail}</p>}
       </CardContent>
     </Card>
   );
@@ -46,14 +47,14 @@ export function StatusPage() {
   const { data, error, lastUpdated } = useHealth();
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">KOS — Estado del sistema</h1>
-        <GlobalBadge apiError={error} status={data?.status} />
-      </header>
+    <PageContainer>
+      <PageHeader
+        title="KOS — Estado del sistema"
+        actions={<GlobalBadge apiError={error} status={data?.status} />}
+      />
 
       {error && (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
           No se pudo consultar la API ({error}). ¿Está corriendo <code>make dev</code>?
         </p>
       )}
@@ -73,6 +74,6 @@ export function StatusPage() {
           ? `Última actualización: ${lastUpdated.toLocaleTimeString()}`
           : "Sin datos todavía"}
       </footer>
-    </main>
+    </PageContainer>
   );
 }

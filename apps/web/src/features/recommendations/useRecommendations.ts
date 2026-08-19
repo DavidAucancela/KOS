@@ -19,18 +19,21 @@ export interface UseRecommendationsResult {
   resolve: (id: string, status: "accepted" | "dismissed", reason?: string) => Promise<void>;
 }
 
-// Superficie mínima de recomendaciones pendientes (doc 11 §7, Sprint 25):
-// lista + aceptar/descartar contra /v1/recommendations (proxy de Vite →
-// apps/api), mismo patrón de fetch directo que `useHealth`/`usePlan`.
+// Trae las últimas 100 recomendaciones de cualquier estado (mejora de
+// interfaz posterior a Sprint 25, doc 11 §7/§8): un solo fetch sin filtrar
+// por status, el filtrado pendiente/historial se hace en el componente —
+// suficiente para un vault de un solo usuario con el tope de generación por
+// pasada ya existente (`recommend.py`); paginar de verdad solo haría falta
+// a un volumen que hoy no existe.
 export function useRecommendations(): UseRecommendationsResult {
   const [items, setItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPending = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/v1/recommendations?status=pending");
+      const response = await fetch("/v1/recommendations?limit=100");
       if (!response.ok) {
         setError(await errorMessage(response));
         return;
@@ -46,8 +49,8 @@ export function useRecommendations(): UseRecommendationsResult {
   }, []);
 
   useEffect(() => {
-    void fetchPending();
-  }, [fetchPending]);
+    void fetchAll();
+  }, [fetchAll]);
 
   const resolve = useCallback(
     async (id: string, status: "accepted" | "dismissed", reason?: string) => {
@@ -60,10 +63,12 @@ export function useRecommendations(): UseRecommendationsResult {
         setError(await errorMessage(response));
         return;
       }
-      // Quita la recomendación resuelta de la lista sin esperar un refetch
-      // completo — misma UX que "optimistic update" sin ser optimista de
-      // verdad (la respuesta del PATCH ya confirmó el cambio real).
-      setItems((current) => current.filter((item) => item.recommendation_id !== id));
+      const updated = (await response.json()) as Recommendation;
+      // Actualiza el ítem en el lugar (no lo saca de la lista): pasa de
+      // "pendiente" a aparecer en el historial sin un refetch completo.
+      setItems((current) =>
+        current.map((item) => (item.recommendation_id === id ? updated : item)),
+      );
     },
     [],
   );

@@ -4,16 +4,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from "d3-force";
 import type { SimulationNodeDatum } from "d3-force";
 
+import { Button } from "@/components/ui/button";
 import { NODE_TYPE_COLORS, type GraphNode, type GraphRelation } from "./types";
 
 // Visualización del grafo (doc 06 §2 `subgraph`, Sprint 10): layout de fuerzas
 // calculado una vez por cambio de datos (d3-force solo para la física, el
 // render lo controla React vía SVG) y arrastre manual simple después — no hay
 // simulación corriendo en vivo, así que no compite con el usuario moviendo un
-// nodo.
+// nodo. Zoom/pan (mejora de interfaz posterior): manual sobre el `viewBox`
+// fijo, sin traer `d3-zoom`/`d3-selection` — mismo criterio que el arrastre
+// de nodos, ya manual desde Sprint 10.
 const WIDTH = 800;
 const HEIGHT = 520;
 const TICKS = 300;
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 3;
 
 interface SimNode extends SimulationNodeDatum {
   id: string;
@@ -23,6 +28,14 @@ interface Point {
   x: number;
   y: number;
 }
+
+interface Transform {
+  x: number;
+  y: number;
+  k: number;
+}
+
+const IDENTITY_TRANSFORM: Transform = { x: 0, y: 0, k: 1 };
 
 export function GraphCanvas({
   nodes,
@@ -38,8 +51,10 @@ export function GraphCanvas({
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  const [transform, setTransform] = useState<Transform>(IDENTITY_TRANSFORM);
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingId = useRef<string | null>(null);
+  const panStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   const degree = useMemo(() => {
     const counts = new Map<string, number>();
@@ -85,14 +100,46 @@ export function GraphCanvas({
     setPositions(next);
   }, [nodes, relations]);
 
-  function toSvgPoint(clientX: number, clientY: number): Point | null {
+  // Listener nativo (no `onWheel` de React): React marca `wheel` como pasivo
+  // por defecto en el listener raíz, así que `preventDefault()` en un
+  // handler JSX no evita el scroll de la página — hace falta un listener
+  // agregado a mano con `{ passive: false }`. Depende de `nodes.length > 0`
+  // (no `[]`) porque el `<svg>` no existe en el DOM hasta que hay nodos que
+  // dibujar — con `[]` el efecto correría una sola vez, antes de que el
+  // `ref` tuviera algo que atar.
+  const hasNodes = nodes.length > 0;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    function onWheel(event: WheelEvent) {
+      event.preventDefault();
+      const rect = svg!.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const viewX = ((event.clientX - rect.left) / rect.width) * WIDTH;
+      const viewY = ((event.clientY - rect.top) / rect.height) * HEIGHT;
+      setTransform((current) => {
+        const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+        const nextK = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.k * factor));
+        // Mantiene el punto bajo el cursor fijo mientras cambia el zoom.
+        const nextX = viewX - ((viewX - current.x) / current.k) * nextK;
+        const nextY = viewY - ((viewY - current.y) / current.k) * nextK;
+        return { x: nextX, y: nextY, k: nextK };
+      });
+    }
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [hasNodes]);
+
+  function toWorldPoint(clientX: number, clientY: number): Point | null {
     const svg = svgRef.current;
     if (!svg) return null;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
+    const viewX = ((clientX - rect.left) / rect.width) * WIDTH;
+    const viewY = ((clientY - rect.top) / rect.height) * HEIGHT;
     return {
-      x: ((clientX - rect.left) / rect.width) * WIDTH,
-      y: ((clientY - rect.top) / rect.height) * HEIGHT,
+      x: (viewX - transform.x) / transform.k,
+      y: (viewY - transform.y) / transform.k,
     };
   }
 
@@ -103,16 +150,37 @@ export function GraphCanvas({
     };
   }
 
+  function handleBackgroundPointerDown(event: ReactPointerEvent<SVGRectElement>) {
+    panStart.current = {
+      x: event.clientX,
+      y: event.clientY,
+      tx: transform.x,
+      ty: transform.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
   function handleSvgPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    const nodeId = draggingId.current;
-    if (!nodeId) return;
-    const point = toSvgPoint(event.clientX, event.clientY);
-    if (!point) return;
-    setPositions((current) => ({ ...current, [nodeId]: point }));
+    if (draggingId.current !== null) {
+      const point = toWorldPoint(event.clientX, event.clientY);
+      if (point) setPositions((current) => ({ ...current, [draggingId.current!]: point }));
+      return;
+    }
+    if (panStart.current) {
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const dx = ((event.clientX - panStart.current.x) / rect.width) * WIDTH;
+      const dy = ((event.clientY - panStart.current.y) / rect.height) * HEIGHT;
+      const start = panStart.current;
+      setTransform((current) => ({ ...current, x: start.tx + dx, y: start.ty + dy }));
+    }
   }
 
   function handleSvgPointerUp() {
     draggingId.current = null;
+    panStart.current = null;
   }
 
   if (nodes.length === 0) {
@@ -124,65 +192,91 @@ export function GraphCanvas({
   }
 
   return (
-    <svg
-      ref={svgRef}
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      className="border-border bg-card h-[520px] w-full touch-none rounded-lg border"
-      onPointerMove={handleSvgPointerMove}
-      onPointerUp={handleSvgPointerUp}
-      onPointerLeave={handleSvgPointerUp}
-      role="img"
-      aria-label="Visualización del grafo de conocimiento"
-    >
-      <g stroke="var(--border)" strokeWidth={1}>
-        {relations.map((rel) => {
-          const from = positions[rel.source_id];
-          const to = positions[rel.target_id];
-          if (!from || !to) return null;
-          return <line key={rel.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
-        })}
-      </g>
-      <g>
-        {nodes.map((node) => {
-          const point = positions[node.id];
-          if (!point) return null;
-          const radius = 10 + Math.min(degree.get(node.id) ?? 0, 8) * 1.5;
-          const isSelected = node.id === selectedId;
-          return (
-            <g
-              key={node.id}
-              transform={`translate(${point.x}, ${point.y})`}
-              onClick={() => onSelect(node.id)}
-              role="button"
-              aria-label={node.canonical_name}
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") onSelect(node.id);
-              }}
-              className="cursor-pointer"
-            >
-              <circle
-                r={radius}
-                fill={NODE_TYPE_COLORS[node.node_type]}
-                stroke={
-                  isSelected ? "var(--foreground)" : node.locked ? "var(--primary)" : "var(--border)"
-                }
-                strokeWidth={isSelected ? 3 : node.locked ? 2 : 1}
-                onPointerDown={handleNodePointerDown(node.id)}
-              />
-              <text
-                y={radius + 14}
-                textAnchor="middle"
-                fontSize={11}
-                fill="var(--foreground)"
-                className="pointer-events-none select-none"
-              >
-                {node.canonical_name}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
+    <div className="relative">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="border-border bg-card h-[520px] w-full touch-none rounded-lg border"
+        onPointerMove={handleSvgPointerMove}
+        onPointerUp={handleSvgPointerUp}
+        onPointerLeave={handleSvgPointerUp}
+        role="img"
+        aria-label="Visualización del grafo de conocimiento"
+      >
+        <rect
+          x={0}
+          y={0}
+          width={WIDTH}
+          height={HEIGHT}
+          fill="transparent"
+          onPointerDown={handleBackgroundPointerDown}
+          className="cursor-grab active:cursor-grabbing"
+        />
+        <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.k})`}>
+          <g stroke="var(--border)" strokeWidth={1}>
+            {relations.map((rel) => {
+              const from = positions[rel.source_id];
+              const to = positions[rel.target_id];
+              if (!from || !to) return null;
+              return <line key={rel.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+            })}
+          </g>
+          <g>
+            {nodes.map((node) => {
+              const point = positions[node.id];
+              if (!point) return null;
+              const radius = 10 + Math.min(degree.get(node.id) ?? 0, 8) * 1.5;
+              const isSelected = node.id === selectedId;
+              return (
+                <g
+                  key={node.id}
+                  transform={`translate(${point.x}, ${point.y})`}
+                  onClick={() => onSelect(node.id)}
+                  role="button"
+                  aria-label={node.canonical_name}
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") onSelect(node.id);
+                  }}
+                  className="cursor-pointer"
+                >
+                  <circle
+                    r={radius}
+                    fill={NODE_TYPE_COLORS[node.node_type]}
+                    stroke={
+                      isSelected
+                        ? "var(--foreground)"
+                        : node.locked
+                          ? "var(--primary)"
+                          : "var(--border)"
+                    }
+                    strokeWidth={isSelected ? 3 : node.locked ? 2 : 1}
+                    onPointerDown={handleNodePointerDown(node.id)}
+                  />
+                  <text
+                    y={radius + 14}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fill="var(--foreground)"
+                    className="pointer-events-none select-none"
+                  >
+                    {node.canonical_name}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        </g>
+      </svg>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="bg-card/80 absolute top-2 right-2 backdrop-blur-sm"
+        onClick={() => setTransform(IDENTITY_TRANSFORM)}
+      >
+        Restablecer vista
+      </Button>
+    </div>
   );
 }
