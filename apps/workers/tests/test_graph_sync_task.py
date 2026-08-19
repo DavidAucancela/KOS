@@ -222,7 +222,7 @@ async def test_sync_graph_documento_inexistente(monkeypatch: pytest.MonkeyPatch)
     async def fake_load(engine: object, value: uuid.UUID) -> None:
         return None
 
-    monkeypatch.setattr(graph_sync_module, "_load_document_text", fake_load)
+    monkeypatch.setattr(graph_sync_module, "_load_document_chunks", fake_load)
 
     async def unreachable(*args: object, **kwargs: object) -> str:
         raise AssertionError("no debe llamarse")
@@ -241,11 +241,14 @@ async def test_sync_graph_documento_inexistente(monkeypatch: pytest.MonkeyPatch)
 
 async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPatch) -> None:
     doc_id = uuid.uuid4()
+    chunk_id = uuid.uuid4()
 
-    async def fake_load(engine: object, value: uuid.UUID) -> tuple[str, str]:
-        return "Proyecto KOS", "KOS usa FastAPI."
+    async def fake_load(
+        engine: object, value: uuid.UUID
+    ) -> tuple[str, list[tuple[uuid.UUID, str]]]:
+        return "Proyecto KOS", [(chunk_id, "Proyecto KOS usa FastAPI.")]
 
-    monkeypatch.setattr(graph_sync_module, "_load_document_text", fake_load)
+    monkeypatch.setattr(graph_sync_module, "_load_document_chunks", fake_load)
     monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", _no_exact_match)
     monkeypatch.setattr(graph_sync_module, "similar_nodes", _no_similar)
     monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
@@ -289,6 +292,108 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     assert len(relations_written) == 1
     assert relations_written[0]["relation_type"] == "USES"
     assert sorted(result["node_ids"]) == ["node-1", "node-2"]
+
+
+def test_merge_entities_por_canonical_name_une_chunk_ids_y_toma_confianza_maxima() -> None:
+    chunk_a, chunk_b = uuid.uuid4(), uuid.uuid4()
+    entities = [
+        EntityCandidate(name="FastAPI", type="Technology", confidence=0.6, chunk_ids=[chunk_a]),
+        EntityCandidate(
+            name="FastAPI",
+            type="Technology",
+            confidence=0.9,
+            aliases=["fast-api"],
+            chunk_ids=[chunk_b],
+        ),
+    ]
+
+    [merged] = graph_sync_module._merge_entities_by_canonical_name(entities)
+
+    assert merged.confidence == 0.9
+    assert merged.aliases == ["fast-api"]
+    assert sorted(merged.chunk_ids) == sorted([chunk_a, chunk_b])
+
+
+def test_merge_relations_por_triple_une_chunk_ids_y_toma_confianza_maxima() -> None:
+    from kos_core.schemas import RelationCandidate
+
+    chunk_a, chunk_b = uuid.uuid4(), uuid.uuid4()
+    relations = [
+        RelationCandidate(
+            source="KOS", relation="USES", target="FastAPI", confidence=0.5, chunk_ids=[chunk_a]
+        ),
+        RelationCandidate(
+            source="KOS", relation="USES", target="FastAPI", confidence=0.8, chunk_ids=[chunk_b]
+        ),
+    ]
+
+    [merged] = graph_sync_module._merge_relations_by_triple(relations)
+
+    assert merged.confidence == 0.8
+    assert sorted(merged.chunk_ids) == sorted([chunk_a, chunk_b])
+
+
+async def test_extract_entities_and_relations_mergea_menciones_repetidas_entre_chunks() -> None:
+    """Doc 12 §5: la misma entidad en 2 chunks se resuelve una sola vez, no dos."""
+    chunk_a, chunk_b = uuid.uuid4(), uuid.uuid4()
+    entities_json = '[{"name": "FastAPI", "type": "Technology", "confidence": 0.8}]'
+
+    async def generate_entities(prompt: str) -> str:
+        return entities_json
+
+    async def generate_relations(prompt: str) -> str:
+        raise AssertionError("sin 2 entidades mencionadas en un chunk no debe pedirse relación")
+
+    entities, relations = await graph_sync_module._extract_entities_and_relations(
+        [(chunk_a, "FastAPI es un framework."), (chunk_b, "FastAPI se usa acá también.")],
+        generate_entities=generate_entities,
+        generate_relations=generate_relations,
+    )
+
+    assert len(entities) == 1
+    assert sorted(entities[0].chunk_ids) == sorted([chunk_a, chunk_b])
+    assert relations == []
+
+
+async def test_extract_entities_and_relations_chunk_vacio_no_llama_al_llm() -> None:
+    async def unreachable(prompt: str) -> str:
+        raise AssertionError("un chunk vacío no debe llamar al LLM")
+
+    entities, relations = await graph_sync_module._extract_entities_and_relations(
+        [(uuid.uuid4(), "")],
+        generate_entities=unreachable,
+        generate_relations=unreachable,
+    )
+
+    assert entities == []
+    assert relations == []
+
+
+async def test_extract_entities_and_relations_pide_relaciones_si_el_chunk_menciona_2() -> None:
+    chunk_id = uuid.uuid4()
+    entities_json = (
+        '[{"name": "Proyecto KOS", "type": "Project", "confidence": 0.9}, '
+        '{"name": "FastAPI", "type": "Technology", "confidence": 0.9}]'
+    )
+    relations_json = (
+        '[{"source": "Proyecto KOS", "relation": "USES", "target": "FastAPI", "confidence": 0.9}]'
+    )
+
+    async def generate_entities(prompt: str) -> str:
+        return entities_json
+
+    async def generate_relations(prompt: str) -> str:
+        return relations_json
+
+    entities, relations = await graph_sync_module._extract_entities_and_relations(
+        [(chunk_id, "Proyecto KOS usa FastAPI.")],
+        generate_entities=generate_entities,
+        generate_relations=generate_relations,
+    )
+
+    assert len(entities) == 2
+    assert len(relations) == 1
+    assert relations[0].chunk_ids == [chunk_id]
 
 
 def test_la_task_esta_registrada_con_nombre_de_evento() -> None:
