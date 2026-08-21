@@ -100,6 +100,7 @@ chunks_table = Table(
     Column("end_offset", Integer),
     Column("embedding", Vector(EMBEDDING_DIM)),
     Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("entity_node_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
 )
 
 memory_items_table = Table(
@@ -145,6 +146,16 @@ recommendations_table = Table(
         index=True,
     ),
     Column("resolved_at", DateTime(timezone=True)),
+)
+
+node_embeddings_table = Table(
+    "node_embeddings",
+    metadata,
+    Column("node_id", Text, primary_key=True),
+    Column("canonical_name", Text, nullable=False),
+    Column("node_type", Text, nullable=False, index=True),
+    Column("embedding", Vector(EMBEDDING_DIM), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
 
 plans_table = Table(
@@ -344,6 +355,37 @@ async def list_chunks(
         rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
     next_cursor = int(rows[-1]["position"]) if len(rows) == limit else None
     return rows, next_cursor
+
+
+async def get_chunk(engine: AsyncEngine, chunk_id: uuid_lib.UUID) -> dict[str, Any] | None:
+    """Un chunk individual con `embedding`/`entity_node_ids` (doc 12 §4): la
+    task de relaciones cross-documento re-carga chunks por id en una corrida
+    separada de la que los generó, no hay lista en memoria que reusar."""
+    query = select(
+        chunks_table.c.chunk_id,
+        chunks_table.c.doc_id,
+        chunks_table.c.text,
+        chunks_table.c.embedding,
+        chunks_table.c.entity_node_ids,
+    ).where(chunks_table.c.chunk_id == chunk_id)
+    async with engine.connect() as conn:
+        row = (await conn.execute(query)).mappings().first()
+        return dict(row) if row else None
+
+
+async def set_chunk_entity_node_ids(
+    engine: AsyncEngine, chunk_id: uuid_lib.UUID, node_ids: list[str]
+) -> None:
+    """Persiste qué nodos de Neo4j salieron de este chunk (doc 12 §4) — se
+    llama al final de cada `graph_sync`, para que una corrida posterior de
+    relaciones cross-documento sepa, dado el chunk_id de OTRO documento, a
+    qué entidades ya resueltas corresponde."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            chunks_table.update()
+            .where(chunks_table.c.chunk_id == chunk_id)
+            .values(entity_node_ids=node_ids)
+        )
 
 
 async def insert_memory(
@@ -583,6 +625,86 @@ async def recent_seed_chunks(engine: AsyncEngine, *, limit: int) -> list[dict[st
     )
     async with engine.connect() as conn:
         return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
+def _format_vector(values: list[float]) -> str:
+    """Literal pgvector: '[v1,v2,...]' (mismo formato que `search.py::_format_vector`,
+    duplicado acá para no crear un import cruzado solo por una función de 1 línea)."""
+    return "[" + ",".join(repr(float(value)) for value in values) + "]"
+
+
+async def upsert_node_embedding(
+    engine: AsyncEngine,
+    *,
+    node_id: str,
+    canonical_name: str,
+    node_type: str,
+    embedding: list[float],
+) -> None:
+    """Persiste el embedding de un nodo del grafo (doc 12 §3) — se llama en el
+    mismo commit que `merge_node` escribe/actualiza el nodo en Neo4j, para que
+    la resolución de entidades indexada (`similar_nodes`) tenga cobertura
+    completa sin re-embedear en cada llamada."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO node_embeddings
+                    (node_id, canonical_name, node_type, embedding, updated_at)
+                VALUES (:node_id, :canonical_name, :node_type, CAST(:embedding AS vector), now())
+                ON CONFLICT (node_id) DO UPDATE SET
+                    canonical_name = EXCLUDED.canonical_name,
+                    node_type = EXCLUDED.node_type,
+                    embedding = EXCLUDED.embedding,
+                    updated_at = now()
+                """
+            ),
+            {
+                "node_id": node_id,
+                "canonical_name": canonical_name,
+                "node_type": node_type,
+                "embedding": _format_vector(embedding),
+            },
+        )
+
+
+_SIMILAR_NODES_SQL = text(
+    """
+    SELECT node_id, canonical_name, node_type,
+           1 - (embedding <=> CAST(:qvec AS vector)) AS score
+    FROM node_embeddings
+    WHERE node_type = :node_type
+      AND 1 - (embedding <=> CAST(:qvec AS vector)) >= :floor
+    ORDER BY score DESC, node_id
+    LIMIT :limit
+    """
+)
+
+
+async def similar_nodes(
+    engine: AsyncEngine,
+    embedding: list[float],
+    *,
+    node_type: str,
+    floor: float,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Candidatos de resolución de entidades (doc 12 §3): búsqueda ANN indexada
+    (índice HNSW, migración 0010) contra los embeddings de nodo ya persistidos,
+    reemplazando el loop de coseno en memoria de `graph_sync.py::_resolve_entity`
+    sobre *todos* los nodos existentes de ese tipo. `floor` es una banda amplia
+    para generar candidatos (el veredicto final lo da el LLM, no este score
+    solo) — mismo principio que `search.py::similarity_band_chunks`."""
+    params = {
+        "qvec": _format_vector(embedding),
+        "node_type": node_type,
+        "floor": floor,
+        "limit": limit,
+    }
+    async with engine.connect() as conn:
+        result = await conn.execute(_SIMILAR_NODES_SQL, params)
+        rows = result.mappings().all()
+    return [dict(row) for row in rows]
 
 
 async def has_active_recommendation(
