@@ -1,6 +1,10 @@
 # 04 — Modelo de memoria y aprendizaje continuo
 
-**Estado:** 🔵 En revisión · **Última actualización:** 2026-08-16 · **Habilita:** Fase 3
+**Estado:** 🟢 Aprobado, implementado · **Última actualización:** 2026-08-18 · **Habilita:** Fase 3
+
+> **Implementado en v0.4** (Sprints 12–15, cerrado 2026-08-15) y extendido en v0.5 (memoria como
+> paso de evidencia elegible por el Planner, Sprint 21). Este doc sigue siendo la fuente de verdad
+> del diseño — cambios al comportamiento real requieren PR sobre este doc primero.
 
 ## 1. Principio
 

@@ -91,6 +91,14 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
 - **Trazas**: OpenTelemetry en API, workers y llamadas a LLM (latencia y tokens por etapa).
 - **Métricas**: Prometheus (`make obs-up` levanta Prometheus + Grafana). Métricas de negocio desde el inicio: documentos ingeridos, latencia de pipeline, coste de tokens por consulta, tamaño del grafo.
 
+  > **Estado real (2026-08-20):** la cobertura de métricas se quedó en lo que Sprint 5/5-addendum
+  > construyó (ingesta/búsqueda). El Planner (Sprint 18), los agentes (Sprint 17-21) y el
+  > Recomendador (Sprint 22-26) no sumaron métricas propias — sin tasa de degradación por
+  > `degraded_reason`, sin distribución de agentes elegidos por el LLM, sin latencia por paso de
+  > plan, sin el ritmo de recomendaciones útiles expuesto en `/metrics` (hoy solo vía
+  > `scripts/recommendations_report.py`, a demanda). Ver `docs/deuda-tecnica.md`, sección
+  > "Monitoreo" — es uno de los tres frentes activos tras el cierre de construcción de v1.0.
+
 ## 7. Despliegue
 
 | Etapa | Estrategia |

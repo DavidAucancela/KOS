@@ -1,8 +1,11 @@
 # 08 — Plan de implementación por sprints
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16
+**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-18
 
-Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan detalla v0.1 → v0.5 (cerradas) y v1.0 (planificada, sin ejecutar); v1.1 se planifica al cerrar v1.0, con lo aprendido.
+Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan
+detalla v0.1 → v1.0: construcción completa hasta Sprint 26 (2026-08-18); el criterio de salida de
+v1.0 sigue en ventana de medición real hasta 2026-09-18 (doc 07). v1.1 se planifica al cerrar v1.0,
+con lo aprendido — sin documento propio todavía.
 
 ## Cadencia y reglas
 

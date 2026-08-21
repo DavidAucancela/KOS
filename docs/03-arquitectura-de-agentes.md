@@ -1,6 +1,15 @@
 # 03 — Arquitectura de agentes y coordinación
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16 · **Habilita:** Fase 4
+**Estado:** 🟢 Aprobado, implementado · **Última actualización:** 2026-08-18 · **Habilita:** Fase 4
+
+> **Implementado en v0.5** (Sprints 16–21, cerrado 2026-08-16): Planner real, `packages/agents`
+> completo, servidor MCP real (`packages/mcp-tools`, 13 herramientas), planes auditables vía
+> `GET /v1/plans/{id}`. Este doc sigue siendo la fuente de verdad del diseño — cambios al
+> comportamiento real requieren PR sobre este doc primero, misma regla que cualquier doc 🟢.
+> `RecommenderAgent` (v1.0, Sprint 22, ver [doc 11](11-recomendador-e-inteligencia-proactiva.md))
+> reusa el mismo contrato `AgentRequest`/`AgentResponse` pero **no vive dentro de un `Plan`**: no
+> lo elige el Planner ni aparece en `Plan.post` — lo dispara `apps/workers` directo ante
+> `graph.updated` real (Celery encadenado, no pub/sub), fuera del ciclo de `/v1/query`.
 
 ## 1. Principio
 
@@ -16,7 +25,8 @@
 | **Memory** | Recupera y escribe memoria episódica/semántica/preferencias | Almacén de memoria |
 | **Research** | Busca fuera del sistema (web, GitHub, artículos) | Herramientas MCP externas |
 | **Writing** | Redacta la respuesta final con citas; crea/modifica notas | LLM + herramientas MCP de escritura |
-| **Learning** | Post-proceso: consolida lo aprendido en la interacción | Grafo + memoria (vía eventos) |
+| **Learning** | Post-paso de `/v1/query`: registra cada interacción respondida en memoria episódica | `memory.store` (MCP, `confirm=true` forzado por código) |
+| **Recommender** | Fuera del ciclo de consulta: ante `graph.updated` real, detecta lagunas de conocimiento y contradicciones | Grafo + `recommendations.store` (MCP) |
 
 Cada agente expone un contrato uniforme (ver [06 — APIs y contratos](06-apis-y-contratos.md)):
 

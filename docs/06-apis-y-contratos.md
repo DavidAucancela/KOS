@@ -126,8 +126,14 @@ Toda capacidad con efectos u acceso a datos se expone como herramienta MCP ([ADR
 | `obsidian.read_note`, `obsidian.create_note`, `obsidian.update_note`, `obsidian.create_folder` | escritura (requiere aprobación) | 3 |
 | `github.search_repos`, `github.search_commits` | lectura externa | 4 |
 | `web.search`, `web.open` | lectura externa | 4 |
+| `recommendations.store` | escritura (requiere aprobación) | 5 |
 | `roadmap.create`, `roadmap.update` | escritura | 5 |
 
+> `recommendations.store` (Sprint 22, v1.0): el `RecommenderAgent` la llama con `confirm=true`
+> forzado por código (mismo patrón que `LearningAgent`/`memory.store` — el sistema completando un
+> paso ya decidido, no un LLM eligiendo escribir por su cuenta), con dedup por firma
+> `type + target_entities` antes de persistir. 13ª herramienta real del servidor MCP.
+>
 > `roadmap.create`/`roadmap.update` no se construyen en los Sprints 22-26 (v1.0) — "roadmaps
 > personalizados" queda diferido a una iteración posterior de Fase 5 (doc 11 §4).
 

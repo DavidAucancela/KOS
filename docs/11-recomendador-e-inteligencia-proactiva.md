@@ -1,6 +1,12 @@
 # 11 — Recomendador e inteligencia proactiva
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-08-16 · **Habilita:** Fase 5
+**Estado:** 🔵 En revisión, implementado · **Última actualización:** 2026-08-18 · **Habilita:** Fase 5
+
+> **Construcción completa 2026-08-18** (Sprints 22–26): `RecommenderAgent`, dos tipos de
+> recomendación (lagunas, contradicciones), feedback loop, UI. El criterio de salida de v1.0 sigue
+> en ventana de medición real hasta 2026-09-18 (doc 07) — por eso este doc queda en 🔵 y no 🟢
+> todavía: promoverlo a Aprobado espera a que el criterio de salida se confirme cumplido, no solo
+> a que el código esté terminado.
 
 ## 1. Principio
 

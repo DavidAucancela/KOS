@@ -37,16 +37,45 @@ fila se mueve a "Resuelta" con el sprint que la cerró (no se borra: es historia
 | Sin badge de conteo de recomendaciones pendientes en el nav | [Sprint 25](sprints/sprint-25.md) | Mejora de interfaz (2026-08-18): badge en el ícono "Estado" del nav (`App.tsx`), mismo `useRecommendations()` que ya usaba el panel |
 | Grafo sin zoom/pan en el canvas | [Sprint 10](sprints/sprint-10.md) | Mejora de interfaz (2026-08-18): zoom (rueda del mouse) y pan (arrastrar el fondo) manuales sobre el `viewBox` del SVG en `GraphCanvas.tsx`, mismo criterio ya usado para el arrastre de nodos desde Sprint 10 (sin traer `d3-zoom`); animación de layout en vivo y resaltado de caminos siguen sin sprint asignado, ver "UI/UX" abajo |
 
+## Ya resueltas en rama sin mergear (2026-08-20, `sprint-21-learning-agent`)
+
+Trabajo hecho en una sesión de auditoría **sobre `sprint-21-learning-agent` (base v0.5), antes de
+que se descubriera que `main` ya tenía v1.0 completo** (Sprints 22-26 mergeados el 2026-08-18) — la
+rama nunca se mergeó a `main` y diverge de ella. Los 3 ítems de abajo están resueltos ahí
+(commits `473aa26`, `dfa2b91`) pero **siguen pendientes en `main`** hasta que se porten:
+
+| Ítem | Cómo se resolvió en la rama |
+|---|---|
+| `web.open` no limitaba el tamaño de la descarga antes de truncar | Streaming (`aiter_bytes`) con corte a `_OPEN_MAX_CHARS*2` bytes, sin cargar el archivo completo a memoria |
+| `trace_id` original de `/v1/query` no se propagaba hasta el `LearningAgent` | `plan_id` viaja desde `apps/api/routes/query.py` → `memory_service.enqueue_learn` → `kos.memory_learn` (Celery) → `LearningAgent` como `trace_id`, fallback a `uuid4()` |
+| Catálogo de `graph` en el Planner acotado a `query` | `find_nodes_by_name()` (Neo4j, case-insensitive) + tool MCP `graph.find_node_by_name` (14ª herramienta si se porta) + `GraphAgent`/catálogo del Planner ampliados a `query`/`find_node_by_name`/`get_node`/`find_path`; `executor.py` deja de forzar `operation="query"` incondicional |
+
+**Antes de portar**: `main` ya sumó `recommendations.store` como 13ª herramienta MCP en paralelo
+(Sprint 22) — portar `graph.find_node_by_name` la haría la 14ª, no la 13ª como dice el commit
+original. Revisar también si `executor.py`/`planner.py` cambiaron de forma incompatible en el
+camino (Sprints 22-26 no tocaron el Planner de `/v1/query`, pero conviene verificar antes de
+aplicar el diff a ciegas).
+
 ## Sin sprint asignado todavía
 
 | Ítem | Origen |
 |---|---|
-| `web.open` no limita el tamaño de la descarga antes de truncar a `_OPEN_MAX_CHARS` — una URL que sirva un archivo grande se descarga entero a memoria antes de cortarse | Auditoría de cierre de v0.5 (2026-08-16) — mismo perfil de riesgo que el SSRF ya cerrado, autoinfligido en un entorno de un solo usuario, no priorizado |
-| Catálogo de `graph` en el Planner acotado a `query` (`most_connected`/`nodes_by_type`) — `get_node`/`find_path` necesitarían resolver un nombre a `node_id` primero, paso que no existe | [Sprint 18](sprints/sprint-18.md) — no bloqueaba la demo de Sprint 18 |
 | `obsidian.read_note`, `obsidian.update_note`, `obsidian.create_folder` (doc 06 §4) siguen sin implementar — solo `create_note` se migró a MCP | [Sprint 20](sprints/sprint-20.md) (addendum) — sin caso de uso real que las pida todavía |
-| El catálogo del Planner describe `research`/`memory` en texto libre; con `llama3.2` (modelo chico) el LLM a veces omite campos requeridos en los `inputs` de un paso — el sistema ya degrada correctamente ese caso, pero no hay validación adicional en el prompt para reducir la tasa | [Sprint 20](sprints/sprint-20.md), reafirmado en [Sprint 21](sprints/sprint-21.md) | Ajuste fino, sin sprint asignado |
-| El `trace_id` original de `/v1/query` no se propaga hasta el `LearningAgent` — la task de Celery genera uno nuevo (`uuid4()`) al invocarlo | [Sprint 21](sprints/sprint-21.md) | Ajuste fino de observabilidad, sin sprint asignado |
-| Catálogo `memory` del Planner solo cubre `recall` — `MemoryAgent.store` elegido por el LLM (más allá del aprendizaje automático de cada interacción) queda fuera de alcance | [Sprint 21](sprints/sprint-21.md) — alcance explícito, sin caso de uso real todavía |
+| Catálogo `memory` del Planner solo cubre `recall` — `MemoryAgent.store` elegido por el LLM (más allá del aprendizaje automático de cada interacción) queda fuera de alcance. **Revisado 2026-08-20**: no es solo falta de caso de uso — es un riesgo real. `LearningAgent`/`RecommenderAgent` fuerzan `confirm=true` por código (nunca confían en el LLM); si el Planner expusiera `store` con `confirm` como campo elegible por el LLM, contenido contaminado en la evidencia recuperada podría inducir una escritura de memoria sin aprobación humana real (mismo perfil que el SSRF ya mitigado en `web.open`). Cerrarlo bien requeriría que `executor.py` fuerce `confirm=false` en cualquier paso `memory`/`store` que venga del plan dinámico — no es un cambio trivial | [Sprint 21](sprints/sprint-21.md) — alcance explícito, riesgo de seguridad documentado en la revisión de 2026-08-20 |
+
+## Monitoreo — sin dueño, próximo frente de trabajo
+
+Doc 09 §6 promete "métricas de negocio desde el inicio", pero la cobertura real quedó parada en lo
+que Sprint 5/5-addendum construyó (documentos ingeridos, latencia de pipeline, tamaño del grafo) —
+nada de esto se extendió cuando se agregaron el Planner (Sprint 18), los agentes (Sprint 17-21) ni
+el Recomendador (Sprint 22-26).
+
+| Ítem | Origen |
+|---|---|
+| Sin métrica de tasa de degradación del Planner por `degraded_reason` (`budget_timeout`/`budget_max_steps`/fallo de generación) — hoy solo se ve por request individual en `GET /v1/plans/{id}`, no agregado | Doc 09 §6 nunca se extendió tras Sprint 18-19 | Sin sprint asignado |
+| Sin métrica de distribución de agentes elegidos por el LLM (`retrieval`/`graph`/`research`/`memory` por plan) — útil para saber si el catálogo ampliado (`graph.find_node_by_name`, ver arriba) realmente se usa una vez portado | Doc 09 §6 nunca se extendió tras Sprint 20-21 | Sin sprint asignado |
+| Sin métrica de latencia por paso de plan (solo el total del request HTTP) — no se puede saber si un paso `research`/`memory` específico es el cuello de botella sin leer logs uno por uno | Doc 09 §6 nunca se extendió | Sin sprint asignado |
+| `scripts/recommendations_report.py` calcula el ritmo de recomendaciones útiles a demanda (manual), no como métrica expuesta en `/metrics` — la ventana de medición de v1.0 (2026-08-18 → 2026-09-18) depende de correrlo a mano | [Sprint 26](sprints/sprint-26.md) — alcance explícito del cierre de construcción, la automatización queda para después de cerrar el criterio de salida |
 | No existe ningún nodo que represente "el usuario" ni ninguna arista `KNOWS` real (doc 02 §3.2) — `gaps_by_prerequisite` usa `confidence` del propio nodo como proxy de "poco evidenciado" en vez de la ausencia de `KNOWS` que el diseño original proponía | [Sprint 23](sprints/sprint-23.md) — decisión explícita al planificar, sin caso de uso real que justifique crear el nodo todavía |
 | `gaps_by_prerequisite` recorre el grafo completo en cada pasada, sin acotar por `node_ids`/`relation_ids` del disparo que la debounceó — aceptable para el volumen de un vault de un solo usuario, no diseñado para escala mayor | [Sprint 23](sprints/sprint-23.md) — alcance explícito |
 | El veredicto de contradicción (`_default_contradiction_verdict`) con `llama3.2` (modelo chico local) es conservador — no confirmó contradicciones ni en casos obviamente contradictorios durante la verificación en vivo de Sprint 24; consistente con el diseño fail-safe, pero puede tardar en generar la primera recomendación real de este tipo | [Sprint 24](sprints/sprint-24.md) | Ajuste fino (¿modelo más capaz para este paso? ¿prompt distinto?), sin sprint asignado |
