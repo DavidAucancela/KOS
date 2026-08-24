@@ -6,6 +6,7 @@ Es el caso de uso canónico #1: retrieval → síntesis LLM → respuesta con
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Literal
 
@@ -24,7 +25,11 @@ from kos_api.services import memory_service, notes_service, query_service, templ
 from kos_api.services.intent_service import detect_template_intent
 from kos_core.config import Settings
 from kos_core.schemas import EvidenceRef
+from kos_core.schemas.conversation import Conversation, Message, MessageRole
+from kos_core.storage.postgres import insert_conversation, insert_message, touch_conversation
 from kos_mcp.client import EmbeddedToolCaller
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/query", tags=["query"])
 
@@ -42,6 +47,7 @@ class QueryRequest(BaseModel):
     query: str = Field(min_length=1)
     limit: int = Field(default=8, ge=1, le=20)
     mode: QueryMode = "hybrid"
+    conversation_id: uuid.UUID | None = None
 
 
 class QueryResponse(BaseModel):
@@ -53,6 +59,57 @@ class QueryResponse(BaseModel):
     degraded: bool
     trace_id: str
     plan_id: str
+    conversation_id: str
+
+
+async def _resolve_conversation_id(
+    engine: AsyncEngine, conversation_id: uuid.UUID | None
+) -> uuid.UUID:
+    """Si no viene `conversation_id` en el body, crea una conversación nueva
+    (doc 06 §2 addendum 2026-08-21). Si la creación falla, igual se devuelve un
+    id local para que la respuesta no se rompa — el turno solo quedará sin
+    guardar (mismo espíritu "mejor algo que nada" que `insert_plan`)."""
+    if conversation_id is not None:
+        return conversation_id
+    conversation = Conversation()
+    try:
+        await insert_conversation(engine, conversation)
+    except Exception:
+        logger.exception("no se pudo crear la conversación %s", conversation.conversation_id)
+    return conversation.conversation_id
+
+
+async def _persist_turn(
+    engine: AsyncEngine,
+    conversation_id: uuid.UUID,
+    *,
+    query_text: str,
+    response: QueryResponse,
+) -> None:
+    """Guarda el turno (pregunta + respuesta) en el historial persistente. Un
+    fallo acá nunca debe romper una respuesta que el usuario ya tiene — mismo
+    principio que ya aplica `insert_plan` en `query_service.answer_query`."""
+    try:
+        await insert_message(
+            engine,
+            Message(conversation_id=conversation_id, role=MessageRole.user, content=query_text),
+        )
+        plan_id = uuid.UUID(response.plan_id) if response.plan_id else None
+        await insert_message(
+            engine,
+            Message(
+                conversation_id=conversation_id,
+                role=MessageRole.assistant,
+                content=response.answer,
+                plan_id=plan_id,
+                evidence=response.evidence,
+                confidence=response.confidence,
+                degraded=response.degraded,
+            ),
+        )
+        await touch_conversation(engine, conversation_id, title=query_text[:80])
+    except Exception:
+        logger.exception("no se pudo persistir el turno de la conversación %s", conversation_id)
 
 
 async def _handle_crear_nota(
@@ -64,6 +121,7 @@ async def _handle_crear_nota(
     engine: AsyncEngine,
     settings: Settings,
     trace_id: str,
+    conversation_id: uuid.UUID,
 ) -> QueryResponse:
     """Comando `/crear-nota <template>|<folder>|<título>`: crea la nota sin pasar
     por retrieval/síntesis. Generalización de `/nueva-maquina` (Sprint 7 → 8)."""
@@ -91,6 +149,7 @@ async def _handle_crear_nota(
         # Sintético: este comando no pasa por el Planner real, no hay fila en
         # `plans` que consultar vía GET /v1/plans/{id} para este id.
         plan_id=str(uuid.uuid4()),
+        conversation_id=str(conversation_id),
     )
 
 
@@ -112,12 +171,13 @@ async def query(
     caller: EmbeddedToolCaller = Depends(tool_caller),
 ) -> QueryResponse:
     trace_id: str = getattr(request.state, "trace_id", str(uuid.uuid4()))
+    conversation_id = await _resolve_conversation_id(engine, body.conversation_id)
 
     stripped = body.query.strip()
     if stripped.startswith(_NUEVA_MAQUINA_PREFIX):
         name = stripped[len(_NUEVA_MAQUINA_PREFIX) :].strip()
         if name:
-            return await _handle_crear_nota(
+            response = await _handle_crear_nota(
                 template_name=_HTB_TEMPLATE,
                 folder=_HTB_FOLDER,
                 title=name,
@@ -125,12 +185,15 @@ async def query(
                 engine=engine,
                 settings=settings,
                 trace_id=trace_id,
+                conversation_id=conversation_id,
             )
+            await _persist_turn(engine, conversation_id, query_text=body.query, response=response)
+            return response
     if stripped.startswith(_CREAR_NOTA_PREFIX):
         args = _parse_crear_nota_args(stripped[len(_CREAR_NOTA_PREFIX) :])
         if args is not None:
             template_name, folder, title = args
-            return await _handle_crear_nota(
+            response = await _handle_crear_nota(
                 template_name=template_name,
                 folder=folder,
                 title=title,
@@ -138,7 +201,10 @@ async def query(
                 engine=engine,
                 settings=settings,
                 trace_id=trace_id,
+                conversation_id=conversation_id,
             )
+            await _persist_turn(engine, conversation_id, query_text=body.query, response=response)
+            return response
 
     if detect_template_intent(body.query):
         result = await template_intent_service.resolve_template_intent(
@@ -147,7 +213,7 @@ async def query(
             query=body.query,
             trace_id=trace_id,
         )
-        return QueryResponse(
+        response = QueryResponse(
             query=body.query,
             answer=result.answer,
             evidence=result.evidence,
@@ -158,7 +224,10 @@ async def query(
             # Sintético (generado en template_intent_service): la rama s0 no
             # pasa por el Planner real, no hay fila en `plans` para este id.
             plan_id=result.plan_id,
+            conversation_id=str(conversation_id),
         )
+        await _persist_turn(engine, conversation_id, query_text=body.query, response=response)
+        return response
 
     planner = Planner(
         llm=request.app.state.llm_client,
@@ -193,7 +262,7 @@ async def query(
         confidence=result.confidence,
     )
 
-    return QueryResponse(
+    response = QueryResponse(
         query=body.query,
         answer=result.answer,
         evidence=result.evidence,
@@ -202,4 +271,7 @@ async def query(
         degraded=result.degraded,
         trace_id=trace_id,
         plan_id=result.plan_id,
+        conversation_id=str(conversation_id),
     )
+    await _persist_turn(engine, conversation_id, query_text=body.query, response=response)
+    return response

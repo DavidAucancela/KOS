@@ -7,8 +7,8 @@ esquema (doc 10 §9); estas Table son la referencia para leer/escribir.
 from __future__ import annotations
 
 import uuid as uuid_lib
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -36,8 +36,16 @@ from sqlalchemy.ext.asyncio import (
 
 from kos_core.confidence import ALIAS_BOOST
 from kos_core.config import Settings
+from kos_core.schemas.conversation import Conversation, Message
 from kos_core.schemas.documents import ParsedDocument
 from kos_core.schemas.plan import Plan
+from kos_core.schemas.plan_metrics import (
+    AgentDistribution,
+    DegradationBreakdown,
+    LatencyBucket,
+    PeriodSummary,
+    compute_insights,
+)
 
 EMBEDDING_DIM = 1024  # dimensión de bge-m3
 
@@ -158,6 +166,46 @@ plans_table = Table(
     Column("degraded_reason", Text),
     Column("elapsed_ms", Float, nullable=False, server_default=text("0")),
     Column("trace_id", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+conversations_table = Table(
+    "conversations",
+    metadata,
+    Column("conversation_id", UUID(as_uuid=True), primary_key=True),
+    Column("title", Text),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    ),
+    Column("archived_at", DateTime(timezone=True)),
+)
+
+messages_table = Table(
+    "messages",
+    metadata,
+    Column("message_id", UUID(as_uuid=True), primary_key=True),
+    Column(
+        "conversation_id",
+        UUID(as_uuid=True),
+        ForeignKey("conversations.conversation_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("role", Text, nullable=False),
+    Column("content", Text, nullable=False),
+    Column("plan_id", UUID(as_uuid=True)),
+    Column("evidence", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("confidence", Float),
+    Column("degraded", Boolean, nullable=False, server_default=text("false")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
 
@@ -728,3 +776,302 @@ async def get_plan(engine: AsyncEngine, plan_id: uuid_lib.UUID) -> dict[str, Any
             .first()
         )
         return dict(row) if row else None
+
+
+async def list_plans(
+    engine: AsyncEngine,
+    *,
+    cursor: datetime | None = None,
+    limit: int = 20,
+    degraded_only: bool = False,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Lista liviana de planes recientes (doc 06 §2 addendum 2026-08-21) — sin
+    `steps`/`post`, para la vista "planes recientes" de Trazas y para no traer
+    JSONB potencialmente grande solo para listar. Cursor por `created_at`
+    (keyset descendente): a diferencia de `list_memories`/`list_recommendations`
+    (keyset sobre PK ascendente), acá lo que importa es la recencia, no un orden
+    estable de inserción — de ahí el índice nuevo `ix_plans_created_at`."""
+    columns = [
+        plans_table.c.plan_id,
+        plans_table.c.query,
+        plans_table.c.degraded,
+        plans_table.c.degraded_reason,
+        plans_table.c.elapsed_ms,
+        plans_table.c.trace_id,
+        plans_table.c.created_at,
+    ]
+    query = select(*columns).order_by(plans_table.c.created_at.desc()).limit(limit)
+    if degraded_only:
+        query = query.where(plans_table.c.degraded.is_(True))
+    if cursor is not None:
+        query = query.where(plans_table.c.created_at < cursor)
+    async with engine.connect() as conn:
+        rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
+    next_cursor = rows[-1]["created_at"] if len(rows) == limit else None
+    return rows, next_cursor
+
+
+async def _plan_window_summary(conn: Any, *, start: datetime, end: datetime) -> dict[str, Any]:
+    query = select(
+        func.count().label("total"),
+        func.count().filter(plans_table.c.degraded).label("degraded"),
+        func.coalesce(func.avg(plans_table.c.elapsed_ms), 0.0).label("avg_ms"),
+    ).where(plans_table.c.created_at >= start, plans_table.c.created_at < end)
+    row = (await conn.execute(query)).mappings().first()
+    return dict(row) if row else {"total": 0, "degraded": 0, "avg_ms": 0.0}
+
+
+async def _plan_window_tokens(conn: Any, *, start: datetime, end: datetime) -> int:
+    query = text(
+        """
+        SELECT coalesce(sum((step->'cost'->>'tokens')::int), 0) AS total_tokens
+        FROM plans, jsonb_array_elements(steps) AS step
+        WHERE created_at >= :start AND created_at < :end
+          AND step->'cost' IS NOT NULL
+        """
+    )
+    row = (await conn.execute(query, {"start": start, "end": end})).mappings().first()
+    return int(row["total_tokens"]) if row else 0
+
+
+async def _plan_window_degradation(
+    conn: Any, *, start: datetime, end: datetime
+) -> list[dict[str, Any]]:
+    query = (
+        select(plans_table.c.degraded_reason, func.count().label("count"))
+        .where(
+            plans_table.c.created_at >= start,
+            plans_table.c.created_at < end,
+            plans_table.c.degraded.is_(True),
+        )
+        .group_by(plans_table.c.degraded_reason)
+    )
+    return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
+async def _plan_window_agents(conn: Any, *, start: datetime, end: datetime) -> list[dict[str, Any]]:
+    query = text(
+        """
+        SELECT step->>'agent' AS agent, count(*) AS count
+        FROM plans, jsonb_array_elements(steps) AS step
+        WHERE created_at >= :start AND created_at < :end
+        GROUP BY agent
+        ORDER BY count DESC
+        """
+    )
+    rows = (await conn.execute(query, {"start": start, "end": end})).mappings().all()
+    return [dict(row) for row in rows if row["agent"]]
+
+
+async def _plan_window_latency(
+    conn: Any, *, start: datetime, end: datetime, bucket: Literal["hour", "day"]
+) -> list[dict[str, Any]]:
+    trunc = func.date_trunc(bucket, plans_table.c.created_at).label("bucket")
+    avg_ms = func.avg(plans_table.c.elapsed_ms).label("avg_ms")
+    query = (
+        select(trunc, avg_ms, func.count().label("count"))
+        .where(plans_table.c.created_at >= start, plans_table.c.created_at < end)
+        .group_by(trunc)
+        .order_by(trunc)
+    )
+    return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
+async def plan_metrics(
+    engine: AsyncEngine, *, since: datetime, bucket: Literal["hour", "day"] = "hour"
+) -> dict[str, Any]:
+    """Métricas agregadas del Planner (doc 06 §2 addendum 2026-08-21): corre las
+    mismas agregaciones sobre la ventana actual (`[since, now]`) y la ventana
+    anterior de igual duración (`[since - Δ, since]`) para poder calcular deltas
+    e insights deterministas (`compute_insights`, sin LLM) — ver
+    `packages/core/src/kos_core/schemas/plan_metrics.py`."""
+    now = datetime.now(UTC)
+    span = now - since
+    previous_since = since - span
+
+    async with engine.connect() as conn:
+        current_raw = await _plan_window_summary(conn, start=since, end=now)
+        current_tokens = await _plan_window_tokens(conn, start=since, end=now)
+        latency_rows = await _plan_window_latency(conn, start=since, end=now, bucket=bucket)
+        degradation_rows = await _plan_window_degradation(conn, start=since, end=now)
+        agent_rows = await _plan_window_agents(conn, start=since, end=now)
+
+        previous_raw = await _plan_window_summary(conn, start=previous_since, end=since)
+        previous_tokens = await _plan_window_tokens(conn, start=previous_since, end=since)
+
+    current_total = current_raw["total"]
+    current = PeriodSummary(
+        total_plans=current_total,
+        degraded_plans=current_raw["degraded"],
+        degradation_rate=(current_raw["degraded"] / current_total) if current_total else 0.0,
+        avg_latency_ms=float(current_raw["avg_ms"]),
+        total_tokens=current_tokens,
+    )
+    previous = None
+    if previous_raw["total"] > 0:
+        previous = PeriodSummary(
+            total_plans=previous_raw["total"],
+            degraded_plans=previous_raw["degraded"],
+            degradation_rate=previous_raw["degraded"] / previous_raw["total"],
+            avg_latency_ms=float(previous_raw["avg_ms"]),
+            total_tokens=previous_tokens,
+        )
+
+    agent_distribution = [
+        AgentDistribution(agent=row["agent"], count=row["count"]) for row in agent_rows
+    ]
+    insights = compute_insights(
+        current=current, previous=previous, agent_distribution=agent_distribution
+    )
+
+    return {
+        "since": since,
+        "current_period": current,
+        "previous_period": previous,
+        "latency": [
+            LatencyBucket(bucket=row["bucket"], avg_ms=float(row["avg_ms"]), count=row["count"])
+            for row in latency_rows
+        ],
+        "degradation_by_reason": [
+            DegradationBreakdown(reason=row["degraded_reason"], count=row["count"])
+            for row in degradation_rows
+        ],
+        "agent_distribution": agent_distribution,
+        "insights": insights,
+    }
+
+
+async def insert_conversation(engine: AsyncEngine, conversation: Conversation) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            conversations_table.insert().values(
+                conversation_id=conversation.conversation_id,
+                title=conversation.title,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at,
+                archived_at=conversation.archived_at,
+            )
+        )
+
+
+async def insert_message(engine: AsyncEngine, message: Message) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            messages_table.insert().values(
+                message_id=message.message_id,
+                conversation_id=message.conversation_id,
+                role=message.role.value,
+                content=message.content,
+                plan_id=message.plan_id,
+                evidence=[ev.model_dump(mode="json") for ev in message.evidence],
+                confidence=message.confidence,
+                degraded=message.degraded,
+                created_at=message.created_at,
+            )
+        )
+
+
+async def touch_conversation(
+    engine: AsyncEngine, conversation_id: uuid_lib.UUID, *, title: str | None = None
+) -> None:
+    """Actualiza `updated_at` en cada turno; fija `title` solo la primera vez
+    (mientras siga `NULL`) — nunca se reescribe con preguntas posteriores."""
+    async with engine.begin() as conn:
+        if title is not None:
+            await conn.execute(
+                conversations_table.update()
+                .where(
+                    conversations_table.c.conversation_id == conversation_id,
+                    conversations_table.c.title.is_(None),
+                )
+                .values(title=title, updated_at=func.now())
+            )
+        await conn.execute(
+            conversations_table.update()
+            .where(conversations_table.c.conversation_id == conversation_id)
+            .values(updated_at=func.now())
+        )
+
+
+async def get_conversation(
+    engine: AsyncEngine, conversation_id: uuid_lib.UUID
+) -> dict[str, Any] | None:
+    async with engine.connect() as conn:
+        row = (
+            (
+                await conn.execute(
+                    select(conversations_table).where(
+                        conversations_table.c.conversation_id == conversation_id
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+
+_MESSAGE_COLUMNS = [
+    messages_table.c.message_id,
+    messages_table.c.conversation_id,
+    messages_table.c.role,
+    messages_table.c.content,
+    messages_table.c.plan_id,
+    messages_table.c.evidence,
+    messages_table.c.confidence,
+    messages_table.c.degraded,
+    messages_table.c.created_at,
+]
+
+
+async def list_messages(
+    engine: AsyncEngine, conversation_id: uuid_lib.UUID
+) -> list[dict[str, Any]]:
+    """Orden cronológico ascendente (a diferencia del resto de los listados del
+    proyecto, que muestran lo más reciente primero): una conversación se lee en
+    el orden en que ocurrió, no al revés."""
+    query = (
+        select(*_MESSAGE_COLUMNS)
+        .where(messages_table.c.conversation_id == conversation_id)
+        .order_by(messages_table.c.created_at.asc())
+    )
+    async with engine.connect() as conn:
+        return [dict(row) for row in (await conn.execute(query)).mappings().all()]
+
+
+async def list_conversations(
+    engine: AsyncEngine,
+    *,
+    cursor: datetime | None = None,
+    limit: int = 20,
+    include_archived: bool = False,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Keyset sobre `updated_at` DESC (más recientemente activa primero) — a
+    diferencia de `list_memories`/`list_recommendations`, que ordenan por PK
+    ascendente; acá lo relevante es qué conversación se tocó últimamente."""
+    query = (
+        select(conversations_table).order_by(conversations_table.c.updated_at.desc()).limit(limit)
+    )
+    if not include_archived:
+        query = query.where(conversations_table.c.archived_at.is_(None))
+    if cursor is not None:
+        query = query.where(conversations_table.c.updated_at < cursor)
+    async with engine.connect() as conn:
+        rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
+    next_cursor = rows[-1]["updated_at"] if len(rows) == limit else None
+    return rows, next_cursor
+
+
+async def archive_conversation(engine: AsyncEngine, conversation_id: uuid_lib.UUID) -> bool:
+    """Mismo patrón idempotente que `archive_memory`: archivado, nunca borrado
+    físico; no reabre una conversación ya archivada."""
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            conversations_table.update()
+            .where(
+                conversations_table.c.conversation_id == conversation_id,
+                conversations_table.c.archived_at.is_(None),
+            )
+            .values(archived_at=func.now())
+        )
+        return result.rowcount > 0

@@ -1,22 +1,24 @@
 import { useState } from "react";
-import { Activity, ListTree, MessagesSquare, Network } from "lucide-react";
+import { Activity, LineChart, ListTree, MessagesSquare, Network } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ChatPage } from "./features/chat/ChatPage";
 import { GraphPage } from "./features/graph/GraphPage";
+import { MetricsPage } from "./features/metrics/MetricsPage";
 import { useRecommendations } from "./features/recommendations/useRecommendations";
 import { StatusPage } from "./features/status/StatusPage";
 import { TracesPage } from "./features/traces/TracesPage";
 
 // Shell de la app: semilla del layout IDE del doc 10 §4. Chat, Grafo, Trazas
-// (Sprint 19) y Estado.
-type View = "chat" | "graph" | "traces" | "status";
+// (Sprint 19), Estado, y Métricas (doc 06 §2 addendum 2026-08-21).
+type View = "chat" | "graph" | "traces" | "status" | "metrics";
 
 const NAV: { id: View; label: string; icon: typeof Activity }[] = [
   { id: "chat", label: "Chat", icon: MessagesSquare },
   { id: "graph", label: "Grafo", icon: Network },
   { id: "traces", label: "Trazas", icon: ListTree },
   { id: "status", label: "Estado", icon: Activity },
+  { id: "metrics", label: "Métricas", icon: LineChart },
 ];
 
 export default function App() {
@@ -70,6 +72,7 @@ export default function App() {
         {view === "graph" && <GraphPage />}
         {view === "traces" && <TracesPage initialPlanId={selectedPlanId} />}
         {view === "status" && <StatusPage />}
+        {view === "metrics" && <MetricsPage />}
       </div>
     </div>
   );

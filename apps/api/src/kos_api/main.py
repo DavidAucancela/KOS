@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from kos_api import middleware
 from kos_api.routes import (
+    conversations,
     documents,
     graph,
     health,
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(graph.router)
     app.include_router(memory.router)
     app.include_router(plans.router)
+    app.include_router(conversations.router)
     app.include_router(recommendations.router)
     return app
 

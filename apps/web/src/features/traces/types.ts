@@ -6,3 +6,5 @@ import type { components } from "../../api/schema";
 
 export type PlanOut = components["schemas"]["PlanOut"];
 export type PlanStep = components["schemas"]["PlanStep"];
+export type PlanSummary = components["schemas"]["PlanSummary"];
+export type PlanPage = components["schemas"]["PlanPage"];

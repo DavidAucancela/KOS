@@ -18,6 +18,17 @@
   --warning-foreground: oklch(0.15 0.02 70);
   --destructive: oklch(0.65 0.2 25);
   --destructive-foreground: oklch(0.15 0.02 25);
+
+  /* Paleta categórica para "distribución de agentes" (Métricas) — validada con
+     scripts/validate_palette.js de la skill dataviz (modo oscuro, superficie de
+     tarjeta): ALL CHECKS PASS, 1 WARN (emerald↔pink, banda 6-8, exige etiqueta
+     directa — ver MetricsPage). Color fijo por agente, nunca reordenado por valor. */
+  --chart-agent-1: #3b82f6; /* retrieval */
+  --chart-agent-2: #ea580c; /* graph */
+  --chart-agent-3: #0891b2; /* research */
+  --chart-agent-4: #ec4899; /* memory */
+  --chart-agent-5: #059669; /* writing */
+  --chart-agent-6: #8b5cf6; /* learning */
 }
 
 @theme inline {
@@ -37,6 +48,12 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-chart-agent-1: var(--chart-agent-1);
+  --color-chart-agent-2: var(--chart-agent-2);
+  --color-chart-agent-3: var(--chart-agent-3);
+  --color-chart-agent-4: var(--chart-agent-4);
+  --color-chart-agent-5: var(--chart-agent-5);
+  --color-chart-agent-6: var(--chart-agent-6);
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
@@ -48,5 +65,26 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* Scrollbars oscuras: sin esto el navegador dibuja las suyas (claras),
+     rompiendo el tema oscuro en cualquier panel con overflow. */
+  * {
+    scrollbar-color: var(--border) transparent;
+    scrollbar-width: thin;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
   }
 }
