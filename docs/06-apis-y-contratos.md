@@ -57,6 +57,11 @@ query arbitraria.
 | `GET` | `/v1/memory?type=&q=` | Explorar memoria (auditoría) | 3 |
 | `DELETE` | `/v1/memory/{id}` | Olvidar (archivado, no borrado físico) | 3 |
 | `GET` | `/v1/plans/{id}` | Traza completa de un plan ejecutado | 4 |
+| `GET` | `/v1/plans` | Lista paginada de planes recientes (sin `steps`/`post`) | 4 |
+| `GET` | `/v1/plans/metrics` | Métricas agregadas del Planner en el tiempo (latencia, degradación, distribución de agentes, tokens, insights) | 4 |
+| `GET` | `/v1/conversations` | Historial de conversaciones (más recientes primero) | 4 |
+| `GET` | `/v1/conversations/{id}` | Detalle + mensajes de una conversación | 4 |
+| `DELETE` | `/v1/conversations/{id}` | Archivar una conversación (no borra) | 4 |
 | `GET` | `/v1/recommendations` | Lagunas, contradicciones, sugerencias | 5 |
 | `PATCH` | `/v1/recommendations/{id}` | Aceptar/descartar una recomendación (doc 11 §8) | 5 |
 
@@ -201,6 +206,18 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > (lista de plantillas existentes) en vez de dejar que el LLM sintetice una
 > plantilla combinando fragmentos de documentos distintos y no relacionados —
 > el motivo original de este cambio (ver retro `docs/sprints/sprint-08.md`).
+>
+> **Historial de conversaciones + métricas del Planner (2026-08-21, diseño ad-hoc post-cierre
+> v1.0, ver `docs/deuda-tecnica.md` "Monitoreo")**: `POST /v1/query` gana `conversation_id`
+> opcional en el body — si se omite, se crea una conversación nueva y su id vuelve en
+> `QueryResponse.conversation_id` (siempre presente). Cada turno (pregunta + respuesta, con
+> `evidence[]` incluida) se persiste en `conversations`/`messages`; esto realiza el evento
+> `conversation.completed` ya listado en la tabla de eventos (§3) — planificado desde Fase 1 pero
+> nunca implementado hasta ahora. Un fallo al guardar el historial nunca bloquea la respuesta ya
+> calculada (mismo principio que ya aplica `insert_plan`). `GET /v1/plans/metrics` no invoca al
+> LLM ni al Planner — los "insights" que devuelve son reglas deterministas sobre agregados SQL
+> (comparación contra el período anterior), no texto generado; no aplica ni viola la regla 3 de
+> CLAUDE.md porque ningún LLM participa.
 
 ## 5. Qué congela este documento
 

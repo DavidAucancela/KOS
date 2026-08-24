@@ -28,6 +28,7 @@ function queryResponse(overrides: Partial<QueryResponse> = {}): QueryResponse {
     degraded: false,
     trace_id: "trace-1",
     plan_id: "plan-1",
+    conversation_id: "conv-1",
     ...overrides,
   };
 }
@@ -60,7 +61,7 @@ describe("ChatPage", () => {
     expect(await screen.findByText(/Docker es contenedores/)).toBeInTheDocument();
     expect(screen.getByText("Nota 1")).toBeInTheDocument();
     expect(screen.getByText("Nota 2")).toBeInTheDocument();
-    expect(screen.getByText("Confianza: 70%")).toBeInTheDocument();
+    expect(screen.getByText("70%")).toBeInTheDocument();
   });
 
   it("renderiza los marcadores [1] y [2] como elementos interactivos", async () => {
@@ -112,7 +113,8 @@ describe("ChatPage", () => {
     render(<ChatPage onViewPlan={() => {}} />);
     await askQuestion();
 
-    expect(await screen.findByText(/Confianza baja \(20%\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Confianza baja: revisa la evidencia/)).toBeInTheDocument();
+    expect(screen.getByText("20%")).toBeInTheDocument();
   });
 
   it("muestra un mensaje de error si el modelo no está disponible (503)", async () => {

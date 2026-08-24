@@ -265,6 +265,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plans */
+        get: operations["list_plans_v1_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plans/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Plan Metrics */
+        get: operations["get_plan_metrics_v1_plans_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/plans/{plan_id}": {
         parameters: {
             query?: never;
@@ -277,6 +311,41 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Conversations */
+        get: operations["list_conversations_v1_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Conversation */
+        get: operations["get_conversation_v1_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        /** Archive Conversation */
+        delete: operations["archive_conversation_v1_conversations__conversation_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -326,6 +395,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentDistribution */
+        AgentDistribution: {
+            /** Agent */
+            agent: string;
+            /** Count */
+            count: number;
+        };
         /** ChunkOut */
         ChunkOut: {
             /**
@@ -360,6 +436,39 @@ export interface components {
             /** Next Cursor */
             next_cursor: number | null;
         };
+        /** ConversationDetail */
+        ConversationDetail: {
+            conversation: components["schemas"]["ConversationOut"];
+            /** Messages */
+            messages: components["schemas"]["MessageOut"][];
+        };
+        /** ConversationOut */
+        ConversationOut: {
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Title */
+            title: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ConversationPage */
+        ConversationPage: {
+            /** Items */
+            items: components["schemas"]["ConversationOut"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /**
          * Cost
          * @description Coste observado de una ejecución (para trazas y métricas, doc 09 §6).
@@ -375,6 +484,13 @@ export interface components {
              * @default 0
              */
             ms: number;
+        };
+        /** DegradationBreakdown */
+        DegradationBreakdown: {
+            /** Reason */
+            reason: string | null;
+            /** Count */
+            count: number;
         };
         /** DocumentDetail */
         DocumentDetail: {
@@ -629,6 +745,35 @@ export interface components {
                 [key: string]: components["schemas"]["ServiceStatus"];
             };
         };
+        /** Insight */
+        Insight: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "critical";
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "latency" | "degradation" | "agent_distribution" | "tokens";
+            /** Message */
+            message: string;
+            /** Delta Pct */
+            delta_pct?: number | null;
+        };
+        /** LatencyBucket */
+        LatencyBucket: {
+            /**
+             * Bucket
+             * Format: date-time
+             */
+            bucket: string;
+            /** Avg Ms */
+            avg_ms: number;
+            /** Count */
+            count: number;
+        };
         /** MemoryOut */
         MemoryOut: {
             /**
@@ -677,6 +822,31 @@ export interface components {
             items: components["schemas"]["MemoryOut"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /** MessageOut */
+        MessageOut: {
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /** Role */
+            role: string;
+            /** Content */
+            content: string;
+            /** Plan Id */
+            plan_id: string | null;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Confidence */
+            confidence: number | null;
+            /** Degraded */
+            degraded: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** NodeWithNeighborhood */
         NodeWithNeighborhood: {
@@ -733,6 +903,37 @@ export interface components {
             /** Confidence */
             confidence?: number | null;
         };
+        /** PeriodSummary */
+        PeriodSummary: {
+            /** Total Plans */
+            total_plans: number;
+            /** Degraded Plans */
+            degraded_plans: number;
+            /** Degradation Rate */
+            degradation_rate: number;
+            /** Avg Latency Ms */
+            avg_latency_ms: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** PlanMetricsOut */
+        PlanMetricsOut: {
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            current_period: components["schemas"]["PeriodSummary"];
+            previous_period: components["schemas"]["PeriodSummary"] | null;
+            /** Latency */
+            latency: components["schemas"]["LatencyBucket"][];
+            /** Degradation By Reason */
+            degradation_by_reason: components["schemas"]["DegradationBreakdown"][];
+            /** Agent Distribution */
+            agent_distribution: components["schemas"]["AgentDistribution"][];
+            /** Insights */
+            insights: components["schemas"]["Insight"][];
+        };
         /** PlanOut */
         PlanOut: {
             /**
@@ -760,6 +961,13 @@ export interface components {
              */
             created_at: string;
         };
+        /** PlanPage */
+        PlanPage: {
+            /** Items */
+            items: components["schemas"]["PlanSummary"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /**
          * PlanStep
          * @description Un paso del plan; la unidad de traza y depuración (doc 03 §3). `inputs`
@@ -785,6 +993,32 @@ export interface components {
             confidence?: number | null;
             cost?: components["schemas"]["Cost"] | null;
         };
+        /**
+         * PlanSummary
+         * @description Versión liviana de `PlanOut` para el listado — sin `steps`/`post`.
+         */
+        PlanSummary: {
+            /**
+             * Plan Id
+             * Format: uuid
+             */
+            plan_id: string;
+            /** Query */
+            query: string;
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason: string | null;
+            /** Elapsed Ms */
+            elapsed_ms: number;
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** QueryRequest */
         QueryRequest: {
             /** Query */
@@ -800,6 +1034,8 @@ export interface components {
              * @enum {string}
              */
             mode: "hybrid" | "lexical" | "vector";
+            /** Conversation Id */
+            conversation_id?: string | null;
         };
         /** QueryResponse */
         QueryResponse: {
@@ -819,6 +1055,8 @@ export interface components {
             trace_id: string;
             /** Plan Id */
             plan_id: string;
+            /** Conversation Id */
+            conversation_id: string;
         };
         /** Recommendation */
         Recommendation: {
@@ -1597,6 +1835,71 @@ export interface operations {
             };
         };
     };
+    list_plans_v1_plans_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                degraded_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_plan_metrics_v1_plans_metrics_get: {
+        parameters: {
+            query?: {
+                since_hours?: number;
+                bucket?: "hour" | "day";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanMetricsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_plan_v1_plans__plan_id__get: {
         parameters: {
             query?: never;
@@ -1616,6 +1919,98 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlanOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_v1_conversations_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_v1_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_conversation_v1_conversations__conversation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

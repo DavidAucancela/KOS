@@ -1,64 +1,22 @@
-// Tipos del contrato POST /v1/query y de la lectura de documentos citados.
-// TEMPORAL: se migrarán al cliente generado desde OpenAPI (src/api/schema.d.ts,
-// `pnpm --filter kos-web generate:api`). No añadir aquí tipos de la API a mano
-// una vez exista el generado.
+// Tipos del contrato POST /v1/query y de historial de conversaciones, derivados
+// del cliente generado desde OpenAPI (`pnpm --filter kos-web generate:api` →
+// src/api/schema.d.ts). Regla doc 09 §3: los tipos de la API no se escriben a
+// mano — antes de la migración server-side de historial (2026-08-21) esta era
+// la única excepción del proyecto; ya no hace falta.
 
-export type QueryMode = "hybrid" | "lexical" | "vector";
+import type { components } from "../../api/schema";
 
-export interface QueryRequest {
-  query: string;
-  limit?: number;
-  mode?: QueryMode;
-}
+export type QueryRequest = components["schemas"]["QueryRequest"];
+export type QueryResponse = components["schemas"]["QueryResponse"];
+export type Evidence = components["schemas"]["EvidenceRef"];
+export type PlanStep = components["schemas"]["PlanStep"];
 
-export interface Evidence {
-  doc_id: string;
-  chunk_id: string | null;
-  quote: string | null;
-  title: string | null;
-  source_id: string | null;
-  connector: string | null;
-  score: number | null;
-  doc_type: string | null;
-}
-
-export interface PlanStep {
-  id: string;
-  agent: string;
-  task: string;
-  depends_on: string[];
-  evidence_count?: number;
-}
-
-export interface QueryResponse {
-  query: string;
-  answer: string;
-  evidence: Evidence[];
-  confidence: number;
-  plan: PlanStep[];
-  degraded: boolean;
-  trace_id: string;
-  plan_id: string;
-}
+export type ConversationOut = components["schemas"]["ConversationOut"];
+export type ConversationPage = components["schemas"]["ConversationPage"];
+export type ConversationDetail = components["schemas"]["ConversationDetail"];
+export type MessageOut = components["schemas"]["MessageOut"];
 
 // Lectura del documento original para el visor de citas.
-export interface DocumentDetail {
-  doc_id: string;
-  title: string | null;
-  source_id: string | null;
-  connector: string | null;
-  summary: string | null;
-}
-
-export interface DocumentChunk {
-  chunk_id: string;
-  doc_id: string;
-  text: string;
-  position: number;
-  metadata: Record<string, unknown>;
-}
-
-export interface ChunkPage {
-  items: DocumentChunk[];
-  next_cursor: number | null;
-}
+export type DocumentDetail = components["schemas"]["DocumentDetail"];
+export type DocumentChunk = components["schemas"]["ChunkOut"];
+export type ChunkPage = components["schemas"]["ChunkPage"];

@@ -1,19 +1,99 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageContainer, PageHeader } from "@/components/page";
+import { DEGRADED_REASON_LABEL } from "@/lib/degradedReasons";
+import { cn } from "@/lib/utils";
+import type { PlanStep } from "./types";
 import { usePlan } from "./usePlan";
+import { usePlansList } from "./usePlansList";
 
-const DEGRADED_REASON_LABEL: Record<string, string> = {
-  llm_generation: "El LLM no generó un plan válido tras reintentar",
-  step_failure: "Un paso individual falló y degradó a evidencia parcial",
-  budget_timeout: "Se cortó por presupuesto de tiempo (timeout_s)",
-  budget_max_steps: "El plan generado excedía el máximo de pasos permitido",
-};
+function StepCard({ step, muted }: { step: PlanStep; muted?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        muted ? "border-border/60 bg-muted/20" : "border-border",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">{step.id}</Badge>
+        <span className="font-medium">{step.agent}</span>
+        <span className="text-muted-foreground">{step.task}</span>
+        {step.depends_on && step.depends_on.length > 0 && (
+          <span className="text-muted-foreground text-xs">
+            depende de: {step.depends_on.join(", ")}
+          </span>
+        )}
+      </div>
+      <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <span>evidencia: {step.evidence_count ?? "—"}</span>
+        <span>
+          confianza: {typeof step.confidence === "number" ? step.confidence.toFixed(2) : "—"}
+        </span>
+        <span>
+          costo:{" "}
+          {step.cost
+            ? `${step.cost.ms.toFixed(0)} ms${step.cost.tokens ? ` · ${step.cost.tokens} tokens` : ""}`
+            : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RecentPlans({ onSelect }: { onSelect: (planId: string) => void }) {
+  const { items, loading, error } = usePlansList();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="rounded-md border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium"
+      >
+        {open ? (
+          <ChevronDown className="size-4" aria-hidden />
+        ) : (
+          <ChevronRight className="size-4" aria-hidden />
+        )}
+        Planes recientes
+      </button>
+      {open && (
+        <div className="space-y-1 border-t border-border p-2">
+          {loading && <p className="text-muted-foreground px-2 py-1 text-xs">Cargando…</p>}
+          {error && <p className="text-destructive px-2 py-1 text-xs">{error}</p>}
+          {!loading && items.length === 0 && (
+            <p className="text-muted-foreground px-2 py-1 text-xs">Todavía no hay planes.</p>
+          )}
+          {items.map((item) => (
+            <button
+              key={item.plan_id}
+              type="button"
+              onClick={() => onSelect(item.plan_id)}
+              className="hover:bg-muted flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs"
+            >
+              <span className="min-w-0 flex-1 truncate">{item.query}</span>
+              {item.degraded && (
+                <Badge variant="outline" className="border-warning/40 text-warning shrink-0">
+                  degradado
+                </Badge>
+              )}
+              <span className="text-muted-foreground shrink-0">
+                {new Date(item.created_at).toLocaleString()}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Pantalla mínima de inspección de planes (doc 03 §3 regla 3, doc 06 línea
 // 59, Sprint 19): pegar un plan_id (o llegar con uno preseleccionado desde el
@@ -58,6 +138,13 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
         </Button>
       </form>
 
+      <RecentPlans
+        onSelect={(planId) => {
+          setDraft(planId);
+          void fetchPlan(planId);
+        }}
+      />
+
       {error && (
         <p className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-4 py-3 text-sm">
           {error}
@@ -88,31 +175,23 @@ export function TracesPage({ initialPlanId }: { initialPlanId: string | null }) 
 
           <div className="space-y-2">
             {plan.steps.map((step) => (
-              <div
-                key={step.id}
-                className="rounded-md border border-border px-3 py-2 text-sm"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">{step.id}</Badge>
-                  <span className="font-medium">{step.agent}</span>
-                  <span className="text-muted-foreground">{step.task}</span>
-                  {step.depends_on && step.depends_on.length > 0 && (
-                    <span className="text-muted-foreground text-xs">
-                      depende de: {step.depends_on.join(", ")}
-                    </span>
-                  )}
-                </div>
-                <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                  <span>evidencia: {step.evidence_count ?? "—"}</span>
-                  <span>
-                    confianza:{" "}
-                    {typeof step.confidence === "number" ? step.confidence.toFixed(2) : "—"}
-                  </span>
-                  <span>costo: {step.cost ? `${step.cost.ms.toFixed(0)} ms` : "—"}</span>
-                </div>
-              </div>
+              <StepCard key={step.id} step={step} />
             ))}
           </div>
+
+          {plan.post.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
+                Post-ejecución
+                <Badge variant="outline" className="text-muted-foreground">
+                  fire-and-forget
+                </Badge>
+              </p>
+              {plan.post.map((step) => (
+                <StepCard key={step.id} step={step} muted />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

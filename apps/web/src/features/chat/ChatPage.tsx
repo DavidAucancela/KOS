@@ -1,12 +1,15 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { AlertTriangle, ListTree, Quote, Send } from "lucide-react";
+import { AlertTriangle, ListTree, Quote, Send, Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { CitationViewer, type CitationTarget } from "./CitationViewer";
+import { ConversationSidebar } from "./ConversationSidebar";
 import type { Evidence } from "./types";
 import { useChat, type ChatTurn } from "./useChat";
+import { useConversations } from "./useConversations";
 
 const CITATION_MARKER = /\[(\d+)\]/g;
 
@@ -34,7 +37,7 @@ function renderAnswer(
           key={`c${match.index}`}
           type="button"
           onClick={() => onCite(citationNumber - 1)}
-          className="mx-0.5 inline-flex items-center rounded bg-primary/15 px-1 text-xs font-medium text-primary hover:bg-primary/25"
+          className="bg-primary/15 text-primary hover:bg-primary/25 mx-0.5 inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold"
           aria-label={`Abrir cita ${citationNumber}`}
         >
           {marker}
@@ -67,7 +70,9 @@ function CitationCard({
       className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left hover:border-primary/50"
     >
       <div className="flex items-center gap-2 text-xs">
-        <Badge variant="outline">[{index + 1}]</Badge>
+        <span className="bg-primary/15 text-primary flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">
+          {index + 1}
+        </span>
         <span className="font-medium">{evidence.title ?? evidence.source_id ?? "Documento"}</span>
         {evidence.doc_type === "template" && (
           <Badge variant="outline" className="border-primary/40 text-primary">
@@ -85,6 +90,45 @@ function CitationCard({
   );
 }
 
+// Umbrales alineados con los variants ya definidos en Badge (success/warning/destructive).
+function confidenceTone(value: number): "success" | "warning" | "destructive" {
+  if (value >= 0.7) return "success";
+  if (value >= 0.4) return "warning";
+  return "destructive";
+}
+
+const CONFIDENCE_BAR_CLASS = {
+  success: "bg-success",
+  warning: "bg-warning",
+  destructive: "bg-destructive",
+} as const;
+
+const CONFIDENCE_TEXT_CLASS = {
+  success: "text-success",
+  warning: "text-warning",
+  destructive: "text-destructive",
+} as const;
+
+function ConfidenceMeter({ value }: { value: number }) {
+  const tone = confidenceTone(value);
+  return (
+    <div
+      className="flex items-center gap-2"
+      title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
+    >
+      <div className="bg-muted h-1.5 w-14 overflow-hidden rounded-full">
+        <div
+          className={cn("h-full", CONFIDENCE_BAR_CLASS[tone])}
+          style={{ width: `${Math.round(value * 100)}%` }}
+        />
+      </div>
+      <span className={cn("text-xs font-semibold", CONFIDENCE_TEXT_CLASS[tone])}>
+        {(value * 100).toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
 function AssistantTurn({
   turn,
   onCite,
@@ -95,7 +139,17 @@ function AssistantTurn({
   onViewPlan: (planId: string) => void;
 }) {
   if (turn.pending) {
-    return <p className="text-muted-foreground text-sm">Pensando…</p>;
+    return (
+      <div className="border-border rounded-lg border">
+        <div className="border-border bg-card flex items-center gap-2 border-b px-3 py-2">
+          <Sparkles className="text-primary size-3.5" aria-hidden />
+          <span className="text-muted-foreground text-xs font-semibold tracking-wide">
+            RESPUESTA
+          </span>
+        </div>
+        <p className="text-muted-foreground px-3 py-3 text-sm">Pensando…</p>
+      </div>
+    );
   }
   if (turn.error) {
     return (
@@ -108,82 +162,121 @@ function AssistantTurn({
 
   const { answer, evidence, confidence, degraded, plan_id } = turn.response;
   return (
-    <div className="space-y-3">
+    <div className="border-border overflow-hidden rounded-lg border">
+      <div className="border-border bg-card flex items-center gap-2 border-b px-3 py-2">
+        <Sparkles className="text-primary size-3.5" aria-hidden />
+        <span className="text-muted-foreground text-xs font-semibold tracking-wide">
+          RESPUESTA
+        </span>
+        <div className="ml-auto">
+          <ConfidenceMeter value={confidence} />
+        </div>
+      </div>
       {degraded && (
-        <p className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+        <p className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 border-b px-3 py-2 text-xs">
           <AlertTriangle className="size-4" aria-hidden />
           Respuesta degradada: síntesis limitada por falta del modelo local.
         </p>
       )}
-      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+      <div className="px-3 py-3 text-sm leading-relaxed whitespace-pre-wrap">
         {renderAnswer(answer, evidence, (i) => onCite(evidence[i]))}
       </div>
-      {evidence.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-muted-foreground flex items-center gap-1 text-xs font-medium">
-            <Quote className="size-3" aria-hidden />
-            Citas
-          </p>
-          {evidence.map((item, index) => (
-            <CitationCard
-              key={item.chunk_id ?? `${item.doc_id}-${index}`}
-              index={index}
-              evidence={item}
-              onOpen={() => onCite(item)}
-            />
-          ))}
-        </div>
-      )}
-      {confidence < 0.4 ? (
-        <p
-          className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
-          title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
-        >
+      {confidence < 0.4 && (
+        <p className="border-warning/30 bg-warning/10 text-warning flex items-center gap-2 border-t px-3 py-2 text-xs">
           <AlertTriangle className="size-4" aria-hidden />
-          Confianza baja ({(confidence * 100).toFixed(0)}%): revisa las citas antes de confiar en
-          esta respuesta.
-        </p>
-      ) : (
-        <p
-          className="text-muted-foreground text-xs"
-          title="Confianza: qué tan bien encajó la mejor evidencia recuperada, no si el modelo alucinó."
-        >
-          Confianza: {(confidence * 100).toFixed(0)}%
+          Confianza baja: revisa la evidencia antes de confiar en esta respuesta.
         </p>
       )}
       {plan_id && (
-        <button
-          type="button"
-          onClick={() => onViewPlan(plan_id)}
-          className="text-muted-foreground hover:text-primary flex items-center gap-1 text-xs"
-        >
-          <ListTree className="size-3" aria-hidden />
-          Ver plan
-        </button>
+        <div className="border-border border-t px-3 py-2">
+          <button
+            type="button"
+            onClick={() => onViewPlan(plan_id)}
+            className="text-muted-foreground hover:text-primary flex items-center gap-1 text-xs"
+          >
+            <ListTree className="size-3" aria-hidden />
+            Ver plan
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
+function EvidencePanel({
+  evidence,
+  onOpen,
+}: {
+  evidence: Evidence[];
+  onOpen: (evidence: Evidence) => void;
+}) {
+  return (
+    <div className="border-border flex h-full min-h-0 flex-col border-l">
+      <div className="border-border flex h-11 shrink-0 items-center gap-2 border-b px-4">
+        <Quote className="text-muted-foreground size-3.5" aria-hidden />
+        <span className="text-muted-foreground text-xs font-semibold tracking-wide">
+          EVIDENCIA
+        </span>
+        <span className="bg-muted text-muted-foreground ml-auto rounded-full px-2 py-0.5 text-xs">
+          {evidence.length}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {evidence.map((item, index) => (
+          <CitationCard
+            key={item.chunk_id ?? `${item.doc_id}-${index}`}
+            index={index}
+            evidence={item}
+            onOpen={() => onOpen(item)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void }) {
-  const { turns, busy, ask } = useChat();
+  const { turns, busy, conversationId, ask, loadConversation, newConversation } = useChat();
+  const { items: conversations, refresh: refreshConversations, archive } = useConversations();
   const [draft, setDraft] = useState("");
   const [citation, setCitation] = useState<CitationTarget | null>(null);
 
-  const openCitation = (evidence: Evidence) =>
-    setCitation({ docId: evidence.doc_id, chunkId: evidence.chunk_id });
+  const openCitation = (evidence: Evidence) => {
+    // Sin doc_id no hay nada que abrir (evidencia mínima real, doc 06 §2).
+    if (!evidence.doc_id) return;
+    setCitation({ docId: evidence.doc_id, chunkId: evidence.chunk_id ?? null });
+  };
 
   const submit = () => {
-    void ask(draft);
+    const text = draft;
     setDraft("");
+    void ask(text).then(() => refreshConversations());
   };
+
+  // Evidencia siempre visible en el panel derecho: la de la última respuesta
+  // con turno completo, salvo que haya una cita abierta (esa gana el panel).
+  const lastEvidence = [...turns].reverse().find((turn) => turn.response?.evidence.length)
+    ?.response?.evidence;
 
   return (
     <div className="flex h-full min-h-0 flex-1">
-      <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
-        <h1 className="text-xl font-semibold tracking-tight">KOS — Preguntar al conocimiento</h1>
+      <ConversationSidebar
+        conversations={conversations}
+        activeId={conversationId}
+        onSelect={(id) => void loadConversation(id)}
+        onNew={newConversation}
+        onArchive={(id) => {
+          void archive(id);
+          if (id === conversationId) newConversation();
+        }}
+      />
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto">
+      <main className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="border-border flex h-11 shrink-0 items-center border-b px-6">
+          <h1 className="text-sm font-semibold">KOS — Preguntar al conocimiento</h1>
+        </div>
+
+        <div className="mx-auto min-h-0 w-full max-w-3xl flex-1 space-y-6 overflow-y-auto px-6 py-6">
           {turns.length === 0 && (
             <p className="text-muted-foreground text-sm">
               Haz una pregunta sobre tus notas; la respuesta vendrá con citas clicables.
@@ -200,7 +293,7 @@ export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void 
         </div>
 
         <form
-          className="flex items-end gap-2"
+          className="border-border mx-auto flex w-full max-w-3xl items-end gap-2 border-t px-6 py-3"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -225,9 +318,13 @@ export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void 
         </form>
       </main>
 
-      {citation && (
+      {(citation ?? lastEvidence) && (
         <div className="hidden w-96 shrink-0 lg:block">
-          <CitationViewer target={citation} onClose={() => setCitation(null)} />
+          {citation ? (
+            <CitationViewer target={citation} onClose={() => setCitation(null)} />
+          ) : (
+            <EvidencePanel evidence={lastEvidence!} onOpen={openCitation} />
+          )}
         </div>
       )}
     </div>

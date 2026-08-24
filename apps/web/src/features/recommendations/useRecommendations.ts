@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { errorMessage } from "@/lib/api";
 import type { Recommendation } from "./types";
-
-async function errorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { detail?: string };
-    if (typeof body.detail === "string") return body.detail;
-  } catch {
-    // el body no era JSON (o no traía `detail`) — se usa el status.
-  }
-  return `HTTP ${response.status}`;
-}
 
 export interface UseRecommendationsResult {
   items: Recommendation[];
