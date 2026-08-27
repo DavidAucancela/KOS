@@ -1,18 +1,23 @@
 """Tablas conversations + messages (historial de chat persistente, doc 06 §2 addendum
 2026-08-21, "Monitoreo" en docs/deuda-tecnica.md).
 
-Revision ID: 0010
-Revises: 0009
+Revision ID: 0012
+Revises: 0011
 Create Date: 2026-08-21
 
+Renumerada de 0010 a 0012 (2026-08-27): esta línea (historial de chat / métricas,
+rama `historial-chat-y-metricas-planner`) y la de calidad de grafo
+(`0010_node_embeddings`, `0011_chunk_entity_node_ids`) ramificaron de 0009 en
+paralelo reusando los mismos IDs, dejando `alembic upgrade head` roto con
+"Multiple head revisions". Se reencadena lineal detrás de 0011.
 """
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "0010"
-down_revision: str | None = "0009"
+revision: str = "0012"
+down_revision: str | None = "0011"
 branch_labels: str | None = None
 depends_on: str | None = None
 
