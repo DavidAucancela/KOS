@@ -8,7 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from kos_core.notes import NoteAlreadyExistsError, TemplateNotFoundError, create_note
+from kos_core.notes import (
+    NoteAlreadyExistsError,
+    NoteNotFoundError,
+    TemplateNotFoundError,
+    VaultPathEscapeError,
+    create_folder,
+    create_note,
+    read_note,
+    update_note,
+)
 
 
 @pytest.fixture
@@ -38,3 +47,44 @@ def test_create_note_no_sobreescribe(vault: Path) -> None:
 
     with pytest.raises(NoteAlreadyExistsError):
         create_note(vault, template_name="Concepto", folder=".", title="Docker")
+
+
+def test_read_note_devuelve_contenido(vault: Path) -> None:
+    (vault / "Nota.md").write_text("# Nota\ncuerpo", encoding="utf-8")
+
+    assert read_note(vault, path="Nota.md") == "# Nota\ncuerpo"
+
+
+def test_read_note_inexistente(vault: Path) -> None:
+    with pytest.raises(NoteNotFoundError):
+        read_note(vault, path="NoExiste.md")
+
+
+def test_update_note_sobreescribe(vault: Path) -> None:
+    (vault / "Nota.md").write_text("viejo", encoding="utf-8")
+
+    path = update_note(vault, path="Nota.md", content="nuevo")
+
+    assert path == vault / "Nota.md"
+    assert path.read_text(encoding="utf-8") == "nuevo"
+
+
+def test_update_note_inexistente_no_crea(vault: Path) -> None:
+    with pytest.raises(NoteNotFoundError):
+        update_note(vault, path="NoExiste.md", content="x")
+    assert not (vault / "NoExiste.md").exists()
+
+
+def test_create_folder_anidado_e_idempotente(vault: Path) -> None:
+    path = create_folder(vault, path="Ideas/Subtema")
+
+    assert path == vault / "Ideas" / "Subtema"
+    assert path.is_dir()
+    create_folder(vault, path="Ideas/Subtema")  # no levanta
+
+
+@pytest.mark.parametrize("fn", [read_note, update_note, create_folder])
+def test_rechaza_ruta_que_escapa_del_vault(vault: Path, fn: object) -> None:
+    kwargs = {"content": "x"} if fn is update_note else {}
+    with pytest.raises(VaultPathEscapeError):
+        fn(vault, path="../fuera.md", **kwargs)  # type: ignore[operator]

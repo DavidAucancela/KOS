@@ -32,6 +32,12 @@ def test_write_tools_contiene_obsidian_create_note() -> None:
     assert "obsidian.create_note" in WRITE_TOOLS
 
 
+def test_write_tools_contiene_las_obsidian_restantes() -> None:
+    """Deuda cerrada 2026-08-26: `read_note`/`update_note`/`create_folder` se
+    implementaron como tools MCP; la tabla del doc 06 §4 las marca escritura."""
+    assert {"obsidian.read_note", "obsidian.update_note", "obsidian.create_folder"} <= WRITE_TOOLS
+
+
 def test_approval_required_incluye_descripcion_legible() -> None:
     with pytest.raises(ApprovalRequired) as exc_info:
         gate(

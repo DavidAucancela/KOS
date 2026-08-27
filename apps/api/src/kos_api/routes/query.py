@@ -235,7 +235,7 @@ async def query(
         graph_agent=GraphAgent(caller),
         research_agent=ResearchAgent(caller),
         memory_agent=MemoryAgent(caller),
-        writing_agent=WritingAgent(request.app.state.llm_client),
+        writing_agent=WritingAgent(request.app.state.llm_client, tool_caller=caller),
     )
     try:
         result = await query_service.answer_query(

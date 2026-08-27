@@ -66,3 +66,73 @@ async def test_fallo_del_llm_lanza_synthesis_error() -> None:
 
     with pytest.raises(SynthesisError):
         await agent(_request(query="x", evidence=evidence, confidence=0.5))
+
+
+class _FakeToolCaller:
+    def __init__(self, response: dict[str, Any]) -> None:
+        self.response = response
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((name, arguments))
+        return self.response
+
+
+async def test_sintesis_nunca_llama_tools_aunque_haya_tool_caller() -> None:
+    caller = _FakeToolCaller({})
+    agent = WritingAgent(_EchoLLM(), tool_caller=caller)
+    evidence = [{"doc_id": None, "chunk_id": None, "quote": "algo"}]
+
+    await agent(_request(query="x", evidence=evidence, confidence=0.5))
+
+    assert caller.calls == []
+
+
+async def test_update_note_fuerza_confirm_true() -> None:
+    caller = _FakeToolCaller({"approved": True, "path": "Ideas/Nota.md"})
+    agent = WritingAgent(_EchoLLM(), tool_caller=caller)
+
+    ok = await agent.update_note("Ideas/Nota.md", "cuerpo nuevo", trace_id="t")
+
+    assert ok is True
+    assert caller.calls == [
+        (
+            "obsidian.update_note",
+            {
+                "path": "Ideas/Nota.md",
+                "content": "cuerpo nuevo",
+                "source_name": None,
+                "confirm": True,
+                "trace_id": "t",
+            },
+        )
+    ]
+
+
+async def test_read_note_fuerza_confirm_true_y_devuelve_contenido() -> None:
+    caller = _FakeToolCaller({"approved": True, "path": "Nota.md", "content": "cuerpo"})
+    agent = WritingAgent(_EchoLLM(), tool_caller=caller)
+
+    content = await agent.read_note("Nota.md", trace_id="t")
+
+    assert content == "cuerpo"
+    assert caller.calls[0][0] == "obsidian.read_note"
+    assert caller.calls[0][1]["confirm"] is True
+
+
+async def test_create_folder_fuerza_confirm_true() -> None:
+    caller = _FakeToolCaller({"approved": True, "path": "Ideas/Sub"})
+    agent = WritingAgent(_EchoLLM(), tool_caller=caller)
+
+    ok = await agent.create_folder("Ideas/Sub", trace_id="t")
+
+    assert ok is True
+    assert caller.calls[0][0] == "obsidian.create_folder"
+    assert caller.calls[0][1]["confirm"] is True
+
+
+async def test_operar_sobre_vault_sin_tool_caller_falla() -> None:
+    agent = WritingAgent(_EchoLLM())
+
+    with pytest.raises(RuntimeError):
+        await agent.create_folder("Ideas/Sub", trace_id="t")
