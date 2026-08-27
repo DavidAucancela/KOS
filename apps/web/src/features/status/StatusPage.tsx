@@ -4,6 +4,7 @@ import { Boxes, Brain, Database, HardDrive, Share2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer, PageHeader } from "@/components/page";
+import { MemoryProposalsPanel } from "../memory-proposals/MemoryProposalsPanel";
 import { RecommendationsPanel } from "../recommendations/RecommendationsPanel";
 import type { ServiceStatus } from "./types";
 import { useHealth } from "./useHealth";
@@ -68,6 +69,8 @@ export function StatusPage() {
       )}
 
       <RecommendationsPanel />
+
+      <MemoryProposalsPanel />
 
       <footer className="text-muted-foreground mt-auto text-xs">
         {lastUpdated
