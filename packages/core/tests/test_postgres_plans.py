@@ -10,7 +10,10 @@ import uuid
 
 import pytest
 
+from datetime import UTC, datetime, timedelta
+
 from kos_core.config import get_settings
+from kos_core.schemas.agents import Cost
 from kos_core.schemas.plan import Plan, PlanStep
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage.postgres import create_engine
@@ -88,4 +91,49 @@ async def test_get_plan_inexistente_devuelve_none() -> None:
     try:
         assert await postgres_storage.get_plan(engine, uuid.uuid4()) is None
     finally:
+        await engine.dispose()
+
+
+async def test_plan_window_agent_latency_promedia_cost_ms_por_agente() -> None:
+    """docs/deuda-tecnica.md "Monitoreo": `agent_distribution` ya contaba
+    pasos por agente, pero no si `research`/`memory` es sistemáticamente el
+    cuello de botella — `_plan_window_agent_latency` agrega el promedio real
+    de `cost.ms`. Usa un `created_at` fijo y distintivo + ventana angosta en
+    vez de `plan_metrics(since=...)` (que siempre agrega hasta "ahora") para
+    no contaminarse con planes reales de otras sesiones en la misma BD."""
+    engine = create_engine(get_settings())
+    plan_id = uuid.uuid4()
+    fixed_created_at = datetime(2031, 1, 1, tzinfo=UTC)
+    try:
+        plan = Plan(
+            plan_id=plan_id,
+            query="x",
+            steps=[
+                PlanStep(id="s1", agent="retrieval", task="buscar", cost=Cost(ms=100.0)),
+                PlanStep(id="s2", agent="research", task="buscar afuera", cost=Cost(ms=900.0)),
+                # Paso degradado sin `cost` (executor.py degrada sin costo real,
+                # ver `_step_inputs`) — no debe contar ni distorsionar el promedio.
+                PlanStep(id="s3", agent="graph", task="grafo", cost=None),
+            ],
+            degraded=False,
+            trace_id="trace-plans-metrics",
+            elapsed_ms=1000.0,
+            created_at=fixed_created_at,
+        )
+        await postgres_storage.insert_plan(engine, plan)
+
+        async with engine.connect() as conn:
+            rows = await postgres_storage._plan_window_agent_latency(
+                conn,
+                start=fixed_created_at - timedelta(seconds=1),
+                end=fixed_created_at + timedelta(seconds=1),
+            )
+
+        by_agent = {row["agent"]: row for row in rows}
+        assert by_agent["retrieval"]["avg_ms"] == pytest.approx(100.0)
+        assert by_agent["retrieval"]["count"] == 1
+        assert by_agent["research"]["avg_ms"] == pytest.approx(900.0)
+        assert "graph" not in by_agent
+    finally:
+        await _cleanup(engine, [plan_id])
         await engine.dispose()

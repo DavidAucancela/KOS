@@ -41,6 +41,7 @@ from kos_core.schemas.documents import ParsedDocument
 from kos_core.schemas.plan import Plan
 from kos_core.schemas.plan_metrics import (
     AgentDistribution,
+    AgentLatency,
     DegradationBreakdown,
     LatencyBucket,
     PeriodSummary,
@@ -985,6 +986,28 @@ async def _plan_window_agents(conn: Any, *, start: datetime, end: datetime) -> l
     return [dict(row) for row in rows if row["agent"]]
 
 
+async def _plan_window_agent_latency(
+    conn: Any, *, start: datetime, end: datetime
+) -> list[dict[str, Any]]:
+    """Promedio de `cost.ms` por agente (mismo criterio de deuda que
+    `_plan_window_agents`: `count` acá cuenta pasos con `cost.ms` presente, no
+    el total de pasos del agente — un paso degradado no siempre trae `cost`)."""
+    query = text(
+        """
+        SELECT step->>'agent' AS agent,
+               avg((step->'cost'->>'ms')::float) AS avg_ms,
+               count(*) AS count
+        FROM plans, jsonb_array_elements(steps) AS step
+        WHERE created_at >= :start AND created_at < :end
+          AND step->'cost'->>'ms' IS NOT NULL
+        GROUP BY agent
+        ORDER BY avg_ms DESC
+        """
+    )
+    rows = (await conn.execute(query, {"start": start, "end": end})).mappings().all()
+    return [dict(row) for row in rows if row["agent"]]
+
+
 async def _plan_window_latency(
     conn: Any, *, start: datetime, end: datetime, bucket: Literal["hour", "day"]
 ) -> list[dict[str, Any]]:
@@ -1017,6 +1040,7 @@ async def plan_metrics(
         latency_rows = await _plan_window_latency(conn, start=since, end=now, bucket=bucket)
         degradation_rows = await _plan_window_degradation(conn, start=since, end=now)
         agent_rows = await _plan_window_agents(conn, start=since, end=now)
+        agent_latency_rows = await _plan_window_agent_latency(conn, start=since, end=now)
 
         previous_raw = await _plan_window_summary(conn, start=previous_since, end=since)
         previous_tokens = await _plan_window_tokens(conn, start=previous_since, end=since)
@@ -1059,6 +1083,10 @@ async def plan_metrics(
             for row in degradation_rows
         ],
         "agent_distribution": agent_distribution,
+        "agent_latency": [
+            AgentLatency(agent=row["agent"], avg_ms=float(row["avg_ms"]), count=row["count"])
+            for row in agent_latency_rows
+        ],
         "insights": insights,
     }
 

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer, PageHeader } from "@/components/page";
 import { DEGRADED_REASON_LABEL } from "@/lib/degradedReasons";
 import { cn } from "@/lib/utils";
-import type { AgentDistribution, Insight, LatencyBucket, SinceRange } from "./types";
+import type { AgentDistribution, AgentLatency, Insight, LatencyBucket, SinceRange } from "./types";
 import { useMetrics } from "./useMetrics";
 
 const RANGES: { value: SinceRange; label: string }[] = [
@@ -350,6 +350,48 @@ function AgentDistributionBars({ items }: { items: AgentDistribution[] }) {
   );
 }
 
+// docs/deuda-tecnica.md "Monitoreo": `AgentDistributionBars` ya mostraba
+// cuántos pasos corre cada agente, pero no si `research`/`memory` es
+// sistemáticamente el cuello de botella — esto agrega el promedio real de
+// `cost.ms` por agente, ordenado de más lento a más rápido (ya viene así del
+// backend, `_plan_window_agent_latency`).
+function AgentLatencyBars({ items }: { items: AgentLatency[] }) {
+  if (items.length === 0) {
+    return <p className="text-muted-foreground text-sm">Sin pasos con costo registrado en este rango.</p>;
+  }
+  const maxMs = Math.max(...items.map((item) => item.avg_ms), 1);
+  return (
+    <div className="space-y-2">
+      {items.map((item, i) => {
+        const pct = (item.avg_ms / maxMs) * 100;
+        return (
+          <div key={item.agent} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 font-medium">
+                <span
+                  className="size-2.5 rounded-full"
+                  style={{ backgroundColor: agentColor(item.agent, i) }}
+                  aria-hidden
+                />
+                {item.agent}
+              </span>
+              <span className="text-muted-foreground tabular-nums">
+                {fmtMs(item.avg_ms)} · {item.count} paso{item.count === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="bg-muted h-2 overflow-hidden rounded-full">
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: agentColor(item.agent, i) }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function fmtMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms.toFixed(0)} ms`;
 }
@@ -429,7 +471,7 @@ export function MetricsPage() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-3">
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Degradación por razón</CardTitle>
@@ -447,6 +489,14 @@ export function MetricsPage() {
               </CardHeader>
               <CardContent>
                 <AgentDistributionBars items={metrics.agent_distribution} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Latencia por agente</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <AgentLatencyBars items={metrics.agent_latency} />
               </CardContent>
             </Card>
           </div>

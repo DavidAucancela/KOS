@@ -111,3 +111,36 @@ def test_get_plan_con_degraded_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     body = response.json()
     assert body["degraded"] is True
     assert body["degraded_reason"] == "budget_timeout"
+
+
+def test_get_plan_metrics_expone_agent_latency(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs/deuda-tecnica.md "Monitoreo": promedio de cost.ms por agente,
+    para saber en agregado si research/memory es el cuello de botella."""
+
+    async def fake_plan_metrics(
+        engine: Any, *, since: datetime, bucket: str
+    ) -> dict[str, Any]:
+        return {
+            "since": since,
+            "current_period": {
+                "total_plans": 2,
+                "degraded_plans": 0,
+                "degradation_rate": 0.0,
+                "avg_latency_ms": 500.0,
+                "total_tokens": 0,
+            },
+            "previous_period": None,
+            "latency": [],
+            "degradation_by_reason": [],
+            "agent_distribution": [{"agent": "research", "count": 1}],
+            "agent_latency": [{"agent": "research", "avg_ms": 900.0, "count": 1}],
+            "insights": [],
+        }
+
+    monkeypatch.setattr(postgres_storage, "plan_metrics", fake_plan_metrics)
+    with TestClient(create_app()) as client:
+        response = client.get("/v1/plans/metrics")
+
+    assert response.status_code == 200
+    [entry] = response.json()["agent_latency"]
+    assert entry == {"agent": "research", "avg_ms": 900.0, "count": 1}

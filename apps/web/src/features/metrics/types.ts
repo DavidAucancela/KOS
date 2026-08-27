@@ -9,6 +9,7 @@ export type PeriodSummary = components["schemas"]["PeriodSummary"];
 export type LatencyBucket = components["schemas"]["LatencyBucket"];
 export type DegradationBreakdown = components["schemas"]["DegradationBreakdown"];
 export type AgentDistribution = components["schemas"]["AgentDistribution"];
+export type AgentLatency = components["schemas"]["AgentLatency"];
 export type Insight = components["schemas"]["Insight"];
 
 export type SinceRange = 24 | 168 | 720; // 24h / 7d / 30d, en horas

@@ -58,7 +58,7 @@ query arbitraria.
 | `DELETE` | `/v1/memory/{id}` | Olvidar (archivado, no borrado físico) | 3 |
 | `GET` | `/v1/plans/{id}` | Traza completa de un plan ejecutado | 4 |
 | `GET` | `/v1/plans` | Lista paginada de planes recientes (sin `steps`/`post`) | 4 |
-| `GET` | `/v1/plans/metrics` | Métricas agregadas del Planner en el tiempo (latencia, degradación, distribución de agentes, tokens, insights) | 4 |
+| `GET` | `/v1/plans/metrics` | Métricas agregadas del Planner en el tiempo (latencia por plan y por agente, degradación, distribución de agentes, tokens, insights) | 4 |
 | `GET` | `/v1/conversations` | Historial de conversaciones (más recientes primero) | 4 |
 | `GET` | `/v1/conversations/{id}` | Detalle + mensajes de una conversación | 4 |
 | `DELETE` | `/v1/conversations/{id}` | Archivar una conversación (no borra) | 4 |
@@ -218,6 +218,18 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > LLM ni al Planner — los "insights" que devuelve son reglas deterministas sobre agregados SQL
 > (comparación contra el período anterior), no texto generado; no aplica ni viola la regla 3 de
 > CLAUDE.md porque ningún LLM participa.
+>
+> **Latencia por agente en `/v1/plans/metrics` (2026-08-27, `docs/deuda-tecnica.md` "Monitoreo")**:
+> `agent_distribution` agregaba pasos por agente (conteo), pero no si un agente en particular
+> (típicamente `research`/`memory`, que hacen I/O real) es sistemáticamente el cuello de botella —
+> había que abrir planes uno por uno en Trazas para saberlo. `agent_latency` agrega el promedio de
+> `cost.ms` por agente sobre la misma ventana, vía `jsonb_array_elements(steps)` (mismo criterio que
+> `agent_distribution`); `count` ahí es la cantidad de pasos con `cost.ms` presente, no el total de
+> pasos del agente — un paso degradado (`executor.py`, ver doc 03 §3 regla de degradación) no
+> siempre trae `cost`. Sin insight nuevo asociado: los umbrales existentes (`_LATENCY_WARNING_DELTA_PCT`,
+> etc.) ya son valores iniciales sin calibrar contra uso real (doc `deuda-tecnica.md` "Calidad /
+> ajuste fino") — inventar otro umbral sobre latencia por agente sin datos reales sería la misma
+> deuda de nuevo, no una que se cierra.
 
 ## 5. Qué congela este documento
 

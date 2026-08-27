@@ -402,6 +402,22 @@ export interface components {
             /** Count */
             count: number;
         };
+        /**
+         * AgentLatency
+         * @description Promedio de `cost.ms` por agente sobre los pasos con costo registrado
+         *     (doc 06 §2 addendum: `agent_distribution` ya contaba pasos por agente,
+         *     pero no si `research`/`memory` es sistemáticamente el cuello de botella —
+         *     `count` acá es la cantidad de pasos con `cost.ms` presente, no el total de
+         *     pasos de ese agente).
+         */
+        AgentLatency: {
+            /** Agent */
+            agent: string;
+            /** Avg Ms */
+            avg_ms: number;
+            /** Count */
+            count: number;
+        };
         /** ChunkOut */
         ChunkOut: {
             /**
@@ -931,6 +947,8 @@ export interface components {
             degradation_by_reason: components["schemas"]["DegradationBreakdown"][];
             /** Agent Distribution */
             agent_distribution: components["schemas"]["AgentDistribution"][];
+            /** Agent Latency */
+            agent_latency: components["schemas"]["AgentLatency"][];
             /** Insights */
             insights: components["schemas"]["Insight"][];
         };
