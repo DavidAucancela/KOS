@@ -48,10 +48,25 @@ async def test_busqueda_lexica_vectorial_e_hibrida() -> None:
         assert hybrid, "la búsqueda híbrida no devolvió resultados"
         assert all(hit.source == "hybrid" for hit in hybrid)
         title = await title_search(engine, "contenedores", limit=5)
+
+        # `hybrid_search` trae candidatos de cada señal con `limit*2` antes de
+        # fusionar con RRF (search.py, `hybrid_search`) — un chunk que rankea
+        # 6º-10º en léxica/vector/título individual (fuera de los top-5 de
+        # arriba) puede legítimamente ganar un lugar en el híbrido top-5. La
+        # cobertura real que importa es "todo lo que sale de RRF vino de
+        # alguna de las tres señales", no "vino del top-5 de cada una por
+        # separado" — por eso el universo de comparación usa el mismo
+        # `limit*2` que `hybrid_search` usa de verdad.
+        fetch_limit = 5 * 2
+        lexical_wide, vector_wide, title_wide = (
+            await lexical_search(engine, "contenedores", limit=fetch_limit),
+            await vector_search(engine, query_embedding, limit=fetch_limit),
+            await title_search(engine, "contenedores", limit=fetch_limit),
+        )
         seen = (
-            {hit.chunk_id for hit in lexical}
-            | {hit.chunk_id for hit in vector}
-            | {hit.chunk_id for hit in title}
+            {hit.chunk_id for hit in lexical_wide}
+            | {hit.chunk_id for hit in vector_wide}
+            | {hit.chunk_id for hit in title_wide}
         )
         assert {hit.chunk_id for hit in hybrid} <= seen
     finally:
