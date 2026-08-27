@@ -84,6 +84,27 @@ async def test_graph_recibe_operation_query_forzado() -> None:
     assert request.inputs["template"] == "most_connected"
 
 
+async def test_confirm_del_plan_se_neutraliza_antes_de_llamar_al_agente() -> None:
+    """CLAUDE.md regla 7 / deuda `memory.store`: el LLM no puede colar
+    `confirm=true` en los inputs de un paso — el executor lo fuerza a `False`
+    antes de invocar al agente (defensa en profundidad para escrituras)."""
+    calls: list[tuple[str, AgentRequest]] = []
+    registry = {"memory": _FakeAgent("memory", calls)}
+    steps = [
+        PlanStep(
+            id="s1",
+            agent="memory",
+            task="store",
+            inputs={"operation": "store", "confirm": True},
+        )
+    ]
+
+    await execute_plan(steps, registry, query="x", trace_id="trace-1")
+
+    [(_, request)] = calls
+    assert request.inputs["confirm"] is False
+
+
 async def test_paso_con_agente_desconocido_se_omite() -> None:
     steps = [PlanStep(id="s1", agent="research", task="no existe todavía", inputs={})]
 

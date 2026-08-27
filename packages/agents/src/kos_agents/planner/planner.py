@@ -111,6 +111,14 @@ def _validate_steps(raw: Any, *, query: str) -> list[PlanStep] | None:
             return None
         if step.agent not in _ALLOWED_AGENTS:
             return None
+        # El LLM no elige `confirm` (CLAUDE.md regla 7, ítem `memory.store` de
+        # `docs/deuda-tecnica.md`): se descarta del paso para que el `Plan`
+        # persistido (`GET /v1/plans/{id}`) nunca muestre un `confirm: true`
+        # engañoso. El executor lo vuelve a neutralizar en tiempo de ejecución.
+        if "confirm" in step.inputs:
+            step = step.model_copy(
+                update={"inputs": {k: v for k, v in step.inputs.items() if k != "confirm"}}
+            )
         steps.append(step)
 
     ids = {step.id for step in steps}
