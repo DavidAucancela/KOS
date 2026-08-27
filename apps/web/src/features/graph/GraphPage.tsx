@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Route } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,11 +22,43 @@ export function GraphPage() {
   const [typeFilter, setTypeFilter] = useState<NodeType | "">("");
   const [nameDraft, setNameDraft] = useState("");
   const [typeDraft, setTypeDraft] = useState<NodeType | "">("");
+  // Modo "resaltar camino" (doc 13 §5.2): el usuario elige dos nodos y se pide
+  // `GET /v1/graph/path`. Mientras está activo, clickear un nodo no abre su
+  // vecindario — fija un extremo.
+  const [pathMode, setPathMode] = useState(false);
+  const [pathFrom, setPathFrom] = useState<string | null>(null);
 
   useEffect(() => {
     void graph.search(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const highlightNodeIds = useMemo(
+    () => (graph.path ? new Set(graph.path.nodeIds) : undefined),
+    [graph.path],
+  );
+  const highlightRelationIds = useMemo(
+    () => (graph.path ? new Set(graph.path.relationIds) : undefined),
+    [graph.path],
+  );
+
+  const exitPathMode = () => {
+    setPathMode(false);
+    setPathFrom(null);
+  };
+
+  const handleNodeSelect = (nodeId: string) => {
+    if (!pathMode) {
+      void graph.selectNode(nodeId);
+      return;
+    }
+    if (pathFrom === null) {
+      setPathFrom(nodeId);
+      return;
+    }
+    if (nodeId !== pathFrom) void graph.findPath(pathFrom, nodeId);
+    exitPathMode();
+  };
 
   useEffect(() => {
     if (graph.selected) {
@@ -61,6 +94,17 @@ export function GraphPage() {
           Ordenado por cantidad de relaciones (para priorizar qué revisar).
         </span>
         <div className="ml-auto flex gap-1">
+          {viewMode === "graph" && (
+            <Button
+              size="sm"
+              variant={pathMode ? "default" : "outline"}
+              onClick={() => (pathMode ? exitPathMode() : setPathMode(true))}
+              className="gap-1"
+            >
+              <Route className="size-3.5" aria-hidden />
+              {pathMode ? "Cancelar" : "Resaltar camino"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant={viewMode === "graph" ? "default" : "outline"}
@@ -77,6 +121,29 @@ export function GraphPage() {
           </Button>
         </div>
       </section>
+
+      {viewMode === "graph" && (pathMode || graph.path || graph.pathError) && (
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          {pathMode
+            ? pathFrom === null
+              ? "Elegí el nodo de origen."
+              : "Elegí el nodo de destino."
+            : graph.pathLoading
+              ? "Buscando camino…"
+              : graph.pathError
+                ? graph.pathError
+                : `Camino resaltado: ${graph.path?.nodeIds.length ?? 0} nodos.`}
+          {!pathMode && (graph.path || graph.pathError) && (
+            <button
+              type="button"
+              onClick={graph.clearPath}
+              className="text-primary hover:underline"
+            >
+              Limpiar
+            </button>
+          )}
+        </p>
+      )}
 
       {viewMode === "graph" && (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -110,7 +177,10 @@ export function GraphPage() {
                 nodes={graph.nodes}
                 relations={graph.relations}
                 selectedId={graph.selected?.node.id ?? null}
-                onSelect={(nodeId) => void graph.selectNode(nodeId)}
+                onSelect={handleNodeSelect}
+                highlightNodeIds={highlightNodeIds}
+                highlightRelationIds={highlightRelationIds}
+                endpointIds={pathFrom ? [pathFrom] : undefined}
               />
             ) : (
               <table className="w-full text-sm">
