@@ -131,6 +131,7 @@ memory_items_table = Table(
         UUID(as_uuid=True),
         ForeignKey("memory_items.memory_id", ondelete="SET NULL"),
     ),
+    Column("locked", Boolean, nullable=False, server_default=text("false")),
 )
 
 recommendations_table = Table(
@@ -482,6 +483,7 @@ _MEMORY_COLUMNS = [
     memory_items_table.c.last_accessed_at,
     memory_items_table.c.archived_at,
     memory_items_table.c.superseded_by,
+    memory_items_table.c.locked,
 ]
 
 
@@ -545,14 +547,53 @@ async def archive_memory(engine: AsyncEngine, memory_id: uuid_lib.UUID) -> bool:
         return result.rowcount > 0
 
 
+async def correct_memory(
+    engine: AsyncEngine,
+    memory_id: uuid_lib.UUID,
+    *,
+    content: str | None = None,
+    type: str | None = None,
+    confidence: float | None = None,
+) -> dict[str, Any] | None:
+    """Corrección manual de memoria (doc 04 §5, análogo a `correct_node` en el
+    grafo): fija los campos provistos y marca la fila `locked=true`. Si no se
+    pasa `confidence`, se asienta en 1.0 — una aserción del usuario vale como
+    evidencia plena, mismo criterio que `correct_node` (`confidence=1.0`).
+
+    `None` si la memoria no existe o ya está archivada. Devuelve la fila
+    actualizada (columnas de auditoría)."""
+    values: dict[str, Any] = {"locked": True}
+    if content is not None:
+        values["content"] = content
+    if type is not None:
+        values["type"] = type
+    values["confidence"] = 1.0 if confidence is None else confidence
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            memory_items_table.update()
+            .where(
+                memory_items_table.c.memory_id == memory_id,
+                memory_items_table.c.archived_at.is_(None),
+            )
+            .values(**values)
+            .returning(*_MEMORY_COLUMNS)
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
 async def list_unconsolidated_episodic(engine: AsyncEngine) -> list[dict[str, Any]]:
     """Memorias episódicas activas con embedding, candidatas de `kos.memory_consolidate`
-    (doc 04 §3 paso 2): ni archivadas ni ya fusionadas en una semántica anterior."""
+    (doc 04 §3 paso 2): ni archivadas ni ya fusionadas en una semántica anterior.
+
+    Excluye las `locked`: una episódica que el usuario corrigió a mano no se
+    pliega en silencio dentro de una semántica ni se marca `superseded_by`."""
     query = select(memory_items_table).where(
         memory_items_table.c.type == "episodic",
         memory_items_table.c.archived_at.is_(None),
         memory_items_table.c.superseded_by.is_(None),
         memory_items_table.c.embedding.is_not(None),
+        memory_items_table.c.locked.is_(False),
     )
     async with engine.connect() as conn:
         return [dict(row) for row in (await conn.execute(query)).mappings().all()]
@@ -563,13 +604,20 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
     saca `doc_id` de `sources[]` de las memorias activas que lo mencionan y
     recalcula `confidence` con lo que sobrevive — misma fórmula que el grafo,
     `min(1.0, max(confidence base restante) + ALIAS_BOOST x (n_restantes - 1))`.
-    Memoria no tiene `locked` (no hay corrección manual de memoria todavía, doc
-    04 §2): siempre se recalcula. Sin ninguna fuente restante, se archiva en vez
-    de recalcular (doc 04 §3: nada se borra sin pasar por archivado)."""
+    Sin ninguna fuente restante, se archiva en vez de recalcular (doc 04 §3:
+    nada se borra sin pasar por archivado).
+
+    Una memoria `locked` (corrección manual, análogo a `locked` en el grafo,
+    doc 02 §4 regla 5): pierde la fuente igual, pero conserva su `confidence` y
+    NO se archiva aunque quede sin ninguna — el valor lo fijó el usuario."""
     async with engine.begin() as conn:
         rows = (
             await conn.execute(
-                select(memory_items_table.c.memory_id, memory_items_table.c.sources).where(
+                select(
+                    memory_items_table.c.memory_id,
+                    memory_items_table.c.sources,
+                    memory_items_table.c.locked,
+                ).where(
                     memory_items_table.c.archived_at.is_(None),
                     memory_items_table.c.sources.contains([{"doc_id": doc_id}]),
                 )
@@ -577,8 +625,17 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
         ).all()
         archived = 0
         recalculated = 0
-        for memory_id, sources in rows:
+        locked_kept = 0
+        for memory_id, sources, locked in rows:
             remaining = [s for s in sources if s["doc_id"] != doc_id]
+            if locked:
+                await conn.execute(
+                    memory_items_table.update()
+                    .where(memory_items_table.c.memory_id == memory_id)
+                    .values(sources=remaining)
+                )
+                locked_kept += 1
+                continue
             if not remaining:
                 await conn.execute(
                     memory_items_table.update()
@@ -597,7 +654,7 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
                 .values(sources=remaining, confidence=new_confidence)
             )
             recalculated += 1
-    return {"recalculated": recalculated, "archived": archived}
+    return {"recalculated": recalculated, "archived": archived, "locked_kept": locked_kept}
 
 
 async def mark_superseded(

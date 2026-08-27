@@ -230,7 +230,7 @@ async def test_retire_memory_sources_recalcula_confidence_y_archiva_sin_fuentes(
         )
 
         result = await postgres_storage.retire_memory_sources(engine, "doc-b")
-        assert result == {"recalculated": 1, "archived": 1}
+        assert result == {"recalculated": 1, "archived": 1, "locked_kept": 0}
 
         survivor = await postgres_storage.get_memory(engine, survivor_id)
         assert survivor is not None
@@ -245,7 +245,128 @@ async def test_retire_memory_sources_recalcula_confidence_y_archiva_sin_fuentes(
 
         # No queda ninguna fuente "doc-b" restante: un segundo retiro es un no-op.
         again = await postgres_storage.retire_memory_sources(engine, "doc-b")
-        assert again == {"recalculated": 0, "archived": 0}
+        assert again == {"recalculated": 0, "archived": 0, "locked_kept": 0}
     finally:
         await _cleanup(engine, [survivor_id, orphan_id])
+        await engine.dispose()
+
+
+async def test_correct_memory_fija_campos_y_marca_locked() -> None:
+    engine = create_engine(get_settings())
+    memory_id, missing_id, archived_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    try:
+        await postgres_storage.insert_memory(
+            engine,
+            memory_id=memory_id,
+            type="episodic",
+            content="texto original con un error",
+            embedding=None,
+            entities=[],
+            sources=[{"doc_id": "doc-a", "confidence": 0.6}],
+            confidence=0.6,
+            salience=0.5,
+        )
+
+        updated = await postgres_storage.correct_memory(
+            engine, memory_id, content="texto corregido", type="semantic", confidence=None
+        )
+        assert updated is not None
+        assert updated["content"] == "texto corregido"
+        assert updated["type"] == "semantic"
+        assert updated["confidence"] == 1.0  # sin confidence explícita → aserción plena
+        assert updated["locked"] is True
+
+        # inexistente → None
+        assert (
+            await postgres_storage.correct_memory(
+                engine, missing_id, content="x", type=None, confidence=None
+            )
+            is None
+        )
+
+        # ya archivada → None
+        await postgres_storage.insert_memory(
+            engine,
+            memory_id=archived_id,
+            type="episodic",
+            content="vieja",
+            embedding=None,
+            entities=[],
+            sources=[],
+            confidence=0.4,
+            salience=0.3,
+        )
+        await postgres_storage.archive_memory(engine, archived_id)
+        assert (
+            await postgres_storage.correct_memory(
+                engine, archived_id, content="x", type=None, confidence=None
+            )
+            is None
+        )
+    finally:
+        await _cleanup(engine, [memory_id, missing_id, archived_id])
+        await engine.dispose()
+
+
+async def test_retire_memory_sources_respeta_locked() -> None:
+    """Una memoria `locked` pierde la fuente pero conserva `confidence` y NO se
+    archiva aunque quede sin ninguna (análogo a `locked` en el grafo)."""
+    engine = create_engine(get_settings())
+    locked_id = uuid.uuid4()
+    try:
+        await postgres_storage.insert_memory(
+            engine,
+            memory_id=locked_id,
+            type="semantic",
+            content="corregida a mano, única fuente es doc-b",
+            embedding=None,
+            entities=[],
+            sources=[{"doc_id": "doc-b", "confidence": 0.5}],
+            confidence=0.95,
+            salience=0.5,
+        )
+        await postgres_storage.correct_memory(
+            engine, locked_id, content=None, type=None, confidence=0.95
+        )
+
+        result = await postgres_storage.retire_memory_sources(engine, "doc-b")
+        assert result["locked_kept"] == 1
+        assert result["archived"] == 0
+
+        fetched = await postgres_storage.get_memory(engine, locked_id)
+        assert fetched is not None
+        assert fetched["sources"] == []
+        assert fetched["archived_at"] is None
+        assert fetched["confidence"] == pytest.approx(0.95)
+    finally:
+        await _cleanup(engine, [locked_id])
+        await engine.dispose()
+
+
+async def test_list_unconsolidated_episodic_excluye_locked() -> None:
+    engine = create_engine(get_settings())
+    plain_id, locked_id = uuid.uuid4(), uuid.uuid4()
+    try:
+        for mid, content in [(plain_id, "episódica normal"), (locked_id, "episódica corregida")]:
+            await postgres_storage.insert_memory(
+                engine,
+                memory_id=mid,
+                type="episodic",
+                content=content,
+                embedding=[0.2] * 1024,
+                entities=[],
+                sources=[{"doc_id": "doc-a", "confidence": 0.7}],
+                confidence=0.7,
+                salience=0.5,
+            )
+        await postgres_storage.correct_memory(
+            engine, locked_id, content=None, type=None, confidence=None
+        )
+
+        rows = await postgres_storage.list_unconsolidated_episodic(engine)
+        ids = {row["memory_id"] for row in rows}
+        assert plain_id in ids
+        assert locked_id not in ids
+    finally:
+        await _cleanup(engine, [plain_id, locked_id])
         await engine.dispose()

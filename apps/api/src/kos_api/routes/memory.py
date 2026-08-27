@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.deps import postgres_engine
@@ -29,6 +29,7 @@ class MemoryOut(BaseModel):
     last_accessed_at: datetime
     archived_at: datetime | None
     superseded_by: uuid.UUID | None
+    locked: bool
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -40,6 +41,12 @@ class MemoryOut(BaseModel):
 class MemoryPage(BaseModel):
     items: list[MemoryOut]
     next_cursor: str | None
+
+
+class PatchMemoryRequest(BaseModel):
+    content: str | None = None
+    type: MemoryType | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 @router.get("", response_model=MemoryPage)
@@ -59,6 +66,23 @@ async def list_memories(
     return MemoryPage(
         items=[MemoryOut.model_validate(item) for item in items], next_cursor=next_cursor
     )
+
+
+@router.patch("/{memory_id}", response_model=MemoryOut)
+async def correct_memory(
+    memory_id: uuid.UUID,
+    body: PatchMemoryRequest,
+    engine: AsyncEngine = Depends(postgres_engine),
+) -> MemoryOut:
+    """Corrección manual (doc 04 §5, análogo a `PATCH /v1/graph/nodes/{id}`):
+    fija los campos provistos y marca la memoria `locked` — deja de recalcularse
+    su `confidence` y de entrar a la consolidación."""
+    updated = await memory_service.correct_memory(
+        engine, memory_id, content=body.content, type=body.type, confidence=body.confidence
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Memoria no encontrada o ya archivada")
+    return MemoryOut.model_validate(updated)
 
 
 @router.delete("/{memory_id}", status_code=204)
