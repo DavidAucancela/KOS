@@ -64,6 +64,8 @@ query arbitraria.
 | `DELETE` | `/v1/conversations/{id}` | Archivar una conversación (no borra) | 4 |
 | `GET` | `/v1/recommendations` | Lagunas, contradicciones, sugerencias | 5 |
 | `PATCH` | `/v1/recommendations/{id}` | Aceptar/descartar una recomendación (doc 11 §8) | 5 |
+| `GET` | `/v1/memory/proposals?status=` | Propuestas de `memory.store` elegidas por el Planner, pendientes de aprobación humana | 4 |
+| `PATCH` | `/v1/memory/proposals/{id}` | Aprobar (escribe la memoria de verdad) o rechazar una propuesta | 4 |
 
 ### Convenciones HTTP
 
@@ -218,6 +220,21 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > LLM ni al Planner — los "insights" que devuelve son reglas deterministas sobre agregados SQL
 > (comparación contra el período anterior), no texto generado; no aplica ni viola la regla 3 de
 > CLAUDE.md porque ningún LLM participa.
+>
+> **Propuestas de memoria del Planner (2026-08-26, mitigación del riesgo de seguridad documentado
+> en `docs/deuda-tecnica.md`)**: el catálogo del Planner suma `agent="memory"` con
+> `operation="store"` — el LLM puede proponer guardar un hecho de la conversación como memoria
+> episódica. `executor.py` fuerza `confirm=false` en ese paso de forma incondicional, sin importar
+> qué traiga `step.inputs` (defensa en profundidad, regla CLAUDE.md 7: el Planner nunca decide
+> `confirm=true` por su cuenta). La tool MCP `memory.store` (único punto de entrada de escritura,
+> `kos_mcp/tools/memory.py`) ya rechazaba intentos sin `confirm=true`; ahora además persiste el
+> intento como `MemoryProposal` (`memory_proposals`, estado `pending`) en vez de perderlo.
+> `GET/PATCH /v1/memory/proposals` expone la cola de revisión humana (mismo patrón que
+> accept/dismiss de `Recommendation`, Sprint 25): aprobar reusa `memory.store` con `confirm=true`
+> real —la aprobación humana— guardando el `memory_id` resultante en la propuesta; rechazar solo
+> cierra el registro. `apps/api` nunca llama a la lógica de escritura de memoria
+> (`learn_from_query_answer`) directo — pasa siempre por la misma tool MCP, tanto para el intento
+> del LLM como para la aprobación humana.
 
 ## 5. Qué congela este documento
 
