@@ -391,6 +391,45 @@ export interface paths {
         patch: operations["update_recommendation_v1_recommendations__recommendation_id__patch"];
         trace?: never;
     };
+    "/v1/memory/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Proposals */
+        get: operations["list_proposals_v1_memory_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Proposal
+         * @description Aprobar escribe la memoria de verdad (vía `memory.store` con
+         *     `confirm=True`, `memory_proposal_service.resolve_proposal`); rechazar solo
+         *     cierra la propuesta.
+         */
+        patch: operations["update_proposal_v1_memory_proposals__proposal_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -823,6 +862,51 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** MemoryProposal */
+        MemoryProposal: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /** Query */
+            query: string;
+            /** Answer */
+            answer: string;
+            /** Sources */
+            sources?: string[];
+            /**
+             * Confidence
+             * @default 0
+             */
+            confidence: number;
+            /**
+             * Status
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected";
+            /** Rejected Reason */
+            rejected_reason?: string | null;
+            /** Memory Id */
+            memory_id?: string | null;
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+        };
+        /** MemoryProposalPage */
+        MemoryProposalPage: {
+            /** Items */
+            items: components["schemas"]["MemoryProposal"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** MessageOut */
         MessageOut: {
             /**
@@ -876,6 +960,16 @@ export interface components {
         NoteOut: {
             /** Path */
             path: string;
+        };
+        /** PatchMemoryProposalRequest */
+        PatchMemoryProposalRequest: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected";
+            /** Reason */
+            reason?: string | null;
         };
         /** PatchNodeRequest */
         PatchNodeRequest: {
@@ -2079,6 +2173,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Recommendation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_proposals_v1_memory_proposals_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected") | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryProposalPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_proposal_v1_memory_proposals__proposal_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchMemoryProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryProposal"];
                 };
             };
             /** @description Validation Error */

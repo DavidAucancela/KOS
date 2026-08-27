@@ -14,6 +14,7 @@ from kos_api.routes import (
     graph,
     health,
     memory,
+    memory_proposals,
     metrics,
     notes,
     plans,
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(plans.router)
     app.include_router(conversations.router)
     app.include_router(recommendations.router)
+    app.include_router(memory_proposals.router)
     return app
 
 

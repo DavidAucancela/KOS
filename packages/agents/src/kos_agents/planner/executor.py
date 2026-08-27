@@ -37,6 +37,12 @@ def _step_inputs(
         return {**step.inputs, "query": query}
     if step.agent == "graph":
         return {**step.inputs, "operation": "query"}
+    if step.agent == "memory" and step.inputs.get("operation") == "store":
+        # Defensa en profundidad (docs/deuda-tecnica.md): el Planner (LLM)
+        # nunca decide `confirm` — sin importar qué venga en `step.inputs`,
+        # un `store` elegido dinámicamente siempre llega sin confirmar y
+        # queda como `MemoryProposal` pendiente (`kos_mcp/tools/memory.py`).
+        return {**step.inputs, "confirm": False}
     if step.agent == "writing":
         evidence: list[Any] = []
         confidences: list[float] = []
