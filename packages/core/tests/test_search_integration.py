@@ -44,14 +44,27 @@ async def test_busqueda_lexica_vectorial_e_hibrida() -> None:
         assert vector, "la búsqueda vectorial no devolvió resultados"
         assert all(hit.score > 0 for hit in vector)
 
-        hybrid = await hybrid_search(engine, "contenedores", query_embedding, limit=5)
+        hybrid_limit = 5
+        hybrid = await hybrid_search(
+            engine, "contenedores", query_embedding, limit=hybrid_limit
+        )
         assert hybrid, "la búsqueda híbrida no devolvió resultados"
         assert all(hit.source == "hybrid" for hit in hybrid)
-        title = await title_search(engine, "contenedores", limit=5)
+
+        # `hybrid_search` fusiona `limit*2` candidatos por rama antes de recortar
+        # al top `limit`: un chunk puede entrar al resultado fusionado sin estar
+        # en el top-`limit` de ninguna rama sola. La cota real es la unión de las
+        # ramas traídas con el MISMO límite interno que usa la híbrida.
+        branch_limit = hybrid_limit * 2
+        lexical_wide, vector_wide, title_wide = (
+            await lexical_search(engine, "contenedores", limit=branch_limit),
+            await vector_search(engine, query_embedding, limit=branch_limit),
+            await title_search(engine, "contenedores", limit=branch_limit),
+        )
         seen = (
-            {hit.chunk_id for hit in lexical}
-            | {hit.chunk_id for hit in vector}
-            | {hit.chunk_id for hit in title}
+            {hit.chunk_id for hit in lexical_wide}
+            | {hit.chunk_id for hit in vector_wide}
+            | {hit.chunk_id for hit in title_wide}
         )
         assert {hit.chunk_id for hit in hybrid} <= seen
     finally:
