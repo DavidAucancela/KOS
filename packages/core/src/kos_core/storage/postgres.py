@@ -168,6 +168,28 @@ node_embeddings_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
 
+memory_proposals_table = Table(
+    "memory_proposals",
+    metadata,
+    Column("proposal_id", UUID(as_uuid=True), primary_key=True),
+    Column("query", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    Column("sources", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("confidence", Float, nullable=False, server_default=text("0.0")),
+    Column("status", Text, nullable=False, server_default=text("'pending'"), index=True),
+    Column("rejected_reason", Text),
+    Column("memory_id", UUID(as_uuid=True)),
+    Column("trace_id", Text, nullable=False),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    ),
+    Column("resolved_at", DateTime(timezone=True)),
+)
+
 plans_table = Table(
     "plans",
     metadata,
@@ -912,6 +934,134 @@ async def list_recommendations(
         rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
     next_cursor = rows[-1]["recommendation_id"] if len(rows) == limit else None
     return rows, next_cursor
+
+
+_MEMORY_PROPOSAL_COLUMNS = [
+    memory_proposals_table.c.proposal_id,
+    memory_proposals_table.c.query,
+    memory_proposals_table.c.answer,
+    memory_proposals_table.c.sources,
+    memory_proposals_table.c.confidence,
+    memory_proposals_table.c.status,
+    memory_proposals_table.c.rejected_reason,
+    memory_proposals_table.c.memory_id,
+    memory_proposals_table.c.trace_id,
+    memory_proposals_table.c.created_at,
+    memory_proposals_table.c.resolved_at,
+]
+
+
+async def insert_memory_proposal(
+    engine: AsyncEngine,
+    *,
+    proposal_id: uuid_lib.UUID,
+    query: str,
+    answer: str,
+    sources: list[str],
+    confidence: float,
+    trace_id: str,
+) -> None:
+    """`memory.store` (MCP, `kos_mcp/tools/memory.py`) llama a esto cuando el
+    intento llega sin `confirm=true` — en vez de perder el intento, queda acá
+    para revisión humana (mitigación del riesgo documentado en
+    `docs/deuda-tecnica.md`: el Planner nunca debe poder auto-aprobar una
+    escritura de memoria)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            memory_proposals_table.insert().values(
+                proposal_id=proposal_id,
+                query=query,
+                answer=answer,
+                sources=sources,
+                confidence=confidence,
+                status="pending",
+                trace_id=trace_id,
+            )
+        )
+
+
+async def list_memory_proposals(
+    engine: AsyncEngine,
+    *,
+    status: str | None = None,
+    cursor: uuid_lib.UUID | None = None,
+    limit: int = 20,
+) -> tuple[list[dict[str, Any]], uuid_lib.UUID | None]:
+    """`GET /v1/memory/proposals?status=` — mismo patrón de cursor que
+    `list_recommendations`."""
+    query = (
+        select(*_MEMORY_PROPOSAL_COLUMNS)
+        .order_by(memory_proposals_table.c.proposal_id)
+        .limit(limit)
+    )
+    if status is not None:
+        query = query.where(memory_proposals_table.c.status == status)
+    if cursor is not None:
+        query = query.where(memory_proposals_table.c.proposal_id > cursor)
+    async with engine.connect() as conn:
+        rows = [dict(row) for row in (await conn.execute(query)).mappings().all()]
+    next_cursor = rows[-1]["proposal_id"] if len(rows) == limit else None
+    return rows, next_cursor
+
+
+async def update_memory_proposal_status(
+    engine: AsyncEngine,
+    proposal_id: uuid_lib.UUID,
+    *,
+    status: str,
+    rejected_reason: str | None = None,
+    memory_id: uuid_lib.UUID | None = None,
+) -> dict[str, Any] | None:
+    """`PATCH /v1/memory/proposals/{id}`: aprobar (`memory_id` ya escrito de
+    verdad, ver `memory_proposal_service.resolve_proposal`) o rechazar. Solo
+    actúa sobre propuestas todavía `pending` — idempotente contra doble-click,
+    mismo criterio que `update_recommendation_status`."""
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            memory_proposals_table.update()
+            .where(
+                memory_proposals_table.c.proposal_id == proposal_id,
+                memory_proposals_table.c.status == "pending",
+            )
+            .values(
+                status=status,
+                rejected_reason=rejected_reason,
+                memory_id=memory_id,
+                resolved_at=func.now(),
+            )
+        )
+        if result.rowcount == 0:
+            return None
+        row = (
+            (
+                await conn.execute(
+                    select(*_MEMORY_PROPOSAL_COLUMNS).where(
+                        memory_proposals_table.c.proposal_id == proposal_id
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
+
+
+async def get_memory_proposal(
+    engine: AsyncEngine, proposal_id: uuid_lib.UUID
+) -> dict[str, Any] | None:
+    async with engine.connect() as conn:
+        row = (
+            (
+                await conn.execute(
+                    select(*_MEMORY_PROPOSAL_COLUMNS).where(
+                        memory_proposals_table.c.proposal_id == proposal_id
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
 
 
 async def insert_plan(engine: AsyncEngine, plan: Plan) -> None:

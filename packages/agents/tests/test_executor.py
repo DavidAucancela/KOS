@@ -84,18 +84,18 @@ async def test_graph_recibe_operation_query_forzado() -> None:
     assert request.inputs["template"] == "most_connected"
 
 
-async def test_confirm_del_plan_se_neutraliza_antes_de_llamar_al_agente() -> None:
-    """CLAUDE.md regla 7 / deuda `memory.store`: el LLM no puede colar
-    `confirm=true` en los inputs de un paso — el executor lo fuerza a `False`
-    antes de invocar al agente (defensa en profundidad para escrituras)."""
+async def test_memory_store_fuerza_confirm_false_aunque_el_llm_lo_pida() -> None:
+    """Defensa en profundidad (docs/deuda-tecnica.md): el Planner nunca debe
+    poder auto-aprobar una escritura de memoria — ni siquiera si el JSON del
+    LLM trae `confirm: true`."""
     calls: list[tuple[str, AgentRequest]] = []
     registry = {"memory": _FakeAgent("memory", calls)}
     steps = [
         PlanStep(
             id="s1",
             agent="memory",
-            task="store",
-            inputs={"operation": "store", "confirm": True},
+            task="guardar memoria",
+            inputs={"operation": "store", "query": "x", "answer": "y", "confirm": True},
         )
     ]
 
@@ -103,6 +103,19 @@ async def test_confirm_del_plan_se_neutraliza_antes_de_llamar_al_agente() -> Non
 
     [(_, request)] = calls
     assert request.inputs["confirm"] is False
+
+
+async def test_memory_recall_no_se_ve_afectado_por_el_blindaje_de_store() -> None:
+    calls: list[tuple[str, AgentRequest]] = []
+    registry = {"memory": _FakeAgent("memory", calls)}
+    steps = [
+        PlanStep(id="s1", agent="memory", task="recordar", inputs={"operation": "recall", "q": "x"})
+    ]
+
+    await execute_plan(steps, registry, query="x", trace_id="trace-1")
+
+    [(_, request)] = calls
+    assert "confirm" not in request.inputs
 
 
 async def test_paso_con_agente_desconocido_se_omite() -> None:

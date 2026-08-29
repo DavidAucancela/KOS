@@ -43,10 +43,16 @@ async def test_recall_core_devuelve_pagina(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 async def test_store_core_sin_confirm_no_escribe(monkeypatch: pytest.MonkeyPatch) -> None:
+    proposals: list[dict[str, Any]] = []
+
     async def fail_insert(engine: Any, **kwargs: Any) -> None:
         raise AssertionError("no debe escribir sin confirm=True")
 
+    async def fake_insert_proposal(engine: Any, **kwargs: Any) -> None:
+        proposals.append(kwargs)
+
     monkeypatch.setattr(postgres_module, "insert_memory", fail_insert)
+    monkeypatch.setattr(postgres_module, "insert_memory_proposal", fake_insert_proposal)
 
     result = await memory_tools._store_core(
         None,
@@ -63,6 +69,10 @@ async def test_store_core_sin_confirm_no_escribe(monkeypatch: pytest.MonkeyPatch
     assert result.approved is False
     assert result.memory_id is None
     assert "confirm=true" in result.message
+    assert result.proposal_id is not None
+    [proposal] = proposals
+    assert proposal["query"] == "¿qué es KOS?"
+    assert proposal["proposal_id"] == result.proposal_id
 
 
 async def test_store_core_con_confirm_escribe(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -56,6 +56,13 @@ _CATALOG = (
     "contexto de conversaciones anteriores, no del contenido del vault en sí. "
     'inputs: {"operation": "recall", "q"?: str, "type"?: '
     '"episodic"|"semantic"|"procedural"|"temporal"|"preference", "limit"?: int}.\n'
+    'agent="memory" con operation="store": propone guardar un hecho relevante de '
+    "esta conversación como memoria episódica — úsalo solo cuando la respuesta "
+    "contenga algo que valga la pena recordar a futuro, no en cada consulta. "
+    "SIEMPRE queda pendiente de aprobación humana antes de escribirse de verdad: "
+    "no puedes aprobarlo vos mismo, así que nunca incluyas `confirm` en los inputs "
+    '(se ignora si lo hacés). inputs: {"operation": "store", "query": str, '
+    '"answer": str, "sources"?: [str], "confidence"?: float}.\n'
     'agent="writing": redacta la respuesta final citando la evidencia de los pasos '
     "de los que depende. Siempre debe existir exactamente un paso `writing` al final "
     "del plan, dependiendo de todos los pasos de evidencia que uses."

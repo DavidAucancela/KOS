@@ -1,5 +1,11 @@
 """Herramientas de memoria: `memory.recall` (lectura) y `memory.store`
-(escritura, requiere aprobación — doc 06 §4, Fase 3, `kos_mcp.permissions`)."""
+(escritura, requiere aprobación — doc 06 §4, Fase 3, `kos_mcp.permissions`).
+
+Un intento de `store` sin `confirm=true` (típicamente un paso `memory`/`store`
+elegido por el Planner, `executor.py` lo fuerza siempre a `confirm=False`) no
+se pierde: queda como `MemoryProposal` pendiente (`memory_proposals`) para
+revisión humana vía `GET/PATCH /v1/memory/proposals` — mitigación del riesgo
+documentado en `docs/deuda-tecnica.md`."""
 
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ class MemoryStoreResult(BaseModel):
     approved: bool
     memory_id: uuid.UUID | None
     message: str
+    proposal_id: uuid.UUID | None = None
 
 
 async def _recall_core(
@@ -63,7 +70,19 @@ async def _store_core(
             description=f"guardar memoria episódica para la consulta {query!r}",
         )
     except ApprovalRequired as exc:
-        return MemoryStoreResult(approved=False, memory_id=None, message=str(exc))
+        proposal_id = uuid.uuid4()
+        await postgres_storage.insert_memory_proposal(
+            engine,
+            proposal_id=proposal_id,
+            query=query,
+            answer=answer,
+            sources=sources,
+            confidence=confidence,
+            trace_id=trace_id,
+        )
+        return MemoryStoreResult(
+            approved=False, memory_id=None, message=str(exc), proposal_id=proposal_id
+        )
 
     async def resolve_entities(doc_ids: list[str]) -> list[str]:
         return await neo4j_storage.find_node_ids_by_sources(driver, doc_ids)
