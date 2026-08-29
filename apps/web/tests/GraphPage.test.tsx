@@ -153,6 +153,32 @@ describe("GraphPage", () => {
     expect(await screen.findByText("Sin relaciones activas.")).toBeInTheDocument();
   });
 
+  it("modo 'Resaltar camino': elegir dos nodos pide /v1/graph/path y resalta", async () => {
+    const nodes = [node(), node({ id: "node-2", canonical_name: "proyecto-kos" })];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith("/v1/graph/path")) {
+        return jsonResponse({ nodes, relations: [neighbor().relation] });
+      }
+      return jsonResponse({ template: "subgraph", nodes, relations: [neighbor().relation] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<GraphPage />);
+    await screen.findByText("docker");
+
+    fireEvent.click(screen.getByRole("button", { name: /Resaltar camino/ }));
+    expect(screen.getByText("Elegí el nodo de origen.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("docker"));
+    expect(screen.getByText("Elegí el nodo de destino.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("proyecto-kos"));
+
+    expect(await screen.findByText(/Camino resaltado: 2 nodos/)).toBeInTheDocument();
+    const pathCall = fetchMock.mock.calls.find((c) => String(c[0]).startsWith("/v1/graph/path"));
+    expect(pathCall?.[0]).toContain("from_id=node-1");
+    expect(pathCall?.[0]).toContain("to_id=node-2");
+  });
+
   it("muestra un error si la búsqueda falla", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: "boom" }, 500)));
 

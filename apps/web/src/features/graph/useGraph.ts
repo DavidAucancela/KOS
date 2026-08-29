@@ -2,11 +2,17 @@ import { useCallback, useState } from "react";
 
 import type {
   GraphNode,
+  GraphPathOut,
   GraphRelation,
   NodeType,
   NodeWithNeighborhood,
   RelationType,
 } from "./types";
+
+export interface GraphPath {
+  nodeIds: string[];
+  relationIds: string[];
+}
 
 async function errorMessage(response: Response): Promise<string> {
   try {
@@ -29,6 +35,12 @@ export interface UseGraphResult {
   selectedLoading: boolean;
   selectedError: string | null;
   selectNode: (nodeId: string) => Promise<void>;
+
+  path: GraphPath | null;
+  pathLoading: boolean;
+  pathError: string | null;
+  findPath: (fromId: string, toId: string) => Promise<void>;
+  clearPath: () => void;
 
   mutating: boolean;
   mutationError: string | null;
@@ -57,8 +69,41 @@ export function useGraph(): UseGraphResult {
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
 
+  const [path, setPath] = useState<GraphPath | null>(null);
+  const [pathLoading, setPathLoading] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
+
   const [mutating, setMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const clearPath = useCallback(() => {
+    setPath(null);
+    setPathError(null);
+  }, []);
+
+  const findPath = useCallback(async (fromId: string, toId: string) => {
+    setPathLoading(true);
+    setPathError(null);
+    try {
+      const params = new URLSearchParams({ from_id: fromId, to_id: toId });
+      const response = await fetch(`/v1/graph/path?${params.toString()}`);
+      if (!response.ok) {
+        setPath(null);
+        setPathError(await errorMessage(response));
+        return;
+      }
+      const body = (await response.json()) as GraphPathOut;
+      setPath({
+        nodeIds: body.nodes.map((n) => n.id),
+        relationIds: body.relations.map((r) => r.id),
+      });
+    } catch (cause) {
+      setPath(null);
+      setPathError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPathLoading(false);
+    }
+  }, []);
 
   const search = useCallback(async (nodeType: NodeType | null) => {
     setNodesLoading(true);
@@ -191,6 +236,11 @@ export function useGraph(): UseGraphResult {
     selectedLoading,
     selectedError,
     selectNode,
+    path,
+    pathLoading,
+    pathError,
+    findPath,
+    clearPath,
     mutating,
     mutationError,
     correctNode,

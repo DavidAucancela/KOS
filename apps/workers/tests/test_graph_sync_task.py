@@ -248,7 +248,11 @@ async def test_sync_graph_extrae_resuelve_y_conecta(monkeypatch: pytest.MonkeyPa
     ) -> tuple[str, list[tuple[uuid.UUID, str]]]:
         return "Proyecto KOS", [(chunk_id, "Proyecto KOS usa FastAPI.")]
 
+    async def fake_get_document(engine: object, value: uuid.UUID) -> None:
+        return None  # sin metadata → sin aristas estructurales (se prueban aparte)
+
     monkeypatch.setattr(graph_sync_module, "_load_document_chunks", fake_load)
+    monkeypatch.setattr(graph_sync_module, "get_document", fake_get_document)
     monkeypatch.setattr(neo4j_module, "fetch_node_by_canonical_name", _no_exact_match)
     monkeypatch.setattr(graph_sync_module, "similar_nodes", _no_similar)
     monkeypatch.setattr(graph_sync_module, "upsert_node_embedding", _RecordingUpsertEmbedding())
@@ -526,3 +530,109 @@ def test_graph_sync_task_no_encadena_cross_documento_sin_chunks(
     result = graph_sync_module.graph_sync(str(uuid.uuid4()))
 
     assert result["synced"] is True
+
+
+# --- doc 12 §10: aristas estructurales y de co-ocurrencia ---
+
+
+def test_note_key_normaliza_source_id_sin_extension() -> None:
+    assert graph_sync_module._note_key("Carpeta/Mi Nota.md") == graph_sync_module._note_key(
+        "Carpeta/Mi Nota"
+    )
+    assert graph_sync_module._note_key("Docker.md") == "docker"
+
+
+async def test_sync_structural_edges_conecta_nota_wikilinks_y_frontmatter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc_id = uuid.uuid4()
+    other_doc_id = uuid.uuid4()
+
+    node_calls: list[dict[str, object]] = []
+    rel_calls: list[dict[str, object]] = []
+
+    async def fake_merge_node(driver: object, **kwargs: object) -> str:
+        node_calls.append(kwargs)
+        return f"n{len(node_calls)}"
+
+    async def fake_merge_relation(driver: object, **kwargs: object) -> None:
+        rel_calls.append(kwargs)
+
+    async def fake_resolve(engine: object, *, connector: str, targets: list[str]) -> dict:
+        assert connector == "obsidian"
+        return {
+            "Docker": {"doc_id": other_doc_id, "title": "Docker", "source_id": "infra/Docker.md"}
+        }
+
+    async def fake_siblings(engine: object, **kwargs: object) -> list[dict]:
+        return [
+            {
+                "doc_id": uuid.uuid4(),
+                "title": "Nota Hermana",
+                "source_id": "x/Nota Hermana.md",
+                "shared": 2,
+            }
+        ]
+
+    monkeypatch.setattr(neo4j_module, "merge_node", fake_merge_node)
+    monkeypatch.setattr(neo4j_module, "merge_relation", fake_merge_relation)
+    monkeypatch.setattr(graph_sync_module, "resolve_note_targets", fake_resolve)
+    monkeypatch.setattr(graph_sync_module, "docs_sharing_keywords", fake_siblings)
+
+    document = {
+        "connector": "obsidian",
+        "source_id": "notas/KOS.md",
+        "title": "KOS",
+        "links": ["Docker"],
+        "keywords": ["infra"],
+        "author": "David",
+        "source_metadata": {"frontmatter": {"project": "KOS Platform"}},
+    }
+
+    counts = await graph_sync_module._sync_structural_edges(
+        driver=None,
+        engine=None,
+        doc_id=str(doc_id),
+        document=document,
+        entity_node_ids=["ent-1", "ent-1", "ent-2"],
+    )
+
+    assert counts == {"wikilink": 1, "note_entity": 2, "shared_tag": 1, "frontmatter": 2}
+    rel_types = sorted(str(c["relation_type"]) for c in rel_calls)
+    assert rel_types == ["AUTHORED_BY", "MENTIONS", "MENTIONS", "MENTIONS", "PART_OF", "RELATED_TO"]
+    provenances = {c["extracted_by"] for c in rel_calls}
+    assert provenances == {
+        "obsidian.note-entity",
+        "obsidian.wikilink",
+        "obsidian.shared-tag",
+        "obsidian.frontmatter",
+    }
+
+
+async def test_sync_cooccurrence_relations_escribe_related_to_con_confianza_por_conteo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rel_calls: list[dict[str, object]] = []
+
+    async def fake_pairs(engine: object, **kwargs: object) -> list[dict]:
+        assert kwargs["touching_node_ids"] == ["a"]
+        return [
+            {"node_a": "a", "node_b": "b", "n_chunks": 3, "n_docs": 2},
+            {"node_a": "a", "node_b": "c", "n_chunks": 9, "n_docs": 4},
+        ]
+
+    async def fake_merge_relation(driver: object, **kwargs: object) -> None:
+        rel_calls.append(kwargs)
+
+    monkeypatch.setattr(graph_sync_module, "cooccurring_node_pairs", fake_pairs)
+    monkeypatch.setattr(neo4j_module, "merge_relation", fake_merge_relation)
+
+    written = await graph_sync_module.sync_cooccurrence_relations(
+        driver=None, engine=None, touching_node_ids=["a"]
+    )
+
+    assert written == 2
+    assert [c["relation_type"] for c in rel_calls] == ["RELATED_TO", "RELATED_TO"]
+    assert rel_calls[0]["confidence"] == 0.4  # 3 chunks → piso
+    assert rel_calls[1]["confidence"] == 0.7  # 9 chunks → 0.4 + 0.05*6
+    assert all(c["extracted_by"] == "cooccurrence" for c in rel_calls)

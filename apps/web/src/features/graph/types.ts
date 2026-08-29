@@ -9,6 +9,7 @@ export type GraphRelation = components["schemas"]["GraphRelation"];
 export type GraphNeighbor = components["schemas"]["GraphNeighbor"];
 export type NodeWithNeighborhood = components["schemas"]["NodeWithNeighborhood"];
 export type GraphQueryResponse = components["schemas"]["GraphQueryResponse"];
+export type GraphPathOut = components["schemas"]["GraphPathOut"];
 export type NodeType = GraphNode["node_type"];
 export type RelationType = GraphRelation["relation_type"];
 

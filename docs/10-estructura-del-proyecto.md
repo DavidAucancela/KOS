@@ -131,6 +131,9 @@ apps/web/
 
 **Regla:** una `feature/` no importa de otra `feature/`; lo compartido baja a `components/` o `lib/`.
 
+El diseño de la UI (principios, layout, colapso de paneles, pantallas nuevas) vive en
+[doc 13 — Interfaz de usuario](13-interfaz-de-usuario.md); acá solo el contrato de carpetas.
+
 ## 5. `packages/core` — El corazón compartido (Sprint 1)
 
 ```
