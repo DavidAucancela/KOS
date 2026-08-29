@@ -51,6 +51,18 @@ class AgentDistribution(BaseModel):
     count: int
 
 
+class AgentLatency(BaseModel):
+    """Promedio de `cost.ms` por agente sobre los pasos con costo registrado
+    (doc 06 §2 addendum: `agent_distribution` ya contaba pasos por agente,
+    pero no si `research`/`memory` es sistemáticamente el cuello de botella —
+    `count` acá es la cantidad de pasos con `cost.ms` presente, no el total de
+    pasos de ese agente)."""
+
+    agent: str
+    avg_ms: float
+    count: int
+
+
 class Insight(BaseModel):
     severity: InsightSeverity
     metric: InsightMetric
@@ -65,6 +77,7 @@ class PlanMetrics(BaseModel):
     latency: list[LatencyBucket]
     degradation_by_reason: list[DegradationBreakdown]
     agent_distribution: list[AgentDistribution]
+    agent_latency: list[AgentLatency]
     insights: list[Insight]
 
 

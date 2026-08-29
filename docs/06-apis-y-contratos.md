@@ -58,7 +58,7 @@ query arbitraria.
 | `DELETE` | `/v1/memory/{id}` | Olvidar (archivado, no borrado físico) | 3 |
 | `GET` | `/v1/plans/{id}` | Traza completa de un plan ejecutado | 4 |
 | `GET` | `/v1/plans` | Lista paginada de planes recientes (sin `steps`/`post`) | 4 |
-| `GET` | `/v1/plans/metrics` | Métricas agregadas del Planner en el tiempo (latencia, degradación, distribución de agentes, tokens, insights) | 4 |
+| `GET` | `/v1/plans/metrics` | Métricas agregadas del Planner en el tiempo (latencia por plan y por agente, degradación, distribución de agentes, tokens, insights) | 4 |
 | `GET` | `/v1/conversations` | Historial de conversaciones (más recientes primero) | 4 |
 | `GET` | `/v1/conversations/{id}` | Detalle + mensajes de una conversación | 4 |
 | `DELETE` | `/v1/conversations/{id}` | Archivar una conversación (no borra) | 4 |
@@ -194,9 +194,18 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > comando `/crear-nota` del chat sigue llamando la lógica promovida directo (su propia aprobación
 > ya la satisface el usuario tecleando el comando, como documenta la nota de Sprint 7 más arriba);
 > la tool MCP es la vía que un agente (`WritingAgent`, doc 03 §2: "crea/modifica notas") podrá usar
-> más adelante, pasando siempre por el gate de aprobación explícita. `obsidian.read_note`,
-> `obsidian.update_note`, `obsidian.create_folder` siguen sin implementar — sin caso de uso real
-> que los pida todavía, ver `docs/deuda-tecnica.md`.
+> más adelante, pasando siempre por el gate de aprobación explícita.
+>
+> **`read_note`/`update_note`/`create_folder` (2026-08-26, deuda cerrada)**: implementadas con el
+> mismo patrón que `create_note` (`kos_core.notes` + wrapper en
+> `packages/mcp-tools/.../obsidian.py` + gate real). Las tres entran a `WRITE_TOOLS` (exigen
+> `confirm=true`). `update_note` es overwrite total y **nunca crea** — la nota debe existir (crear
+> es `create_note`). `kos_core.notes._resolve_in_vault` rechaza rutas que escapan del vault
+> (`..`/symlink/ruta absoluta), mismo criterio de no confianza que el guard de SSRF de
+> `web.open`. El `WritingAgent` gana los métodos `read_note`/`update_note`/`create_folder`
+> (forzando `confirm=true` por código, patrón `LearningAgent`), pero las tools **no** están en el
+> catálogo del Planner de `/v1/query` — el LLM no elige `confirm` (regla 7 de CLAUDE.md, mismo
+> tratamiento que `memory.store`). Quedan listas para un flujo de aprobación explícito futuro.
 >
 > Además, `POST /v1/query` gana un paso `s0` (dentro del pipeline fijo, no un
 > planner nuevo — ver regla 3 de CLAUDE.md) que detecta con una heurística
@@ -235,6 +244,18 @@ Reglas: las herramientas de escritura requieren aprobación del usuario por defe
 > cierra el registro. `apps/api` nunca llama a la lógica de escritura de memoria
 > (`learn_from_query_answer`) directo — pasa siempre por la misma tool MCP, tanto para el intento
 > del LLM como para la aprobación humana.
+>
+> **Latencia por agente en `/v1/plans/metrics` (2026-08-27, `docs/deuda-tecnica.md` "Monitoreo")**:
+> `agent_distribution` agregaba pasos por agente (conteo), pero no si un agente en particular
+> (típicamente `research`/`memory`, que hacen I/O real) es sistemáticamente el cuello de botella —
+> había que abrir planes uno por uno en Trazas para saberlo. `agent_latency` agrega el promedio de
+> `cost.ms` por agente sobre la misma ventana, vía `jsonb_array_elements(steps)` (mismo criterio que
+> `agent_distribution`); `count` ahí es la cantidad de pasos con `cost.ms` presente, no el total de
+> pasos del agente — un paso degradado (`executor.py`, ver doc 03 §3 regla de degradación) no
+> siempre trae `cost`. Sin insight nuevo asociado: los umbrales existentes (`_LATENCY_WARNING_DELTA_PCT`,
+> etc.) ya son valores iniciales sin calibrar contra uso real (doc `deuda-tecnica.md` "Calidad /
+> ajuste fino") — inventar otro umbral sobre latencia por agente sin datos reales sería la misma
+> deuda de nuevo, no una que se cierra.
 
 ## 5. Qué congela este documento
 

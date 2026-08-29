@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { Archive, MessagesSquare, Plus, Search } from "lucide-react";
+import {
+  Archive,
+  MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,12 +88,16 @@ function ConversationRow({
 export function ConversationSidebar({
   conversations,
   activeId,
+  collapsed,
+  onToggle,
   onSelect,
   onNew,
   onArchive,
 }: {
   conversations: ConversationOut[];
   activeId: string | null;
+  collapsed: boolean;
+  onToggle: () => void;
   onSelect: (conversationId: string) => void;
   onNew: () => void;
   onArchive: (conversationId: string) => void;
@@ -101,13 +112,47 @@ export function ConversationSidebar({
 
   const groups = useMemo(() => groupConversations(filtered), [filtered]);
 
+  if (collapsed) {
+    return (
+      <aside className="flex w-8 shrink-0 flex-col items-center border-r border-border py-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          title="Mostrar conversaciones"
+          aria-label="Mostrar conversaciones"
+          aria-expanded={false}
+          className="text-muted-foreground hover:bg-muted flex size-6 items-center justify-center rounded-md"
+        >
+          <PanelLeftOpen className="size-4" aria-hidden />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-border lg:flex">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-border">
       <div className="flex flex-col gap-2 border-b border-border p-3">
-        <Button variant="outline" size="sm" className="justify-start gap-2" onClick={onNew}>
-          <Plus className="size-4" aria-hidden />
-          Nueva conversación
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 justify-start gap-2"
+            onClick={onNew}
+          >
+            <Plus className="size-4" aria-hidden />
+            Nueva conversación
+          </Button>
+          <button
+            type="button"
+            onClick={onToggle}
+            title="Ocultar conversaciones"
+            aria-label="Ocultar conversaciones"
+            aria-expanded={true}
+            className="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded-md p-1.5"
+          >
+            <PanelLeftClose className="size-4" aria-hidden />
+          </button>
+        </div>
         <div className="relative">
           <Search
             className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2"

@@ -38,6 +38,10 @@ class MemoryItem(BaseModel):
     last_accessed_at: datetime
     archived_at: datetime | None = None
     superseded_by: UUID | None = None
+    locked: bool = False
+    """Corrección manual (doc 04 §5): confidence fijada por el usuario, no se
+    recalcula al perder una fuente ni se consolida — análogo a `locked` en el
+    grafo (doc 02 §4 regla 5)."""
 
     @computed_field  # type: ignore[prop-decorator]
     @property

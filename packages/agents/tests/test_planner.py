@@ -55,6 +55,34 @@ def test_parse_plan_response_json_invalido_devuelve_none() -> None:
     assert parse_plan_response("no es json", query="x") is None
 
 
+def test_parse_plan_response_descarta_confirm_de_los_inputs() -> None:
+    """CLAUDE.md regla 7 / deuda `memory.store`: el LLM no elige `confirm` — se
+    quita del paso para que el plan persistido no muestre un `confirm: true`
+    engañoso."""
+    raw = json.dumps(
+        [
+            {
+                "id": "s1",
+                "agent": "memory",
+                "task": "store",
+                "inputs": {"operation": "store", "confirm": True},
+                "depends_on": [],
+            },
+            {
+                "id": "s2",
+                "agent": "writing",
+                "task": "redactar",
+                "inputs": {},
+                "depends_on": ["s1"],
+            },
+        ]
+    )
+    steps = parse_plan_response(raw, query="x")
+    assert steps is not None
+    assert "confirm" not in steps[0].inputs
+    assert steps[0].inputs["operation"] == "store"
+
+
 def test_parse_plan_response_requiere_exactamente_un_writing_con_dependencia() -> None:
     sin_writing = json.dumps(
         [{"id": "s1", "agent": "retrieval", "task": "buscar", "inputs": {}, "depends_on": []}]

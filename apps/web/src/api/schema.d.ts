@@ -262,7 +262,13 @@ export interface paths {
         delete: operations["archive_memory_v1_memory__memory_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Correct Memory
+         * @description Corrección manual (doc 04 §5, análogo a `PATCH /v1/graph/nodes/{id}`):
+         *     fija los campos provistos y marca la memoria `locked` — deja de recalcularse
+         *     su `confidence` y de entrar a la consolidación.
+         */
+        patch: operations["correct_memory_v1_memory__memory_id__patch"];
         trace?: never;
     };
     "/v1/plans": {
@@ -438,6 +444,22 @@ export interface components {
         AgentDistribution: {
             /** Agent */
             agent: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * AgentLatency
+         * @description Promedio de `cost.ms` por agente sobre los pasos con costo registrado
+         *     (doc 06 §2 addendum: `agent_distribution` ya contaba pasos por agente,
+         *     pero no si `research`/`memory` es sistemáticamente el cuello de botella —
+         *     `count` acá es la cantidad de pasos con `cost.ms` presente, no el total de
+         *     pasos de ese agente).
+         */
+        AgentLatency: {
+            /** Agent */
+            agent: string;
+            /** Avg Ms */
+            avg_ms: number;
             /** Count */
             count: number;
         };
@@ -849,6 +871,8 @@ export interface components {
             archived_at: string | null;
             /** Superseded By */
             superseded_by: string | null;
+            /** Locked */
+            locked: boolean;
             /**
              * Prune Candidate
              * @description Doc 04 §5: confidence bajo el umbral tras perder una fuente.
@@ -971,6 +995,15 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** PatchMemoryRequest */
+        PatchMemoryRequest: {
+            /** Content */
+            content?: string | null;
+            /** Type */
+            type?: ("episodic" | "semantic" | "procedural" | "temporal" | "preference") | null;
+            /** Confidence */
+            confidence?: number | null;
+        };
         /** PatchNodeRequest */
         PatchNodeRequest: {
             /** Canonical Name */
@@ -1025,6 +1058,8 @@ export interface components {
             degradation_by_reason: components["schemas"]["DegradationBreakdown"][];
             /** Agent Distribution */
             agent_distribution: components["schemas"]["AgentDistribution"][];
+            /** Agent Latency */
+            agent_latency: components["schemas"]["AgentLatency"][];
             /** Insights */
             insights: components["schemas"]["Insight"][];
         };
@@ -1917,6 +1952,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_memory_v1_memory__memory_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryOut"];
+                };
             };
             /** @description Validation Error */
             422: {

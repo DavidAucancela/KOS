@@ -15,7 +15,10 @@ function PageContainer({
     <main
       data-slot="page-container"
       className={cn(
-        "mx-auto flex min-h-screen w-full flex-col gap-6 px-6 py-10",
+        // `h-full` + `overflow-y-auto`: la zona de contenido de App.tsx es de
+        // alto fijo (`h-screen`) y `overflow-hidden`; sin esto las pantallas
+        // largas (Memoria, Métricas) se recortan sin barra de scroll.
+        "mx-auto flex h-full min-h-0 w-full flex-col gap-6 overflow-y-auto px-6 py-10",
         wide ? "max-w-5xl" : "max-w-3xl",
         className,
       )}

@@ -41,6 +41,7 @@ from kos_core.schemas.documents import ParsedDocument
 from kos_core.schemas.plan import Plan
 from kos_core.schemas.plan_metrics import (
     AgentDistribution,
+    AgentLatency,
     DegradationBreakdown,
     LatencyBucket,
     PeriodSummary,
@@ -130,6 +131,7 @@ memory_items_table = Table(
         UUID(as_uuid=True),
         ForeignKey("memory_items.memory_id", ondelete="SET NULL"),
     ),
+    Column("locked", Boolean, nullable=False, server_default=text("false")),
 )
 
 recommendations_table = Table(
@@ -503,6 +505,7 @@ _MEMORY_COLUMNS = [
     memory_items_table.c.last_accessed_at,
     memory_items_table.c.archived_at,
     memory_items_table.c.superseded_by,
+    memory_items_table.c.locked,
 ]
 
 
@@ -566,14 +569,53 @@ async def archive_memory(engine: AsyncEngine, memory_id: uuid_lib.UUID) -> bool:
         return result.rowcount > 0
 
 
+async def correct_memory(
+    engine: AsyncEngine,
+    memory_id: uuid_lib.UUID,
+    *,
+    content: str | None = None,
+    type: str | None = None,
+    confidence: float | None = None,
+) -> dict[str, Any] | None:
+    """Corrección manual de memoria (doc 04 §5, análogo a `correct_node` en el
+    grafo): fija los campos provistos y marca la fila `locked=true`. Si no se
+    pasa `confidence`, se asienta en 1.0 — una aserción del usuario vale como
+    evidencia plena, mismo criterio que `correct_node` (`confidence=1.0`).
+
+    `None` si la memoria no existe o ya está archivada. Devuelve la fila
+    actualizada (columnas de auditoría)."""
+    values: dict[str, Any] = {"locked": True}
+    if content is not None:
+        values["content"] = content
+    if type is not None:
+        values["type"] = type
+    values["confidence"] = 1.0 if confidence is None else confidence
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            memory_items_table.update()
+            .where(
+                memory_items_table.c.memory_id == memory_id,
+                memory_items_table.c.archived_at.is_(None),
+            )
+            .values(**values)
+            .returning(*_MEMORY_COLUMNS)
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
 async def list_unconsolidated_episodic(engine: AsyncEngine) -> list[dict[str, Any]]:
     """Memorias episódicas activas con embedding, candidatas de `kos.memory_consolidate`
-    (doc 04 §3 paso 2): ni archivadas ni ya fusionadas en una semántica anterior."""
+    (doc 04 §3 paso 2): ni archivadas ni ya fusionadas en una semántica anterior.
+
+    Excluye las `locked`: una episódica que el usuario corrigió a mano no se
+    pliega en silencio dentro de una semántica ni se marca `superseded_by`."""
     query = select(memory_items_table).where(
         memory_items_table.c.type == "episodic",
         memory_items_table.c.archived_at.is_(None),
         memory_items_table.c.superseded_by.is_(None),
         memory_items_table.c.embedding.is_not(None),
+        memory_items_table.c.locked.is_(False),
     )
     async with engine.connect() as conn:
         return [dict(row) for row in (await conn.execute(query)).mappings().all()]
@@ -584,13 +626,20 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
     saca `doc_id` de `sources[]` de las memorias activas que lo mencionan y
     recalcula `confidence` con lo que sobrevive — misma fórmula que el grafo,
     `min(1.0, max(confidence base restante) + ALIAS_BOOST x (n_restantes - 1))`.
-    Memoria no tiene `locked` (no hay corrección manual de memoria todavía, doc
-    04 §2): siempre se recalcula. Sin ninguna fuente restante, se archiva en vez
-    de recalcular (doc 04 §3: nada se borra sin pasar por archivado)."""
+    Sin ninguna fuente restante, se archiva en vez de recalcular (doc 04 §3:
+    nada se borra sin pasar por archivado).
+
+    Una memoria `locked` (corrección manual, análogo a `locked` en el grafo,
+    doc 02 §4 regla 5): pierde la fuente igual, pero conserva su `confidence` y
+    NO se archiva aunque quede sin ninguna — el valor lo fijó el usuario."""
     async with engine.begin() as conn:
         rows = (
             await conn.execute(
-                select(memory_items_table.c.memory_id, memory_items_table.c.sources).where(
+                select(
+                    memory_items_table.c.memory_id,
+                    memory_items_table.c.sources,
+                    memory_items_table.c.locked,
+                ).where(
                     memory_items_table.c.archived_at.is_(None),
                     memory_items_table.c.sources.contains([{"doc_id": doc_id}]),
                 )
@@ -598,8 +647,17 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
         ).all()
         archived = 0
         recalculated = 0
-        for memory_id, sources in rows:
+        locked_kept = 0
+        for memory_id, sources, locked in rows:
             remaining = [s for s in sources if s["doc_id"] != doc_id]
+            if locked:
+                await conn.execute(
+                    memory_items_table.update()
+                    .where(memory_items_table.c.memory_id == memory_id)
+                    .values(sources=remaining)
+                )
+                locked_kept += 1
+                continue
             if not remaining:
                 await conn.execute(
                     memory_items_table.update()
@@ -618,7 +676,7 @@ async def retire_memory_sources(engine: AsyncEngine, doc_id: str) -> dict[str, i
                 .values(sources=remaining, confidence=new_confidence)
             )
             recalculated += 1
-    return {"recalculated": recalculated, "archived": archived}
+    return {"recalculated": recalculated, "archived": archived, "locked_kept": locked_kept}
 
 
 async def mark_superseded(
@@ -1135,6 +1193,28 @@ async def _plan_window_agents(conn: Any, *, start: datetime, end: datetime) -> l
     return [dict(row) for row in rows if row["agent"]]
 
 
+async def _plan_window_agent_latency(
+    conn: Any, *, start: datetime, end: datetime
+) -> list[dict[str, Any]]:
+    """Promedio de `cost.ms` por agente (mismo criterio de deuda que
+    `_plan_window_agents`: `count` acá cuenta pasos con `cost.ms` presente, no
+    el total de pasos del agente — un paso degradado no siempre trae `cost`)."""
+    query = text(
+        """
+        SELECT step->>'agent' AS agent,
+               avg((step->'cost'->>'ms')::float) AS avg_ms,
+               count(*) AS count
+        FROM plans, jsonb_array_elements(steps) AS step
+        WHERE created_at >= :start AND created_at < :end
+          AND step->'cost'->>'ms' IS NOT NULL
+        GROUP BY agent
+        ORDER BY avg_ms DESC
+        """
+    )
+    rows = (await conn.execute(query, {"start": start, "end": end})).mappings().all()
+    return [dict(row) for row in rows if row["agent"]]
+
+
 async def _plan_window_latency(
     conn: Any, *, start: datetime, end: datetime, bucket: Literal["hour", "day"]
 ) -> list[dict[str, Any]]:
@@ -1167,6 +1247,7 @@ async def plan_metrics(
         latency_rows = await _plan_window_latency(conn, start=since, end=now, bucket=bucket)
         degradation_rows = await _plan_window_degradation(conn, start=since, end=now)
         agent_rows = await _plan_window_agents(conn, start=since, end=now)
+        agent_latency_rows = await _plan_window_agent_latency(conn, start=since, end=now)
 
         previous_raw = await _plan_window_summary(conn, start=previous_since, end=since)
         previous_tokens = await _plan_window_tokens(conn, start=previous_since, end=since)
@@ -1209,6 +1290,10 @@ async def plan_metrics(
             for row in degradation_rows
         ],
         "agent_distribution": agent_distribution,
+        "agent_latency": [
+            AgentLatency(agent=row["agent"], avg_ms=float(row["avg_ms"]), count=row["count"])
+            for row in agent_latency_rows
+        ],
         "insights": insights,
     }
 
@@ -1347,3 +1432,141 @@ async def archive_conversation(engine: AsyncEngine, conversation_id: uuid_lib.UU
             .values(archived_at=func.now())
         )
         return result.rowcount > 0
+
+
+# --- doc 12 §10: aristas estructurales y por co-ocurrencia (determinístico, sin LLM) ---
+
+
+async def resolve_note_targets(
+    engine: AsyncEngine, *, connector: str, targets: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Resuelve destinos de `[[wikilinks]]` (doc 12 §10.4.2) a documentos reales
+    del mismo conector. Un `[[Docker]]` apunta a la nota cuyo `title` (stem del
+    archivo) es "Docker"; un `[[Carpeta/Nota]]` a la del `source_id`
+    "Carpeta/Nota.md". Devuelve solo los destinos que resolvieron a UN documento
+    — un título ambiguo (varias notas con el mismo nombre) se trata como link
+    colgante (métrica doc 12 §10.7), no se adivina."""
+    if not targets:
+        return {}
+    uniq = list(dict.fromkeys(t.strip() for t in targets if t and t.strip()))
+    source_id_guesses = [*uniq, *(f"{t}.md" for t in uniq)]
+    query = select(
+        documents_table.c.doc_id,
+        documents_table.c.title,
+        documents_table.c.source_id,
+    ).where(
+        documents_table.c.connector == connector,
+        documents_table.c.deleted_at.is_(None),
+        (documents_table.c.title.in_(uniq)) | (documents_table.c.source_id.in_(source_id_guesses)),
+    )
+    async with engine.connect() as conn:
+        rows = [dict(r) for r in (await conn.execute(query)).mappings().all()]
+
+    by_target: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        keys = {row["title"], row["source_id"]}
+        if row["source_id"].endswith(".md"):
+            keys.add(row["source_id"][:-3])
+        for target in uniq:
+            if target in keys:
+                by_target.setdefault(target, []).append(row)
+    return {target: matches[0] for target, matches in by_target.items() if len(matches) == 1}
+
+
+_DOCS_SHARING_KEYWORDS_SQL = text(
+    """
+    SELECT doc_id, title, source_id,
+           (SELECT count(*) FROM jsonb_array_elements_text(keywords) k
+            WHERE k.value = ANY(:keywords)) AS shared
+    FROM documents
+    WHERE connector = :connector
+      AND deleted_at IS NULL
+      AND doc_id <> :doc_id
+      AND keywords ?| :keywords
+    ORDER BY shared DESC, doc_id
+    LIMIT :limit
+    """
+)
+
+
+async def docs_sharing_keywords(
+    engine: AsyncEngine,
+    *,
+    connector: str,
+    doc_id: uuid_lib.UUID,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Otros documentos del conector que comparten al menos un tag con este
+    (doc 12 §10.4.4). `limit` acota el fan-out para no generar un componente
+    completo por cada tag masivo."""
+    clean = list(dict.fromkeys(k for k in keywords if k))
+    if not clean:
+        return []
+    params = {
+        "connector": connector,
+        "doc_id": doc_id,
+        "keywords": clean,
+        "limit": limit,
+    }
+    async with engine.connect() as conn:
+        rows = (await conn.execute(_DOCS_SHARING_KEYWORDS_SQL, params)).mappings().all()
+    return [dict(row) for row in rows]
+
+
+_COOCCURRENCE_SQL = """
+WITH exploded AS (
+    SELECT c.doc_id, c.chunk_id, e.value AS node_id
+    FROM chunks c
+    CROSS JOIN LATERAL jsonb_array_elements_text(c.entity_node_ids) AS e(value)
+    {chunk_filter}
+),
+pairs AS (
+    SELECT a.chunk_id, a.doc_id,
+           LEAST(a.node_id, b.node_id) AS node_a,
+           GREATEST(a.node_id, b.node_id) AS node_b
+    FROM exploded a
+    JOIN exploded b ON a.chunk_id = b.chunk_id AND a.node_id < b.node_id
+)
+SELECT node_a, node_b,
+       count(*) AS n_chunks,
+       count(DISTINCT doc_id) AS n_docs
+FROM pairs
+{pair_filter}
+GROUP BY node_a, node_b
+HAVING count(*) >= :min_chunks AND count(DISTINCT doc_id) >= :min_docs
+ORDER BY n_chunks DESC
+LIMIT :limit
+"""
+
+
+async def cooccurring_node_pairs(
+    engine: AsyncEngine,
+    *,
+    min_chunks: int,
+    min_docs: int,
+    limit: int,
+    touching_node_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Pares de nodos que aparecen juntos en el mismo chunk (doc 12 §10.5),
+    agregados sobre `chunks.entity_node_ids`. Filtra a pares vistos en
+    `>= min_chunks` chunks de `>= min_docs` documentos distintos — el piso de
+    documentos evita elevar a relación lo que es una lista dentro de una sola
+    nota. `touching_node_ids` restringe el cálculo a pares que incluyen alguno
+    de esos nodos (pasada incremental tras un `graph_sync`); sin él, es la
+    pasada completa del backfill."""
+    params: dict[str, Any] = {
+        "min_chunks": min_chunks,
+        "min_docs": min_docs,
+        "limit": limit,
+    }
+    chunk_filter = ""
+    pair_filter = ""
+    if touching_node_ids:
+        params["touching"] = list(dict.fromkeys(touching_node_ids))
+        chunk_filter = "WHERE c.entity_node_ids ?| :touching"
+        pair_filter = "WHERE node_a = ANY(:touching) OR node_b = ANY(:touching)"
+    sql = text(_COOCCURRENCE_SQL.format(chunk_filter=chunk_filter, pair_filter=pair_filter))
+    async with engine.connect() as conn:
+        rows = (await conn.execute(sql, params)).mappings().all()
+    return [dict(row) for row in rows]

@@ -114,6 +114,7 @@ async def merge_node(
     confidence: float,
     sources: list[str],
     source_confidences: list[float] | None = None,
+    extracted_by: str = "parser@v1",
 ) -> str:
     """Crea o actualiza el nodo por `canonical_name` (clave de dedupe, doc 02 §4).
 
@@ -159,7 +160,7 @@ async def merge_node(
         query = (
             f"MERGE (n:{node_type} {{canonical_name: $canonical_name}}) "
             "ON CREATE SET n.id = $id, n.created_at = datetime(), n.version = 1, "
-            "n.locked = false, n.extracted_by = 'parser@v1' "
+            "n.locked = false, n.extracted_by = $extracted_by "
             "ON MATCH SET n.version = n.version + 1 "
             "SET n.name = $name, n.aliases = $aliases, n.confidence = $confidence, "
             "n.sources = $sources, n.updated_at = datetime() "
@@ -177,6 +178,7 @@ async def merge_node(
             "aliases": aliases,
             "confidence": confidence,
             "sources": sources,
+            "extracted_by": extracted_by,
         }
         if source_confidences is not None:
             params["source_confidences"] = source_confidences

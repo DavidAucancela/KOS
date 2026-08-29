@@ -34,6 +34,17 @@ class NoteAlreadyExistsError(Exception):
     """Ya existe una nota en la ruta destino; nunca se sobreescribe."""
 
 
+class NoteNotFoundError(Exception):
+    """La nota a leer o actualizar no existe en la ruta pedida."""
+
+
+class VaultPathEscapeError(Exception):
+    """La ruta pedida resuelve fuera del vault (path traversal, symlink, ruta
+    absoluta). La entrada de `read_note`/`update_note`/`create_folder` puede
+    venir de un plan del LLM — mismo criterio de no confianza que el guard de
+    SSRF de `web.open` (ver `docs/deuda-tecnica.md`)."""
+
+
 class TemplateInfo(BaseModel):
     """Una plantilla real existente en `_Templates/` (Sprint 8)."""
 
@@ -80,6 +91,41 @@ async def list_templates(engine: AsyncEngine) -> list[TemplateInfo]:
         )
         for row in rows
     ]
+
+
+def _resolve_in_vault(vault_path: Path, relative: str) -> Path:
+    """Resuelve `relative` dentro de `vault_path`, rechazando cualquier ruta que
+    escape del vault (`..`, symlink, ruta absoluta)."""
+    vault_resolved = vault_path.resolve()
+    candidate = (vault_resolved / relative).resolve()
+    if candidate != vault_resolved and not candidate.is_relative_to(vault_resolved):
+        raise VaultPathEscapeError(f"Ruta fuera del vault: {relative!r}")
+    return candidate
+
+
+def read_note(vault_path: Path, *, path: str) -> str:
+    """Devuelve el contenido crudo de `path` (relativa al vault)."""
+    target = _resolve_in_vault(vault_path, path)
+    if not target.is_file():
+        raise NoteNotFoundError(f"Nota no encontrada: {path}")
+    return target.read_text(encoding="utf-8")
+
+
+def update_note(vault_path: Path, *, path: str, content: str) -> Path:
+    """Sobreescribe el contenido de `path` (relativa al vault). La nota debe
+    existir — crear es trabajo de `create_note`."""
+    target = _resolve_in_vault(vault_path, path)
+    if not target.is_file():
+        raise NoteNotFoundError(f"Nota no encontrada: {path}")
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def create_folder(vault_path: Path, *, path: str) -> Path:
+    """Crea `path` (relativa al vault) y sus padres. Idempotente."""
+    target = _resolve_in_vault(vault_path, path)
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def create_note(vault_path: Path, *, template_name: str, folder: str, title: str) -> Path:

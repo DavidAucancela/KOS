@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { collapsedByDefault, setUiPref } from "@/lib/uiPrefs";
 import { CitationViewer, type CitationTarget } from "./CitationViewer";
 import { ConversationSidebar } from "./ConversationSidebar";
 import type { Evidence } from "./types";
@@ -240,6 +241,19 @@ export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void 
   const { items: conversations, refresh: refreshConversations, archive } = useConversations();
   const [draft, setDraft] = useState("");
   const [citation, setCitation] = useState<CitationTarget | null>(null);
+  // Colapso del sidebar de conversaciones (doc 13 §3): default responsivo
+  // (colapsado bajo `lg`), la elección explícita del usuario gana y persiste.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    collapsedByDefault("chatSidebarCollapsed"),
+  );
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      setUiPref("chatSidebarCollapsed", next);
+      return next;
+    });
+  };
 
   const openCitation = (evidence: Evidence) => {
     // Sin doc_id no hay nada que abrir (evidencia mínima real, doc 06 §2).
@@ -263,6 +277,8 @@ export function ChatPage({ onViewPlan }: { onViewPlan: (planId: string) => void 
       <ConversationSidebar
         conversations={conversations}
         activeId={conversationId}
+        collapsed={sidebarCollapsed}
+        onToggle={toggleSidebar}
         onSelect={(id) => void loadConversation(id)}
         onNew={newConversation}
         onArchive={(id) => {

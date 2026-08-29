@@ -22,6 +22,7 @@ pasaban en el contrato pero nunca se exigían) ahora se deriva de
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -29,8 +30,10 @@ from kos_agents.base import Agent
 from kos_core.schemas.agents import AgentRequest, AgentResponse, Constraints
 from kos_core.schemas.plan import PlanStep
 
+logger = logging.getLogger("kos_agents.planner.executor")
 
-def _step_inputs(
+
+def _raw_step_inputs(
     step: PlanStep, responses: dict[str, AgentResponse], *, query: str
 ) -> dict[str, Any]:
     if step.agent == "retrieval":
@@ -58,6 +61,27 @@ def _step_inputs(
             "confidence": max(confidences) if confidences else 0.0,
         }
     return dict(step.inputs)
+
+
+def _step_inputs(
+    step: PlanStep, responses: dict[str, AgentResponse], *, query: str
+) -> dict[str, Any]:
+    inputs = _raw_step_inputs(step, responses, query=query)
+    # CLAUDE.md regla 7 / docs/deuda-tecnica.md (ítem `memory.store`): el LLM
+    # nunca decide `confirm=true`. Cualquier `confirm` que venga en los inputs
+    # de un paso del plan se neutraliza acá — una escritura real solo ocurre
+    # cuando un agente fuerza `confirm=true` en su propio código
+    # (`LearningAgent`/`RecommenderAgent`), nunca por un campo elegible por el
+    # LLM. El executor es el chokepoint: todo plan (dinámico o fallback fijo)
+    # pasa por esta función antes de llamar a cualquier agente.
+    if inputs.get("confirm"):
+        logger.warning(
+            "plan_step_confirm_ignorado",
+            extra={"step_id": step.id, "agent": step.agent},
+        )
+    if "confirm" in inputs:
+        inputs = {**inputs, "confirm": False}
+    return inputs
 
 
 async def execute_plan(

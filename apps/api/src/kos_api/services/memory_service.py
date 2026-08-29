@@ -46,3 +46,17 @@ async def list_memories(
 
 async def archive_memory(engine: AsyncEngine, memory_id: uuid.UUID) -> bool:
     return await postgres_storage.archive_memory(engine, memory_id)
+
+
+async def correct_memory(
+    engine: AsyncEngine,
+    memory_id: uuid.UUID,
+    *,
+    content: str | None,
+    type: str | None,
+    confidence: float | None,
+) -> dict[str, Any] | None:
+    """Corrección manual (doc 04 §5): fija campos y marca `locked`."""
+    return await postgres_storage.correct_memory(
+        engine, memory_id, content=content, type=type, confidence=confidence
+    )

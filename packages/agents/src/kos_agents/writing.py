@@ -1,10 +1,10 @@
 """WritingAgent (doc 03 §2): redacta la respuesta final con citas a partir de la
 evidencia ya fusionada por pasos previos del plan (retrieval/graph/memory).
 
-A diferencia de Retrieval/Graph/Memory, no llama ninguna herramienta MCP — la
-síntesis con el LLM es el paso final del plan, no una capacidad de storage
-(doc 03 §2 lo lista como agente propio, no como wrapper de una tool). Envuelve
-la lógica que hasta Sprint 17 vivía inline en
+`__call__` (la síntesis con el LLM) no llama ninguna herramienta MCP — es el
+paso final del plan, no una capacidad de storage (doc 03 §2 lo lista como
+agente propio, no como wrapper de una tool). Envuelve la lógica que hasta
+Sprint 17 vivía inline en
 `apps/api/.../query_service.py::answer_query` (`_build_context`, `_SYSTEM_PROMPT`,
 `llm.generate(...)`), Sprint 18 la promueve a agente real para que el Planner
 pueda tratarla como cualquier otro paso del plan (mismo contrato
@@ -14,13 +14,24 @@ pueda tratarla como cualquier otro paso del plan (mismo contrato
 cierre v0.5, 2026-08-16): antes la llamada real a Ollama usaba el timeout fijo
 del cliente (120s) sin importar el presupuesto declarado del plan — la
 síntesis, siendo el paso más lento típico, era el caso más visible de esa
-desconexión."""
+desconexión.
+
+Capacidad de escritura sobre el vault (doc 03 §2: "crea/modifica notas", deuda
+cerrada 2026-08-26): los métodos `read_note`/`update_note`/`create_folder`
+envuelven las tools MCP `obsidian.*` forzando `confirm=True` por código — mismo
+patrón que `LearningAgent`/`RecommenderAgent` (el sistema completa una acción ya
+aprobada fuera de banda, no un LLM eligiendo escribir). La frontera de seguridad
+(CLAUDE.md regla 7: el Planner-LLM de `/v1/query` nunca elige `confirm=true`) es
+que estos métodos NO se alcanzan desde `__call__` ni desde el `_CATALOG` del
+Planner — quedan listos para un flujo explícito futuro, igual que `MemoryAgent`
+se construyó standalone en Sprint 17 antes de conectarse."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
+from kos_agents.base import ToolCaller
 from kos_core.llm.base import LLMClient
 from kos_core.schemas.agents import AgentRequest, AgentResponse, Cost, EvidenceRef
 
@@ -70,8 +81,48 @@ def _build_context(evidence: list[EvidenceRef]) -> str:
 
 
 class WritingAgent:
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, tool_caller: ToolCaller | None = None) -> None:
         self._llm = llm
+        self._tool_caller = tool_caller
+
+    def _require_tool_caller(self) -> ToolCaller:
+        if self._tool_caller is None:
+            raise RuntimeError("WritingAgent sin tool_caller: no puede operar sobre el vault")
+        return self._tool_caller
+
+    async def read_note(self, path: str, *, source_name: str | None = None, trace_id: str) -> str:
+        result = await self._require_tool_caller().call_tool(
+            "obsidian.read_note",
+            {"path": path, "source_name": source_name, "confirm": True, "trace_id": trace_id},
+        )
+        content = result.get("content")
+        if content is None:
+            raise RuntimeError(result.get("message") or f"no se pudo leer {path!r}")
+        return str(content)
+
+    async def update_note(
+        self, path: str, content: str, *, source_name: str | None = None, trace_id: str
+    ) -> bool:
+        result = await self._require_tool_caller().call_tool(
+            "obsidian.update_note",
+            {
+                "path": path,
+                "content": content,
+                "source_name": source_name,
+                "confirm": True,
+                "trace_id": trace_id,
+            },
+        )
+        return bool(result.get("approved") and result.get("path"))
+
+    async def create_folder(
+        self, path: str, *, source_name: str | None = None, trace_id: str
+    ) -> bool:
+        result = await self._require_tool_caller().call_tool(
+            "obsidian.create_folder",
+            {"path": path, "source_name": source_name, "confirm": True, "trace_id": trace_id},
+        )
+        return bool(result.get("approved") and result.get("path"))
 
     async def __call__(self, request: AgentRequest) -> AgentResponse:
         started = time.perf_counter()

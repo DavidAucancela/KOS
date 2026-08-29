@@ -117,6 +117,7 @@ Reglas:
 - Cada agente consume herramientas **solo** vía MCP ([ADR-0005](adr/0005-mcp-como-protocolo-de-herramientas.md)); los agentes no importan clientes de BD directamente — usan las herramientas registradas (`graph.query`, `vector.search`, `memory.recall`, `obsidian.write_note`…).
 - El catálogo de herramientas es dinámico: registrar un nuevo servidor MCP amplía las capacidades del planner sin redesplegar.
 - Permisos por herramienta: las de escritura (`*.write_*`, `*.create_*`) requieren confirmación del usuario hasta que este las marque como autónomas.
+- El LLM nunca decide `confirm=true` (CLAUDE.md regla 7): `executor.py` neutraliza cualquier `confirm` que venga en los `inputs` de un paso del plan antes de llamar al agente, y `planner.py` lo descarta ya en el parseo. Una escritura real solo ocurre cuando un agente fuerza `confirm=true` en su propio código (`LearningAgent`/`RecommenderAgent`, o los métodos de vault de `WritingAgent`) — el sistema completando un paso ya decidido, nunca un campo elegible por el LLM (ver `docs/deuda-tecnica.md`, ítem `memory.store`).
 
 ## 5. Ciclo de ejecución
 

@@ -34,8 +34,12 @@ from kos_core.schemas import EntityCandidate, ParsedDocument, RelationCandidate
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage.postgres import (
     chunks_table,
+    cooccurring_node_pairs,
     create_engine,
+    docs_sharing_keywords,
     documents_table,
+    get_document,
+    resolve_note_targets,
     set_chunk_entity_node_ids,
     similar_nodes,
     upsert_node_embedding,
@@ -46,6 +50,26 @@ from kos_workers.pipeline.s7_entities import parse_entities_response as parse_en
 from kos_workers.pipeline.s8_relations import RELATIONS_SYSTEM, build_relations_prompt
 from kos_workers.pipeline.s8_relations import parse_relations_response as parse_relations
 from kos_workers.pipeline.s9_confidence import ALIAS_BOOST, apply_confidence_rules
+from kos_workers.pipeline.structural import (
+    BY_NOTE_ENTITY,
+    BY_SHARED_TAG,
+    BY_WIKILINK,
+    NOTE_ENTITY_CONFIDENCE,
+    SHARED_TAG_CONFIDENCE,
+    WIKILINK_CONFIDENCE,
+    frontmatter_edges,
+)
+
+# doc 12 §10.4.4: tope de notas hermanas por tag compartido, para no generar un
+# componente completo por cada tag masivo (mismo criterio que MAX_CHUNKS_PER_RUN
+# en cross_doc_relations.py).
+MAX_SHARED_TAG_SIBLINGS = 10
+
+# doc 12 §10.5: umbrales de la pasada incremental de co-ocurrencia disparada por
+# cada graph_sync. K=3 chunks, en ≥2 documentos distintos.
+COOCCURRENCE_MIN_CHUNKS = 3
+COOCCURRENCE_MIN_DOCS = 2
+COOCCURRENCE_MAX_PAIRS = 200
 
 # Banda amplia para generar candidatos (doc 12 §3) — el veredicto final lo da
 # el LLM (`merge_verdict`), no este score solo; reemplaza el umbral único
@@ -245,6 +269,178 @@ async def _sync_relations(
     return written
 
 
+def _note_key(source_id: str) -> str:
+    """Clave de dedupe del nodo `Document` de una nota (doc 12 §10.4.1): el
+    `source_id` sin extensión, canonicalizado — así el nodo del documento en
+    curso y el que resuelve un `[[wikilink]]` a ese mismo archivo caen en la
+    misma clave."""
+    stem = source_id[:-3] if source_id.endswith(".md") else source_id
+    return canonicalize(stem)
+
+
+async def _merge_document_node(
+    driver: Any, *, source_id: str, title: str, doc_id: str
+) -> str:
+    """Nodo `Document` por nota (doc 12 §10.4.1), keyed por `source_id`."""
+    return await neo4j_storage.merge_node(
+        driver,
+        node_type="Document",
+        canonical_name=_note_key(source_id),
+        name=title or source_id,
+        aliases=[],
+        confidence=1.0,
+        sources=[doc_id],
+        extracted_by="obsidian.note",
+    )
+
+
+async def _sync_structural_edges(
+    driver: Any,
+    engine: AsyncEngine,
+    *,
+    doc_id: str,
+    document: dict[str, Any],
+    entity_node_ids: list[str],
+) -> dict[str, int]:
+    """Aristas determinísticas desde la estructura del vault (doc 12 §10.4):
+    nodo `Document` por nota + wikilinks + nota↔entidad + tags compartidos +
+    frontmatter tipado. Sin LLM."""
+    connector = document["connector"]
+    source_id = document["source_id"]
+    title = document.get("title") or source_id
+    links = [str(x) for x in (document.get("links") or [])]
+    keywords = [str(x) for x in (document.get("keywords") or [])]
+    frontmatter = (document.get("source_metadata") or {}).get("frontmatter") or {}
+
+    doc_node_id = await _merge_document_node(
+        driver, source_id=source_id, title=title, doc_id=doc_id
+    )
+    counts = {"wikilink": 0, "note_entity": 0, "shared_tag": 0, "frontmatter": 0}
+
+    # §10.4.3: cada entidad resuelta queda colgada de su nota — lo que saca de
+    # aislamiento a las entidades que no tienen relación tipada con otra.
+    for entity_id in dict.fromkeys(entity_node_ids):
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=doc_node_id,
+            relation_type="MENTIONS",
+            target_id=entity_id,
+            confidence=NOTE_ENTITY_CONFIDENCE,
+            sources=[doc_id],
+            extracted_by=BY_NOTE_ENTITY,
+        )
+        counts["note_entity"] += 1
+
+    # §10.4.2: [[wikilinks]] → arista Document→Document (conexión escrita a mano).
+    resolved = await resolve_note_targets(engine, connector=connector, targets=links)
+    for row in resolved.values():
+        if str(row["doc_id"]) == doc_id:
+            continue
+        target_node_id = await _merge_document_node(
+            driver,
+            source_id=row["source_id"],
+            title=row.get("title") or row["source_id"],
+            doc_id=str(row["doc_id"]),
+        )
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=doc_node_id,
+            relation_type="MENTIONS",
+            target_id=target_node_id,
+            confidence=WIKILINK_CONFIDENCE,
+            sources=[doc_id],
+            extracted_by=BY_WIKILINK,
+        )
+        counts["wikilink"] += 1
+
+    # §10.4.4: notas que comparten un tag → RELATED_TO débil, con tope de fan-out.
+    siblings = await docs_sharing_keywords(
+        engine,
+        connector=connector,
+        doc_id=uuid.UUID(doc_id),
+        keywords=keywords,
+        limit=MAX_SHARED_TAG_SIBLINGS,
+    )
+    for row in siblings:
+        target_node_id = await _merge_document_node(
+            driver,
+            source_id=row["source_id"],
+            title=row.get("title") or row["source_id"],
+            doc_id=str(row["doc_id"]),
+        )
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=doc_node_id,
+            relation_type="RELATED_TO",
+            target_id=target_node_id,
+            confidence=SHARED_TAG_CONFIDENCE,
+            sources=[doc_id],
+            extracted_by=BY_SHARED_TAG,
+        )
+        counts["shared_tag"] += 1
+
+    # §10.4.5: frontmatter con semántica clara → arista tipada.
+    for spec in frontmatter_edges(frontmatter, document.get("author")):
+        target_node_id = await neo4j_storage.merge_node(
+            driver,
+            node_type=spec.target_node_type,
+            canonical_name=canonicalize(spec.target_name),
+            name=spec.target_name,
+            aliases=[],
+            confidence=spec.confidence,
+            sources=[doc_id],
+            extracted_by=spec.extracted_by,
+        )
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=doc_node_id,
+            relation_type=spec.relation_type,
+            target_id=target_node_id,
+            confidence=spec.confidence,
+            sources=[doc_id],
+            extracted_by=spec.extracted_by,
+        )
+        counts["frontmatter"] += 1
+
+    return counts
+
+
+async def sync_cooccurrence_relations(
+    driver: Any,
+    engine: AsyncEngine,
+    *,
+    touching_node_ids: list[str] | None,
+    min_chunks: int = COOCCURRENCE_MIN_CHUNKS,
+    min_docs: int = COOCCURRENCE_MIN_DOCS,
+    limit: int = COOCCURRENCE_MAX_PAIRS,
+) -> int:
+    """Aristas `RELATED_TO` por co-ocurrencia de entidades en el mismo chunk
+    (doc 12 §10.5). `touching_node_ids` acota a los pares tocados por un
+    `graph_sync` reciente; `None` es la pasada completa del backfill."""
+    pairs = await cooccurring_node_pairs(
+        engine,
+        min_chunks=min_chunks,
+        min_docs=min_docs,
+        limit=limit,
+        touching_node_ids=touching_node_ids,
+    )
+    written = 0
+    for pair in pairs:
+        n_chunks = int(pair["n_chunks"])
+        confidence = min(0.85, 0.4 + 0.05 * (n_chunks - min_chunks))
+        await neo4j_storage.merge_relation(
+            driver,
+            source_id=pair["node_a"],
+            relation_type="RELATED_TO",
+            target_id=pair["node_b"],
+            confidence=round(confidence, 3),
+            sources=[],
+            extracted_by="cooccurrence",
+        )
+        written += 1
+    return written
+
+
 def _merge_entities_by_canonical_name(entities: list[EntityCandidate]) -> list[EntityCandidate]:
     """La misma entidad puede aparecer en varios chunks del mismo documento
     (doc 12 §5) — se mergea antes de pasar por `_resolve_entity` para no
@@ -343,6 +539,7 @@ async def _sync_graph(
     if loaded is None:
         return {"doc_id": str(doc_id), "synced": False}
     _title, chunks = loaded
+    document = await get_document(engine, doc_id)
 
     entities, relations = await _extract_entities_and_relations(
         chunks, generate_entities=generate_entities, generate_relations=generate_relations
@@ -366,6 +563,18 @@ async def _sync_graph(
 
     relations_written = await _sync_relations(driver, relations, node_ids, str(doc_id))
 
+    # doc 12 §10.4: aristas determinísticas desde la estructura del vault — la
+    # fuente primaria de conectividad; la extracción LLM (arriba) es refuerzo.
+    structural: dict[str, int] = {}
+    if document is not None:
+        structural = await _sync_structural_edges(
+            driver,
+            engine,
+            doc_id=str(doc_id),
+            document=document,
+            entity_node_ids=list(node_ids.values()),
+        )
+
     # doc 12 §4: persiste qué nodos salieron de cada chunk — EntityCandidate.chunk_ids
     # es transitorio, esto es lo único que sobrevive para que la task de relaciones
     # cross-documento sepa, más tarde, a qué entidades corresponde este chunk.
@@ -382,6 +591,7 @@ async def _sync_graph(
         "synced": True,
         "entities": len(normalized),
         "relations": relations_written,
+        "structural": structural,
         "node_ids": list(node_ids.values()),
         "chunk_ids": [str(chunk_id) for chunk_id, _ in chunks],
     }
@@ -446,4 +656,10 @@ def graph_sync(doc_id: str) -> dict[str, Any]:
         discover_cross_document_relations.delay(
             doc_id=result["doc_id"], chunk_ids=result["chunk_ids"]
         )
+    if result.get("synced") and result.get("node_ids"):
+        # doc 12 §10.5: pasada incremental de co-ocurrencia sobre los pares que
+        # tocan los nodos de este documento.
+        from kos_workers.tasks.cooccurrence_relations import discover_cooccurrence_relations
+
+        discover_cooccurrence_relations.delay(node_ids=result["node_ids"])
     return result

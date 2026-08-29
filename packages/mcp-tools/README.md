@@ -2,7 +2,7 @@
 
 **Servidores MCP de KOS.** Solo dependen de `packages/core`.
 
-Toda herramienta (interna o externa) se expone por MCP: `vector.search`, `graph.query`, `memory.recall`, `obsidian.create_note`, `github.search_repos`, `web.search`… Convención: `<dominio>.<verbo>_<objeto>`.
+Toda herramienta (interna o externa) se expone por MCP: `vector.search`, `graph.query`, `memory.recall`, `obsidian.create_note`/`read_note`/`update_note`/`create_folder`, `github.search_repos`, `web.search`… Convención: `<dominio>.<verbo>_<objeto>`.
 
 Las herramientas de escritura requieren aprobación del usuario por defecto; toda invocación se registra con el `trace_id` del plan que la causó.
 

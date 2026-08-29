@@ -94,7 +94,7 @@ El criterio de v1.0 en doc 07 lista cinco tipos. No todos entran en el primer co
 | Contradicciones | **Sí** | `CONTRADICTS` ya reservado en doc 02 §3.2 exactamente para esto ("detección de contradicciones (Fase 5)") — más costoso que lagunas porque requiere comparar afirmaciones, no solo recorrer una relación existente |
 | Relaciones descubiertas | No | necesita heurística nueva (similitud de embeddings entre clusters desconectados, o un paso LLM) sin base existente en el grafo actual |
 | Roadmaps personalizados | No | depende de que existan lagunas primero — es una vista derivada/secuenciada sobre gaps; natural para una iteración posterior de Fase 5 |
-| Reorganización de Obsidian | No | doc 04 §6 ya la dejó para "Fase 5, autonomía configurable"; exige herramientas MCP de escritura (mover/renombrar) que no existen (`obsidian.update_note`/`create_folder`, ver doc 06 §4) — el ítem de mayor riesgo y alcance |
+| Reorganización de Obsidian | No | doc 04 §6 ya la dejó para "Fase 5, autonomía configurable"; `obsidian.update_note`/`create_folder` ya existen (deuda cerrada 2026-08-26, doc 06 §4), pero lo pendiente es el flujo de aprobación real para una reorganización autónoma — el ítem de mayor riesgo y alcance |
 
 Los tres tipos diferidos no se prometen en v1.0. Quedan como iteración posterior de la misma Fase 5.
 

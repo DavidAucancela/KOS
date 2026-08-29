@@ -166,6 +166,14 @@ La confianza es transversal (documentos, grafo, memoria) y sigue reglas únicas:
 > la fórmula lo que faltaba). `ALIAS_BOOST`/`PRUNE_THRESHOLD` viven en `kos_core.confidence`
 > (antes `ALIAS_BOOST` estaba mal ubicado en `apps/workers/pipeline/s9_confidence.py`, que ahora
 > lo reexporta). Verificado en vivo contra infra real, ver `docs/sprints/sprint-14.md`.
+>
+> **Corrección manual de memoria (2026-08-27)**: `MemoryItem.locked` (migración `0014`), análogo
+> a `locked` en nodos/relaciones del grafo (doc 02 §4 regla 5). `PATCH /v1/memory/{id}`
+> (`correct_memory`, espejo de `PATCH /v1/graph/nodes/{id}`) fija los campos provistos, marca
+> `locked=true` y asienta `confidence=1.0` si no se pasa una explícita — una aserción del usuario
+> vale como evidencia plena. Una memoria `locked`: pierde la fuente cuando se retira un documento
+> pero conserva su `confidence` y no se archiva aunque quede sin ninguna, y queda fuera de la
+> consolidación episódica→semántica (`list_unconsolidated_episodic` la excluye).
 
 ## 6. Detección de duplicados y reorganización
 

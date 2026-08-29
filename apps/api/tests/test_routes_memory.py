@@ -28,6 +28,7 @@ def _memory(**overrides: Any) -> dict[str, Any]:
         "last_accessed_at": _NOW,
         "archived_at": None,
         "superseded_by": None,
+        "locked": False,
     }
     base.update(overrides)
     return base
@@ -97,3 +98,47 @@ def test_archive_memory_404_si_no_existe_o_ya_archivada(monkeypatch: pytest.Monk
         response = client.delete(f"/v1/memory/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+def test_correct_memory_devuelve_memoria_locked(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_correct(
+        engine: Any,
+        memory_id: uuid.UUID,
+        *,
+        content: str | None,
+        type: str | None,
+        confidence: float | None,
+    ) -> dict[str, Any]:
+        captured.update({"content": content, "type": type, "confidence": confidence})
+        return _memory(memory_id=memory_id, content=content or "", locked=True, confidence=1.0)
+
+    monkeypatch.setattr(postgres_storage, "correct_memory", fake_correct)
+    with TestClient(create_app()) as client:
+        response = client.patch(
+            f"/v1/memory/{uuid.uuid4()}", json={"content": "texto corregido"}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content"] == "texto corregido"
+    assert body["locked"] is True
+    assert captured == {"content": "texto corregido", "type": None, "confidence": None}
+
+
+def test_correct_memory_404_si_no_existe_o_ya_archivada(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_correct(engine: Any, memory_id: uuid.UUID, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(postgres_storage, "correct_memory", fake_correct)
+    with TestClient(create_app()) as client:
+        response = client.patch(f"/v1/memory/{uuid.uuid4()}", json={"content": "x"})
+
+    assert response.status_code == 404
+
+
+def test_correct_memory_confidence_fuera_de_rango_es_422() -> None:
+    with TestClient(create_app()) as client:
+        response = client.patch(f"/v1/memory/{uuid.uuid4()}", json={"confidence": 1.5})
+    assert response.status_code == 422

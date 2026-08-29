@@ -38,7 +38,7 @@ cerrar el criterio de salida de v1.0.
 4. Respuestas de consulta sin `evidence[]` = bug.
 5. Local-first: Ollama por defecto; cloud solo opt-in por tarea (ADR-0006).
 6. Idioma de los docs: español. Código e identificadores: inglés.
-7. Herramientas de escritura (`memory.store`, `obsidian.create_note`, `recommendations.store`) requieren `confirm=true` vía el gate real de `permissions.py` — nunca un bypass. El Planner (LLM) nunca decide `confirm=true` por su cuenta en un paso de `/v1/query`; ver el ítem `memory.store` en `docs/deuda-tecnica.md` para el razonamiento completo.
+7. Las herramientas de escritura (`WRITE_TOOLS` en `permissions.py`: `memory.store`, `recommendations.store`, `obsidian.create_note`/`read_note`/`update_note`/`create_folder`) requieren `confirm=true` vía el gate real de `permissions.py` — nunca un bypass. El Planner (LLM) nunca decide `confirm=true` por su cuenta en un paso de `/v1/query`, y por eso las tools `obsidian.*` no están en su catálogo (solo `WritingAgent` las expone, forzando `confirm=true` por código); ver el ítem `memory.store` en `docs/deuda-tecnica.md` para el razonamiento completo.
 
 ## Comandos
 

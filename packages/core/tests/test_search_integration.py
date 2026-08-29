@@ -44,7 +44,10 @@ async def test_busqueda_lexica_vectorial_e_hibrida() -> None:
         assert vector, "la búsqueda vectorial no devolvió resultados"
         assert all(hit.score > 0 for hit in vector)
 
-        hybrid = await hybrid_search(engine, "contenedores", query_embedding, limit=5)
+        hybrid_limit = 5
+        hybrid = await hybrid_search(
+            engine, "contenedores", query_embedding, limit=hybrid_limit
+        )
         assert hybrid, "la búsqueda híbrida no devolvió resultados"
         assert all(hit.source == "hybrid" for hit in hybrid)
         title = await title_search(engine, "contenedores", limit=5)

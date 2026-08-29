@@ -23,6 +23,7 @@ from kos_api.services import plan_service
 from kos_core.schemas.plan import PlanStep
 from kos_core.schemas.plan_metrics import (
     AgentDistribution,
+    AgentLatency,
     DegradationBreakdown,
     Insight,
     LatencyBucket,
@@ -68,6 +69,7 @@ class PlanMetricsOut(BaseModel):
     latency: list[LatencyBucket]
     degradation_by_reason: list[DegradationBreakdown]
     agent_distribution: list[AgentDistribution]
+    agent_latency: list[AgentLatency]
     insights: list[Insight]
 
 
