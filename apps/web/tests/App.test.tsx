@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "../src/App";
@@ -30,6 +30,7 @@ function jsonResponse(body: unknown): Response {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("App — badge de recomendaciones pendientes en el nav", () => {
@@ -61,6 +62,38 @@ describe("App — badge de recomendaciones pendientes en el nav", () => {
     // Deja que el fetch inicial resuelva antes de asegurar la ausencia del badge.
     await screen.findByLabelText("Estado");
     expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("oculta y muestra el rail de navegación, y persiste la elección", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ items: [], next_cursor: null })),
+    );
+
+    render(<App />);
+    await screen.findByLabelText("Chat");
+
+    fireEvent.click(screen.getByLabelText("Ocultar barra de navegación"));
+
+    expect(screen.queryByLabelText("Chat")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Mostrar barra de navegación")).toBeInTheDocument();
+    expect(window.localStorage.getItem("kos.ui.railCollapsed")).toBe("true");
+
+    fireEvent.click(screen.getByLabelText("Mostrar barra de navegación"));
+    expect(screen.getByLabelText("Chat")).toBeInTheDocument();
+  });
+
+  it("arranca con el rail oculto si la preferencia guardada lo dice", async () => {
+    window.localStorage.setItem("kos.ui.railCollapsed", "true");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ items: [], next_cursor: null })),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByLabelText("Mostrar barra de navegación")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Chat")).not.toBeInTheDocument();
   });
 
   it("no cuenta recomendaciones ya resueltas en el badge", async () => {

@@ -8,17 +8,32 @@ import { Button } from "@/components/ui/button";
 import { NODE_TYPE_COLORS, type GraphNode, type GraphRelation } from "./types";
 
 // Visualización del grafo (doc 06 §2 `subgraph`, Sprint 10): layout de fuerzas
-// calculado una vez por cambio de datos (d3-force solo para la física, el
-// render lo controla React vía SVG) y arrastre manual simple después — no hay
-// simulación corriendo en vivo, así que no compite con el usuario moviendo un
-// nodo. Zoom/pan (mejora de interfaz posterior): manual sobre el `viewBox`
-// fijo, sin traer `d3-zoom`/`d3-selection` — mismo criterio que el arrastre
-// de nodos, ya manual desde Sprint 10.
+// con d3-force solo para la física (el render lo controla React vía SVG).
+//
+// doc 13 §5.1: en la primera carga el layout se resuelve de una sola pasada
+// síncrona (como desde Sprint 10). Cuando llegan datos nuevos y ya había un
+// layout en pantalla (re-fetch tras `graph.updated`), el reacomodo se anima
+// unos frames desde las posiciones actuales y se detiene solo al estabilizarse
+// — nunca queda una simulación corriendo en reposo. Los nodos que el usuario
+// arrastró quedan fijados (`fx`/`fy`) para que la animación no se los mueva.
+// `prefers-reduced-motion` fuerza la pasada síncrona.
+//
+// Zoom/pan (mejora de interfaz posterior): manual sobre el `viewBox` fijo, sin
+// traer `d3-zoom`/`d3-selection` — mismo criterio que el arrastre de nodos.
 const WIDTH = 800;
 const HEIGHT = 520;
 const TICKS = 300;
+const TICKS_PER_FRAME = 3;
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 3;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 interface SimNode extends SimulationNodeDatum {
   id: string;
@@ -42,11 +57,20 @@ export function GraphCanvas({
   relations,
   selectedId,
   onSelect,
+  highlightNodeIds,
+  highlightRelationIds,
+  endpointIds,
 }: {
   nodes: GraphNode[];
   relations: GraphRelation[];
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
+  // doc 13 §5.2: resaltado de un camino (`GET /v1/graph/path`). Con un set no
+  // vacío, lo que no está en él se atenúa.
+  highlightNodeIds?: ReadonlySet<string>;
+  highlightRelationIds?: ReadonlySet<string>;
+  // Nodos elegidos como extremos mientras se está armando el camino.
+  endpointIds?: readonly string[];
 }) {
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const positionsRef = useRef(positions);
@@ -55,6 +79,11 @@ export function GraphCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingId = useRef<string | null>(null);
   const panStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+  // Posiciones de los nodos que el usuario arrastró a mano: se fijan (`fx`/`fy`)
+  // al reanimar el layout con datos nuevos (doc 13 §5.1) para no moverlos.
+  const pinnedRef = useRef<Record<string, Point>>({});
+
+  const highlightActive = highlightNodeIds !== undefined && highlightNodeIds.size > 0;
 
   const degree = useMemo(() => {
     const counts = new Map<string, number>();
@@ -73,7 +102,16 @@ export function GraphCanvas({
     // Conserva la posición si el nodo ya estaba (re-fetch tras una corrección):
     // evita que el layout entero salte cuando solo cambió un campo.
     const previous = positionsRef.current;
-    const simNodes: SimNode[] = nodes.map((node) => ({ id: node.id, ...previous[node.id] }));
+    const pinned = pinnedRef.current;
+    const simNodes: SimNode[] = nodes.map((node) => {
+      const base: SimNode = { id: node.id, ...previous[node.id] };
+      const pin = pinned[node.id];
+      if (pin) {
+        base.fx = pin.x;
+        base.fy = pin.y;
+      }
+      return base;
+    });
     const nodeIds = new Set(nodes.map((node) => node.id));
     const simLinks = relations
       .filter((rel) => nodeIds.has(rel.source_id) && nodeIds.has(rel.target_id))
@@ -91,13 +129,37 @@ export function GraphCanvas({
       .force("collide", forceCollide(32))
       .stop();
 
-    for (let i = 0; i < TICKS; i += 1) simulation.tick();
+    const flush = () => {
+      const next: Record<string, Point> = {};
+      for (const simNode of simNodes) {
+        next[simNode.id] = { x: simNode.x ?? WIDTH / 2, y: simNode.y ?? HEIGHT / 2 };
+      }
+      setPositions(next);
+    };
 
-    const next: Record<string, Point> = {};
-    for (const simNode of simNodes) {
-      next[simNode.id] = { x: simNode.x ?? WIDTH / 2, y: simNode.y ?? HEIGHT / 2 };
+    // Anima solo si ya había un layout en pantalla para animar desde él
+    // (doc 13 §5.1). Primera carga o `prefers-reduced-motion` → pasada síncrona.
+    const hadLayout = nodes.some((node) => previous[node.id] !== undefined);
+    if (!hadLayout || prefersReducedMotion()) {
+      for (let i = 0; i < TICKS; i += 1) simulation.tick();
+      flush();
+      return;
     }
-    setPositions(next);
+
+    simulation.alpha(0.6).alphaDecay(0.05);
+    let raf = 0;
+    const step = () => {
+      for (let i = 0; i < TICKS_PER_FRAME; i += 1) simulation.tick();
+      flush();
+      if (simulation.alpha() > simulation.alphaMin()) {
+        raf = requestAnimationFrame(step);
+      }
+    };
+    raf = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(raf);
+      simulation.stop();
+    };
   }, [nodes, relations]);
 
   // Listener nativo (no `onWheel` de React): React marca `wheel` como pasivo
@@ -163,7 +225,11 @@ export function GraphCanvas({
   function handleSvgPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     if (draggingId.current !== null) {
       const point = toWorldPoint(event.clientX, event.clientY);
-      if (point) setPositions((current) => ({ ...current, [draggingId.current!]: point }));
+      if (point) {
+        const id = draggingId.current;
+        pinnedRef.current[id] = point;
+        setPositions((current) => ({ ...current, [id]: point }));
+      }
       return;
     }
     if (panStart.current) {
@@ -213,12 +279,24 @@ export function GraphCanvas({
           className="cursor-grab active:cursor-grabbing"
         />
         <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.k})`}>
-          <g stroke="var(--border)" strokeWidth={1}>
+          <g>
             {relations.map((rel) => {
               const from = positions[rel.source_id];
               const to = positions[rel.target_id];
               if (!from || !to) return null;
-              return <line key={rel.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+              const onPath = highlightRelationIds?.has(rel.id) ?? false;
+              return (
+                <line
+                  key={rel.id}
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke={onPath ? "var(--primary)" : "var(--border)"}
+                  strokeWidth={onPath ? 2.5 : 1}
+                  opacity={highlightActive && !onPath ? 0.12 : 1}
+                />
+              );
             })}
           </g>
           <g>
@@ -227,6 +305,8 @@ export function GraphCanvas({
               if (!point) return null;
               const radius = 10 + Math.min(degree.get(node.id) ?? 0, 8) * 1.5;
               const isSelected = node.id === selectedId;
+              const onPath = highlightNodeIds?.has(node.id) ?? false;
+              const isEndpoint = endpointIds?.includes(node.id) ?? false;
               return (
                 <g
                   key={node.id}
@@ -239,7 +319,17 @@ export function GraphCanvas({
                     if (event.key === "Enter" || event.key === " ") onSelect(node.id);
                   }}
                   className="cursor-pointer"
+                  opacity={highlightActive && !onPath ? 0.2 : 1}
                 >
+                  {isEndpoint && (
+                    <circle
+                      r={radius + 4}
+                      fill="none"
+                      stroke="var(--primary)"
+                      strokeWidth={1.5}
+                      strokeDasharray="3 2"
+                    />
+                  )}
                   <circle
                     r={radius}
                     fill={NODE_TYPE_COLORS[node.node_type]}

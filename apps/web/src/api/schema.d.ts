@@ -262,7 +262,13 @@ export interface paths {
         delete: operations["archive_memory_v1_memory__memory_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Correct Memory
+         * @description Corrección manual (doc 04 §5, análogo a `PATCH /v1/graph/nodes/{id}`):
+         *     fija los campos provistos y marca la memoria `locked` — deja de recalcularse
+         *     su `confidence` y de entrar a la consolidación.
+         */
+        patch: operations["correct_memory_v1_memory__memory_id__patch"];
         trace?: never;
     };
     "/v1/plans": {
@@ -826,6 +832,8 @@ export interface components {
             archived_at: string | null;
             /** Superseded By */
             superseded_by: string | null;
+            /** Locked */
+            locked: boolean;
             /**
              * Prune Candidate
              * @description Doc 04 §5: confidence bajo el umbral tras perder una fuente.
@@ -892,6 +900,15 @@ export interface components {
         NoteOut: {
             /** Path */
             path: string;
+        };
+        /** PatchMemoryRequest */
+        PatchMemoryRequest: {
+            /** Content */
+            content?: string | null;
+            /** Type */
+            type?: ("episodic" | "semantic" | "procedural" | "temporal" | "preference") | null;
+            /** Confidence */
+            confidence?: number | null;
         };
         /** PatchNodeRequest */
         PatchNodeRequest: {
@@ -1841,6 +1858,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_memory_v1_memory__memory_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryOut"];
+                };
             };
             /** @description Validation Error */
             422: {

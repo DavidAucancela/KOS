@@ -80,6 +80,25 @@ describe("GraphCanvas", () => {
     expect(onSelect).toHaveBeenCalledWith("node-1");
   });
 
+  it("atenúa los nodos fuera del camino resaltado", () => {
+    const nodes = [node(), node({ id: "node-2", canonical_name: "proyecto-kos" })];
+    const { container } = render(
+      <GraphCanvas
+        nodes={nodes}
+        relations={[]}
+        selectedId={null}
+        onSelect={() => {}}
+        highlightNodeIds={new Set(["node-1"])}
+      />,
+    );
+
+    const groups = Array.from(container.querySelectorAll("svg g[role='button']"));
+    const opacities = groups.map((g) => g.getAttribute("opacity"));
+    // node-1 en el camino → sin atenuar; node-2 fuera → atenuado.
+    expect(opacities).toContain("1");
+    expect(opacities).toContain("0.2");
+  });
+
   it("resalta el nodo seleccionado con un trazo distinto", () => {
     const nodes = [node(), node({ id: "node-2", canonical_name: "proyecto-kos" })];
     const { container } = render(

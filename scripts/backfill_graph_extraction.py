@@ -34,9 +34,10 @@ import uuid
 from sqlalchemy import select
 
 from kos_core.config import get_settings
+from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage.postgres import create_engine, documents_table
 from kos_workers.tasks.cross_doc_relations import _async_discover_cross_document_relations
-from kos_workers.tasks.graph_sync import _async_graph_sync
+from kos_workers.tasks.graph_sync import _async_graph_sync, sync_cooccurrence_relations
 
 
 async def _active_doc_ids(limit: int | None) -> list[uuid.UUID]:
@@ -59,19 +60,49 @@ async def _active_doc_ids(limit: int | None) -> list[uuid.UUID]:
 async def _backfill(limit: int | None) -> None:
     doc_ids = await _active_doc_ids(limit)
     print(f"Backfill de {len(doc_ids)} documento(s)...")
+    failed = 0
     for i, doc_id in enumerate(doc_ids, 1):
-        result = await _async_graph_sync(doc_id)
-        cross_doc = {"chunks_checked": 0, "relations_written": 0}
-        if result.get("synced") and result.get("chunk_ids"):
-            cross_doc = await _async_discover_cross_document_relations(
-                doc_id=result["doc_id"], chunk_ids=result["chunk_ids"]
-            )
+        try:
+            result = await _async_graph_sync(doc_id)
+            cross_doc = {"chunks_checked": 0, "relations_written": 0}
+            if result.get("synced") and result.get("chunk_ids"):
+                cross_doc = await _async_discover_cross_document_relations(
+                    doc_id=result["doc_id"], chunk_ids=result["chunk_ids"]
+                )
+        except Exception as exc:
+            # El LLM local (llama3.2) cuelga/timeoutea a menudo (doc 12 §10.2).
+            # El script es idempotente y se retoma con --limit: un documento que
+            # falla no debe abortar la tanda entera.
+            failed += 1
+            print(f"[{i}/{len(doc_ids)}] {doc_id}: FALLÓ ({type(exc).__name__}: {exc}) — se salta")
+            continue
+        structural = result.get("structural") or {}
         print(
             f"[{i}/{len(doc_ids)}] {doc_id}: "
-            f"{result.get('entities', 0)} entidades, {result.get('relations', 0)} relaciones, "
+            f"{result.get('entities', 0)} entidades, {result.get('relations', 0)} relaciones LLM, "
+            f"estructural: {sum(structural.values())} "
+            f"(wiki {structural.get('wikilink', 0)}, "
+            f"nota-entidad {structural.get('note_entity', 0)}, "
+            f"tag {structural.get('shared_tag', 0)}, fm {structural.get('frontmatter', 0)}), "
             f"cross-doc: {cross_doc['chunks_checked']} revisados/"
             f"{cross_doc['relations_written']} nuevas"
         )
+
+    if failed:
+        print(f"({failed} documento(s) fallaron y se saltaron — re-correr para reintentarlos)")
+
+    # doc 12 §10.5: pasada completa de co-ocurrencia una sola vez al final, sobre
+    # todo `chunks.entity_node_ids` ya poblado (no por documento).
+    print("Pasada de co-ocurrencia de entidades (doc 12 §10.5)...")
+    settings = get_settings()
+    engine = create_engine(settings)
+    driver = neo4j_storage.create_driver(settings)
+    try:
+        written = await sync_cooccurrence_relations(driver, engine, touching_node_ids=None)
+        print(f"Co-ocurrencia: {written} aristas RELATED_TO")
+    finally:
+        await driver.close()
+        await engine.dispose()
 
 
 def main() -> None:

@@ -1282,3 +1282,141 @@ async def archive_conversation(engine: AsyncEngine, conversation_id: uuid_lib.UU
             .values(archived_at=func.now())
         )
         return result.rowcount > 0
+
+
+# --- doc 12 §10: aristas estructurales y por co-ocurrencia (determinístico, sin LLM) ---
+
+
+async def resolve_note_targets(
+    engine: AsyncEngine, *, connector: str, targets: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Resuelve destinos de `[[wikilinks]]` (doc 12 §10.4.2) a documentos reales
+    del mismo conector. Un `[[Docker]]` apunta a la nota cuyo `title` (stem del
+    archivo) es "Docker"; un `[[Carpeta/Nota]]` a la del `source_id`
+    "Carpeta/Nota.md". Devuelve solo los destinos que resolvieron a UN documento
+    — un título ambiguo (varias notas con el mismo nombre) se trata como link
+    colgante (métrica doc 12 §10.7), no se adivina."""
+    if not targets:
+        return {}
+    uniq = list(dict.fromkeys(t.strip() for t in targets if t and t.strip()))
+    source_id_guesses = [*uniq, *(f"{t}.md" for t in uniq)]
+    query = select(
+        documents_table.c.doc_id,
+        documents_table.c.title,
+        documents_table.c.source_id,
+    ).where(
+        documents_table.c.connector == connector,
+        documents_table.c.deleted_at.is_(None),
+        (documents_table.c.title.in_(uniq)) | (documents_table.c.source_id.in_(source_id_guesses)),
+    )
+    async with engine.connect() as conn:
+        rows = [dict(r) for r in (await conn.execute(query)).mappings().all()]
+
+    by_target: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        keys = {row["title"], row["source_id"]}
+        if row["source_id"].endswith(".md"):
+            keys.add(row["source_id"][:-3])
+        for target in uniq:
+            if target in keys:
+                by_target.setdefault(target, []).append(row)
+    return {target: matches[0] for target, matches in by_target.items() if len(matches) == 1}
+
+
+_DOCS_SHARING_KEYWORDS_SQL = text(
+    """
+    SELECT doc_id, title, source_id,
+           (SELECT count(*) FROM jsonb_array_elements_text(keywords) k
+            WHERE k.value = ANY(:keywords)) AS shared
+    FROM documents
+    WHERE connector = :connector
+      AND deleted_at IS NULL
+      AND doc_id <> :doc_id
+      AND keywords ?| :keywords
+    ORDER BY shared DESC, doc_id
+    LIMIT :limit
+    """
+)
+
+
+async def docs_sharing_keywords(
+    engine: AsyncEngine,
+    *,
+    connector: str,
+    doc_id: uuid_lib.UUID,
+    keywords: list[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Otros documentos del conector que comparten al menos un tag con este
+    (doc 12 §10.4.4). `limit` acota el fan-out para no generar un componente
+    completo por cada tag masivo."""
+    clean = list(dict.fromkeys(k for k in keywords if k))
+    if not clean:
+        return []
+    params = {
+        "connector": connector,
+        "doc_id": doc_id,
+        "keywords": clean,
+        "limit": limit,
+    }
+    async with engine.connect() as conn:
+        rows = (await conn.execute(_DOCS_SHARING_KEYWORDS_SQL, params)).mappings().all()
+    return [dict(row) for row in rows]
+
+
+_COOCCURRENCE_SQL = """
+WITH exploded AS (
+    SELECT c.doc_id, c.chunk_id, e.value AS node_id
+    FROM chunks c
+    CROSS JOIN LATERAL jsonb_array_elements_text(c.entity_node_ids) AS e(value)
+    {chunk_filter}
+),
+pairs AS (
+    SELECT a.chunk_id, a.doc_id,
+           LEAST(a.node_id, b.node_id) AS node_a,
+           GREATEST(a.node_id, b.node_id) AS node_b
+    FROM exploded a
+    JOIN exploded b ON a.chunk_id = b.chunk_id AND a.node_id < b.node_id
+)
+SELECT node_a, node_b,
+       count(*) AS n_chunks,
+       count(DISTINCT doc_id) AS n_docs
+FROM pairs
+{pair_filter}
+GROUP BY node_a, node_b
+HAVING count(*) >= :min_chunks AND count(DISTINCT doc_id) >= :min_docs
+ORDER BY n_chunks DESC
+LIMIT :limit
+"""
+
+
+async def cooccurring_node_pairs(
+    engine: AsyncEngine,
+    *,
+    min_chunks: int,
+    min_docs: int,
+    limit: int,
+    touching_node_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Pares de nodos que aparecen juntos en el mismo chunk (doc 12 §10.5),
+    agregados sobre `chunks.entity_node_ids`. Filtra a pares vistos en
+    `>= min_chunks` chunks de `>= min_docs` documentos distintos — el piso de
+    documentos evita elevar a relación lo que es una lista dentro de una sola
+    nota. `touching_node_ids` restringe el cálculo a pares que incluyen alguno
+    de esos nodos (pasada incremental tras un `graph_sync`); sin él, es la
+    pasada completa del backfill."""
+    params: dict[str, Any] = {
+        "min_chunks": min_chunks,
+        "min_docs": min_docs,
+        "limit": limit,
+    }
+    chunk_filter = ""
+    pair_filter = ""
+    if touching_node_ids:
+        params["touching"] = list(dict.fromkeys(touching_node_ids))
+        chunk_filter = "WHERE c.entity_node_ids ?| :touching"
+        pair_filter = "WHERE node_a = ANY(:touching) OR node_b = ANY(:touching)"
+    sql = text(_COOCCURRENCE_SQL.format(chunk_filter=chunk_filter, pair_filter=pair_filter))
+    async with engine.connect() as conn:
+        rows = (await conn.execute(sql, params)).mappings().all()
+    return [dict(row) for row in rows]
