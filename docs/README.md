@@ -21,6 +21,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 12 | [Calidad de extracción: entidades y relaciones cross-documento](12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Mejora sobre Fase 1 | 🟡 Borrador |
 | 13 | [Interfaz de usuario](13-interfaz-de-usuario.md) | Mejora sobre Fase 1+ | 🟡 Borrador (implementado 2026-08-27: colapso de paneles, vista de memoria, animación/caminos del grafo) |
 | 14 | [Despliegue en Railway (single-tenant, mínimo coste)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; el ADR de proveedor cloud existe: ADR-0007, acotado a Planner/Writing) |
+| 15 | [Multiproveedor LLM](15-multiproveedor-llm.md) | Extiende ADR-0007 sobre ADR-0006 | 🟡 Borrador (proveedores OpenAI-compatibles ya usables sin código; §5 requiere ADR-0008) |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado. Un doc marcado "implementado" ya tiene código
 real construido sobre él — cambiarlo requiere PR igual que cualquier documento en revisión, no
