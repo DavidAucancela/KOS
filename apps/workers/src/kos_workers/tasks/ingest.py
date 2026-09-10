@@ -105,8 +105,17 @@ async def _retire_missing(
     return retired
 
 
+# Claves de `sources.config` que NO son kwargs del conector (los conectores
+# toman args con nombre, no **kwargs, así que una clave extra rompe con TypeError).
+_RESERVED_CONFIG_KEYS = frozenset({"cloud_safe"})  # ADR-0007: puerta de síntesis cloud
+
+
 def _build_connector(source: dict[str, Any]) -> Connector:
-    config: dict[str, Any] = source.get("config") or {}
+    config: dict[str, Any] = {
+        key: value
+        for key, value in (source.get("config") or {}).items()
+        if key not in _RESERVED_CONFIG_KEYS
+    }
     return get_connector(str(source["connector"]), **config)
 
 

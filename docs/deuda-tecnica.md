@@ -89,6 +89,7 @@ el Recomendador (Sprint 22-26).
 | El veredicto de contradicción (`_default_contradiction_verdict`) con `llama3.2` (modelo chico local) es conservador — no confirmó contradicciones ni en casos obviamente contradictorios durante la verificación en vivo de Sprint 24; consistente con el diseño fail-safe, pero puede tardar en generar la primera recomendación real de este tipo | [Sprint 24](sprints/sprint-24.md) | Ajuste fino (¿modelo más capaz para este paso? ¿prompt distinto?), sin sprint asignado |
 | `recent_seed_chunks` no acota por el disparo real (`node_ids`/`relation_ids`) — mismo patrón de deuda que `gaps_by_prerequisite`; además, con pocos chunks recientes puede comparar el mismo par en ambas direcciones (dos llamadas al LLM por un solo par candidato) | [Sprint 24](sprints/sprint-24.md) — alcance explícito |
 | Banda de similitud de contradicción (0.75–0.92) sin tuning contra uso real | [Sprint 24](sprints/sprint-24.md) |
+| La ruta cloud opt-in (ADR-0007) manda token/coste/latencia/error a llm-observatory self-hosted solo para Planner y Writing cuando el proveedor es `openai`; el path local (Ollama) y las métricas de negocio del Planner/agentes/Recomendador en `/metrics` siguen sin instrumentar. Además llm-observatory solo alerta (Discord), no hay tope de coste duro | [ADR-0007](adr/0007-proveedor-cloud-opt-in-para-planner-y-writing.md) — alcance explícito; tope de coste y clasificador de contenido privado diferidos |
 
 ## UI/UX — baja prioridad, sin sprint asignado
 

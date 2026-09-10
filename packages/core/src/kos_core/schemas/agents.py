@@ -26,6 +26,10 @@ class EvidenceRef(BaseModel):
     connector: str | None = None
     score: float | None = None
     doc_type: str | None = None
+    # Puerta de privacidad para la síntesis cloud (ADR-0007): solo es True si la
+    # fuente de origen está marcada `cloud_safe` en `sources.config`. Evidencia de
+    # grafo/memoria no tiene fila de fuente y queda en False.
+    cloud_safe: bool = False
 
 
 class Constraints(BaseModel):

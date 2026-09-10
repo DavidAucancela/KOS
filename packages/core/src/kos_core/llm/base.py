@@ -37,3 +37,7 @@ class LLMClient(Protocol):
         en vez de que un paso lento pueda tardar hasta 120s pese a un
         presupuesto menor."""
         ...
+
+    async def aclose(self) -> None:
+        """Libera recursos del cliente (conexiones HTTP). Idempotente."""
+        ...

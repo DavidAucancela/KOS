@@ -136,3 +136,42 @@ async def test_operar_sobre_vault_sin_tool_caller_falla() -> None:
 
     with pytest.raises(RuntimeError):
         await agent.create_folder("Ideas/Sub", trace_id="t")
+
+
+# --- Puerta cloud_safe (ADR-0007) ---
+
+
+def _ev(cloud_safe: bool) -> dict[str, Any]:
+    return {"doc_id": None, "chunk_id": None, "quote": "algo", "cloud_safe": cloud_safe}
+
+
+async def test_toda_evidencia_cloud_safe_usa_el_cliente_cloud() -> None:
+    local, cloud = _EchoLLM(), _EchoLLM()
+    agent = WritingAgent(local, cloud_llm=cloud)
+
+    response = await agent(_request(query="x", evidence=[_ev(True), _ev(True)], confidence=0.5))
+
+    assert cloud.calls == 1
+    assert local.calls == 0
+    assert response.outputs["llm_path"] == "cloud"
+
+
+async def test_evidencia_mixta_se_queda_local() -> None:
+    local, cloud = _EchoLLM(), _EchoLLM()
+    agent = WritingAgent(local, cloud_llm=cloud)
+
+    response = await agent(_request(query="x", evidence=[_ev(True), _ev(False)], confidence=0.5))
+
+    assert local.calls == 1
+    assert cloud.calls == 0
+    assert response.outputs["llm_path"] == "local"
+
+
+async def test_sin_cliente_cloud_se_queda_local() -> None:
+    local = _EchoLLM()
+    agent = WritingAgent(local)
+
+    response = await agent(_request(query="x", evidence=[_ev(True)], confidence=0.5))
+
+    assert local.calls == 1
+    assert response.outputs["llm_path"] == "local"

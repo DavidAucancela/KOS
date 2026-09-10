@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # Fuente por defecto donde `notes_service` crea notas nuevas desde el chat.
     kos_default_vault_source: str = "vault-real"
 
+    # LLM cloud opt-in (ADR-0007): por tarea, explícito, off por defecto. Solo el
+    # Planner (generación de plan) y el WritingAgent (síntesis) son configurables
+    # a cloud; la ingesta, el grafo y los embeddings siguen 100% locales.
+    kos_planner_llm_provider: str = "ollama"
+    kos_writing_llm_provider: str = "ollama"
+    openai_api_key: str = ""
+    openai_llm_model: str = "gpt-4o-mini"
+    openai_base_url: str = ""
+    llm_observatory_url: str = ""
+    llm_observatory_token: str = ""
+
     # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
     # repetida → semántica) y la media vida del decaimiento de `salience`.
     kos_memory_consolidation_hours: int = 24

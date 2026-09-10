@@ -113,6 +113,59 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-kos_dev_password}
 
+  # --- llm-observatory (perfil opcional: docker compose --profile llm-observatory up) ---
+  # Auditoría del path cloud opt-in (ADR-0007). Imágenes pendientes de publicar
+  # en GHCR desde DavidAucancela/llm-observatory (su compose las hace build: desde
+  # fuente). BD propia en un puerto distinto del de kos-postgres.
+  llm-observatory-db:
+    image: postgres:16
+    container_name: kos-llm-observatory-db
+    profiles: ["llm-observatory"]
+    environment:
+      POSTGRES_USER: ${LLM_OBS_PG_USER:-observatory}
+      POSTGRES_PASSWORD: ${LLM_OBS_PG_PASSWORD:-observatory_dev_password}
+      POSTGRES_DB: ${LLM_OBS_PG_DB:-llm_observatory}
+    volumes:
+      - llm_observatory_db_data:/var/lib/postgresql/data
+    ports:
+      - "${LLM_OBS_PG_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LLM_OBS_PG_USER:-observatory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  llm-observatory-api:
+    image: ghcr.io/davidaucancela/llm-observatory-api:latest
+    container_name: kos-llm-observatory-api
+    profiles: ["llm-observatory"]
+    environment:
+      DATABASE_URL: postgresql://${LLM_OBS_PG_USER:-observatory}:${LLM_OBS_PG_PASSWORD:-observatory_dev_password}@llm-observatory-db:5432/${LLM_OBS_PG_DB:-llm_observatory}
+      PORT: "3001"
+      NODE_ENV: production
+      # Vacío por defecto para que `docker compose config` siempre parsee (el
+      # perfil llm-observatory es opt-in); ponlos en .env antes de `make llm-obs-up`.
+      ENCRYPTION_KEY: ${LLM_OBS_ENCRYPTION_KEY:-}
+      JWT_SECRET: ${LLM_OBS_JWT_SECRET:-}
+      DISCORD_WEBHOOK_URL: ${LLM_OBS_DISCORD_WEBHOOK_URL:-}
+    ports:
+      - "${LLM_OBS_API_PORT:-3002}:3001"
+    depends_on:
+      llm-observatory-db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  llm-observatory-web:
+    image: ghcr.io/davidaucancela/llm-observatory-web:latest
+    container_name: kos-llm-observatory-web
+    profiles: ["llm-observatory"]
+    ports:
+      - "${LLM_OBS_WEB_PORT:-3003}:80"
+    depends_on:
+      llm-observatory-api:
+        condition: service_started
+
 volumes:
   postgres_data:
   neo4j_data:
@@ -121,3 +174,4 @@ volumes:
   ollama_data:
   prometheus_data:
   grafana_data:
+  llm_observatory_db_data:

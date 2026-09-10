@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from kos_api import middleware
+from kos_api.llm.factory import make_llm_client, make_writing_clients
 from kos_api.routes import (
     conversations,
     documents,
@@ -24,7 +25,7 @@ from kos_api.routes import (
     sources,
 )
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
+from kos_core.llm.ollama import OllamaEmbeddingClient
 from kos_core.observability import configure_logging, configure_tracing
 from kos_core.storage import minio as minio_storage
 from kos_core.storage import neo4j as neo4j_storage
@@ -47,7 +48,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis_client = redis_storage.create_client(settings)
     app.state.minio_client = minio_storage.create_client(settings)
     app.state.embedding_client = OllamaEmbeddingClient(settings)
-    app.state.llm_client = OllamaLLMClient(settings)
+    # Planner: cliente único (Ollama, o Fallback(OpenAI→Ollama) si cloud está on).
+    app.state.llm_client = make_llm_client(settings, task="planner")
+    # WritingAgent: local y cloud por separado — su puerta cloud_safe elige por
+    # evidencia (ADR-0007). `writing_cloud_llm` es None si cloud está off.
+    writing_local, writing_cloud = make_writing_clients(settings)
+    app.state.writing_local_llm = writing_local
+    app.state.writing_cloud_llm = writing_cloud
 
     # Servidor MCP embebido (Sprint 17, doc 10 §8): comparte las conexiones de
     # arriba en vez de abrir un segundo pool — los agentes (`packages/agents`)
@@ -70,6 +77,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.redis_client.aclose()
             await app.state.embedding_client.aclose()
             await app.state.llm_client.aclose()
+            await app.state.writing_local_llm.aclose()
+            if app.state.writing_cloud_llm is not None:
+                await app.state.writing_cloud_llm.aclose()
 
 
 def create_app() -> FastAPI:
