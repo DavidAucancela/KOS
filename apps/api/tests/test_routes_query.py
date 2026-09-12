@@ -174,6 +174,9 @@ def test_comando_no_encola_memoria(
         return Path("/vault-falso")
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", lambda vault_path, **kwargs: Path("x.md"))
 
     monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
@@ -297,7 +300,11 @@ def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
         return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
     llm = _EchoLLM()
     monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
@@ -340,7 +347,11 @@ def test_comando_crear_nota_generico_crea_nota_sin_llamar_al_llm(
         return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
     llm = _EchoLLM()
     monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
@@ -434,7 +445,11 @@ def test_comando_nueva_maquina_nota_existente_responde_conflicto(
         raise notes_service.NoteAlreadyExistsError("Ya existe una nota en: /vault-falso/x/Fawn.md")
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
     monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:

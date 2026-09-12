@@ -126,16 +126,26 @@ async def _handle_crear_nota(
     """Comando `/crear-nota <template>|<folder>|<título>`: crea la nota sin pasar
     por retrieval/síntesis. Generalización de `/nueva-maquina` (Sprint 7 → 8)."""
     try:
-        vault_path = await notes_service.get_vault_path(engine, settings.kos_default_vault_source)
-        note_path = notes_service.create_note(
-            vault_path, template_name=template_name, folder=folder, title=title
+        note_path, deferred = await notes_service.create_note_or_enqueue(
+            engine,
+            settings,
+            source_name=settings.kos_default_vault_source,
+            template_name=template_name,
+            folder=folder,
+            title=title,
         )
     except notes_service.NoteAlreadyExistsError as exc:
         answer = f"⚠️ {exc}"
     except (notes_service.VaultSourceNotFoundError, notes_service.TemplateNotFoundError) as exc:
         answer = f"❌ {exc}"
     else:
-        answer = f"✅ Nota creada: {note_path}"
+        # Diferida: este proceso no tiene el vault y la materializa el drain
+        # (doc 14 §5). Decirlo importa — el usuario no la verá al instante.
+        answer = (
+            f"🕒 Nota encolada: {note_path} (se creará en el próximo ciclo de sincronización)"
+            if deferred
+            else f"✅ Nota creada: {note_path}"
+        )
     return QueryResponse(
         query=original_query,
         answer=answer,

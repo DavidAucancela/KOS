@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # Build estático de `apps/web` servido por la propia API (doc 14 §3): un
     # servicio menos en Railway. Vacío en local, donde el web corre en Vite.
     kos_web_dist: str = ""
+    # La API del despliegue gestionado no tiene el filesystem del vault (doc 14
+    # §5): las escrituras se encolan y las materializa el drain. `true` solo en
+    # el servicio `api`; el servicio cron escribe directo.
+    kos_defer_vault_writes: bool = False
 
     # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
     # repetida → semántica) y la media vida del decaimiento de `salience`.

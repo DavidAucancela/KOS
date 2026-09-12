@@ -26,11 +26,11 @@ from pydantic import BaseModel
 from kos_core.config import Settings
 from kos_core.notes import (
     NoteNotFoundError,
-    create_folder,
-    create_note,
+    create_folder_or_enqueue,
+    create_note_or_enqueue,
     get_vault_path,
     read_note,
-    update_note,
+    update_note_or_enqueue,
 )
 from kos_mcp.permissions import ApprovalRequired, gate
 
@@ -81,9 +81,19 @@ async def _create_note_core(
     except ApprovalRequired as exc:
         return ObsidianCreateNoteResult(approved=False, path=None, message=str(exc))
 
-    vault_path = await get_vault_path(engine, source_name or settings.kos_default_vault_source)
-    note_path = create_note(vault_path, template_name=template_name, folder=folder, title=title)
-    return ObsidianCreateNoteResult(approved=True, path=str(note_path), message="nota creada")
+    path, deferred = await create_note_or_enqueue(
+        engine,
+        settings,
+        source_name=source_name or settings.kos_default_vault_source,
+        template_name=template_name,
+        folder=folder,
+        title=title,
+    )
+    return ObsidianCreateNoteResult(
+        approved=True,
+        path=path,
+        message="nota encolada: se creará en el próximo ciclo" if deferred else "nota creada",
+    )
 
 
 async def _read_note_core(
@@ -105,14 +115,26 @@ async def _read_note_core(
     except ApprovalRequired as exc:
         return ObsidianReadNoteResult(approved=False, path=None, content=None, message=str(exc))
 
+    if settings.kos_defer_vault_writes:
+        # Una lectura no se puede diferir. En este despliegue el contenido de las
+        # notas ya indexadas está en Postgres/MinIO y se consulta con las
+        # herramientas de recuperación; el vault en crudo no está aquí (doc 14 §5).
+        return ObsidianReadNoteResult(
+            approved=True,
+            path=None,
+            content=None,
+            message=(
+                "el vault no está disponible en este despliegue: usa las herramientas "
+                "de recuperación sobre el contenido ya indexado"
+            ),
+        )
+
     vault_path = await get_vault_path(engine, source_name or settings.kos_default_vault_source)
     try:
         content = read_note(vault_path, path=path)
     except NoteNotFoundError as exc:
         return ObsidianReadNoteResult(approved=True, path=None, content=None, message=str(exc))
-    return ObsidianReadNoteResult(
-        approved=True, path=path, content=content, message="nota leída"
-    )
+    return ObsidianReadNoteResult(approved=True, path=path, content=content, message="nota leída")
 
 
 async def _update_note_core(
@@ -135,13 +157,24 @@ async def _update_note_core(
     except ApprovalRequired as exc:
         return ObsidianUpdateNoteResult(approved=False, path=None, message=str(exc))
 
-    vault_path = await get_vault_path(engine, source_name or settings.kos_default_vault_source)
     try:
-        note_path = update_note(vault_path, path=path, content=content)
+        note_path, deferred = await update_note_or_enqueue(
+            engine,
+            settings,
+            source_name=source_name or settings.kos_default_vault_source,
+            path=path,
+            content=content,
+        )
     except NoteNotFoundError as exc:
         return ObsidianUpdateNoteResult(approved=True, path=None, message=str(exc))
     return ObsidianUpdateNoteResult(
-        approved=True, path=str(note_path), message="nota actualizada"
+        approved=True,
+        path=note_path,
+        message=(
+            "actualización encolada: se aplicará en el próximo ciclo"
+            if deferred
+            else "nota actualizada"
+        ),
     )
 
 
@@ -164,10 +197,16 @@ async def _create_folder_core(
     except ApprovalRequired as exc:
         return ObsidianCreateFolderResult(approved=False, path=None, message=str(exc))
 
-    vault_path = await get_vault_path(engine, source_name or settings.kos_default_vault_source)
-    folder_path = create_folder(vault_path, path=path)
+    folder_path, deferred = await create_folder_or_enqueue(
+        engine,
+        settings,
+        source_name=source_name or settings.kos_default_vault_source,
+        path=path,
+    )
     return ObsidianCreateFolderResult(
-        approved=True, path=str(folder_path), message="carpeta creada"
+        approved=True,
+        path=folder_path,
+        message="carpeta encolada: se creará en el próximo ciclo" if deferred else "carpeta creada",
     )
 
 

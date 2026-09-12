@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from kos_core import vault_queue
+from kos_core.config import Settings
 from kos_core.storage.postgres import documents_table, sources_table
 from kos_core.templater import render_template
 
@@ -149,3 +151,68 @@ def create_note(vault_path: Path, *, template_name: str, folder: str, title: str
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(rendered, encoding="utf-8")
     return target_path
+
+
+# --- Escrituras diferidas (doc 14 §5) --------------------------------------
+#
+# En el despliegue gestionado la API no tiene el vault en disco: el volumen está
+# en el servicio cron. Estas tres funciones son el único punto donde el sistema
+# decide entre escribir ya o encolar, para que los tres call sites (el comando
+# del chat, `POST /v1/notes` y las herramientas MCP del WritingAgent) se
+# comporten igual sin repetir la decisión.
+
+
+async def create_note_or_enqueue(
+    engine: AsyncEngine,
+    settings: Settings,
+    *,
+    source_name: str,
+    template_name: str,
+    folder: str,
+    title: str,
+) -> tuple[str, bool]:
+    """Crea la nota, o la encola si este proceso no tiene el vault.
+
+    Devuelve `(ruta, diferida)`. Con `diferida=True` la ruta es la *prevista*:
+    aquí no se puede ni leer la plantilla, así que nada se ha renderizado
+    todavía.
+    """
+    if settings.kos_defer_vault_writes:
+        await vault_queue.enqueue(
+            engine,
+            op="create_note",
+            source_name=source_name,
+            payload={"template_name": template_name, "folder": folder, "title": title},
+        )
+        return f"{folder}/{title}.md", True
+    vault_path = await get_vault_path(engine, source_name)
+    return str(
+        create_note(vault_path, template_name=template_name, folder=folder, title=title)
+    ), False
+
+
+async def update_note_or_enqueue(
+    engine: AsyncEngine, settings: Settings, *, source_name: str, path: str, content: str
+) -> tuple[str, bool]:
+    if settings.kos_defer_vault_writes:
+        await vault_queue.enqueue(
+            engine,
+            op="update_note",
+            source_name=source_name,
+            payload={"path": path, "content": content},
+        )
+        return path, True
+    vault_path = await get_vault_path(engine, source_name)
+    return str(update_note(vault_path, path=path, content=content)), False
+
+
+async def create_folder_or_enqueue(
+    engine: AsyncEngine, settings: Settings, *, source_name: str, path: str
+) -> tuple[str, bool]:
+    if settings.kos_defer_vault_writes:
+        await vault_queue.enqueue(
+            engine, op="create_folder", source_name=source_name, payload={"path": path}
+        )
+        return path, True
+    vault_path = await get_vault_path(engine, source_name)
+    return str(create_folder(vault_path, path=path)), False

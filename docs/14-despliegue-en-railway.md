@@ -146,11 +146,18 @@ empuja desde la Mac y desde móvil), y el despliegue lo consume así:
   `KOS_SYNC_NOW_PER_HOUR` disparos por hora porque cada uno arranca un contenedor.
 
 **Consecuencia asumida:** un volumen Railway se adjunta a **un solo servicio**, y lo tiene el cron.
-Por lo tanto `apps/api` **no ve el filesystem del vault**: las herramientas de escritura
-(`obsidian.create_note`/`update_note`, regla 7 de CLAUDE.md) dejan de escribir en disco al
-instante y pasan a **encolar** la escritura, que el siguiente ciclo cron materializa y empuja al
-repo. Una nota creada desde el chat aparece en el vault en minutos, no en segundos. El gate de
-`confirm=true` de `permissions.py` no cambia: sigue siendo la API quien lo exige antes de encolar.
+Por lo tanto `apps/api` **no ve el filesystem del vault**: con `KOS_DEFER_VAULT_WRITES=true`, las
+herramientas de escritura (`obsidian.create_note`/`update_note`/`create_folder`, el comando
+`/crear-nota` del chat y `POST /v1/notes`) dejan de escribir en disco y **encolan la intención** en
+`pending_vault_writes`; el drain la materializa al inicio del ciclo siguiente —antes de encolar la
+sincronización, así la nota entra al índice en esa misma pasada— y empuja el resultado al repo.
+Una nota creada desde el chat aparece en el vault en minutos, no en segundos, y la respuesta lo
+dice explícitamente en vez de fingir que ya existe. El gate de `confirm=true` de `permissions.py`
+no cambia: sigue siendo la API quien lo exige antes de encolar.
+
+`obsidian.read_note` es la excepción: **una lectura no se puede diferir**. En este modo devuelve un
+mensaje que remite a las herramientas de recuperación sobre el contenido ya indexado (Postgres/R2),
+que es donde vive lo que el sistema sabe.
 
 ## 6. Lo que hay que tocar en el código
 
@@ -168,7 +175,7 @@ Ninguna de estas piezas existe hoy; todas son requisito, no mejora.
 | Cadena de proveedores cloud (`KOS_LLM_PROVIDER_CHAIN`) en el factory | `apps/api/.../llm/factory.py` | ADR-0008: el fallback deja de ser cloud→local y pasa a ser cloud→cloud; en producción Ollama no entra en la cadena. |
 | Tabla de ejecuciones del cron + `GET /v1/ops/status` + aviso en la web | `apps/api`, `apps/workers`, `apps/web` | ADR-0009: sin esto, que el cron deje de correr es invisible. |
 | `POST /v1/ops/sync-now` → `serviceInstanceRedeploy` de Railway | `apps/api/.../ops/railway.py` | Camino inmediato de §5. Único punto del código acoplado a la plataforma: si el despliegue se muda, se reemplaza este módulo y nada más. |
-| Encolado de `obsidian.*` en vez de escritura directa | `apps/api` + `apps/workers` | Consecuencia del volumen único (§5). |
+| Cola `pending_vault_writes` + aplicador en el drain | `packages/core`, `apps/workers` | Consecuencia del volumen único (§5). La decisión de escribir o encolar vive en un solo punto (`kos_core.notes.*_or_enqueue`), para que los tres call sites se comporten igual. |
 | Release command `alembic upgrade head` | Railway | Migraciones antes de cambiar tráfico. Neo4j no tiene migraciones: sus constraints se crean idempotentes al arrancar — verificar que ese arranque tolere Aura. |
 | `kos_guardian_enabled=false`, beat desactivado | config | El `docker_guardian` (doc 09 §8) no aplica en Railway; su equivalente es el serverless. |
 

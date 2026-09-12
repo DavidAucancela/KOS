@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kos_api.auth import RateLimiter, client_ip
 from kos_api.deps import postgres_engine, settings_dep
 from kos_api.ops import railway
+from kos_core import vault_queue
 from kos_core.config import Settings
 from kos_core.storage import postgres as postgres_storage
 
@@ -51,6 +52,9 @@ class OpsStatus(BaseModel):
     now: datetime
     mode: Literal["local", "managed"]
     ingesta: IngestStatus
+    escrituras_pendientes: int
+    """Notas y carpetas encoladas esperando al drain (doc 14 §5). En el modo
+    local siempre 0: allí se escriben al instante."""
 
 
 @router.get("/status", response_model=OpsStatus)
@@ -73,6 +77,7 @@ async def ops_status(
     return OpsStatus(
         now=now,
         mode="managed" if settings.kos_serverless_mode else "local",
+        escrituras_pendientes=await vault_queue.count_pending(engine),
         ingesta=IngestStatus(
             last_run=last_run,
             hours_since_last_run=hours,

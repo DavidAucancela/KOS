@@ -124,3 +124,86 @@ async def test_consolidacion_de_memoria_respeta_la_cadencia(
 
     monkeypatch.setattr(drain.postgres_storage, "last_cron_run", fake_last)
     assert await drain._memory_consolidation_due(object(), _settings()) is expected
+
+
+class _QueueEngine:
+    """Engine de mentira para el aplicador: devuelve la cola y recoge el cierre."""
+
+    def __init__(self, items: list[dict[str, Any]]) -> None:
+        self.items = items
+        self.applied: list[tuple[Any, str]] = []
+        self.failed: list[tuple[Any, str]] = []
+
+
+async def test_aplica_las_escrituras_pendientes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Lo que la API encoló se materializa aquí, que es quien tiene el vault."""
+    vault = tmp_path / "vault"
+    (vault / "_Templates").mkdir(parents=True)
+    (vault / "_Templates" / "Base.md").write_text("# {{title}}", encoding="utf-8")
+
+    engine = _QueueEngine(
+        [
+            {
+                "write_id": "w1",
+                "op": "create_note",
+                "source_name": "vault-real",
+                "payload": {"template_name": "Base", "folder": "Notas", "title": "Desde el chat"},
+            }
+        ]
+    )
+
+    async def fake_pending(_engine: Any, **_kw: Any) -> list[dict[str, Any]]:
+        return engine.items
+
+    async def fake_applied(_engine: Any, write_id: Any, *, result_path: str) -> None:
+        engine.applied.append((write_id, result_path))
+
+    async def fake_vault_path(_engine: Any, source_name: str) -> Path:
+        return vault
+
+    monkeypatch.setattr(drain.vault_queue, "pending", fake_pending)
+    monkeypatch.setattr(drain.vault_queue, "mark_applied", fake_applied)
+    monkeypatch.setattr(drain, "get_vault_path", fake_vault_path)
+
+    applied, failed = await drain.apply_pending_writes(engine)
+    assert (applied, failed) == (1, 0)
+    assert (vault / "Notas" / "Desde el chat.md").is_file()
+    assert engine.applied[0][0] == "w1"
+
+
+async def test_una_escritura_rota_no_bloquea_las_demas(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Se marca con su error en vez de reintentarse en todos los ciclos."""
+    vault = tmp_path / "vault"
+    (vault / "_Templates").mkdir(parents=True)
+
+    engine = _QueueEngine(
+        [
+            {
+                "write_id": "rota",
+                "op": "create_note",
+                "source_name": "vault-real",
+                "payload": {"template_name": "NoExiste", "folder": "N", "title": "X"},
+            }
+        ]
+    )
+
+    async def fake_pending(_engine: Any, **_kw: Any) -> list[dict[str, Any]]:
+        return engine.items
+
+    async def fake_failed(_engine: Any, write_id: Any, *, error: str) -> None:
+        engine.failed.append((write_id, error))
+
+    async def fake_vault_path(_engine: Any, source_name: str) -> Path:
+        return vault
+
+    monkeypatch.setattr(drain.vault_queue, "pending", fake_pending)
+    monkeypatch.setattr(drain.vault_queue, "mark_failed", fake_failed)
+    monkeypatch.setattr(drain, "get_vault_path", fake_vault_path)
+
+    applied, failed = await drain.apply_pending_writes(engine)
+    assert (applied, failed) == (0, 1)
+    assert "Plantilla no encontrada" in engine.failed[0][1]

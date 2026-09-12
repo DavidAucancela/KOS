@@ -33,10 +33,13 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from celery.signals import task_postrun
 
+from kos_core import vault_queue
 from kos_core.config import Settings, get_settings
+from kos_core.notes import create_folder, create_note, get_vault_path, update_note
 from kos_core.storage import postgres as postgres_storage
 from kos_core.storage import redis as redis_storage
 
@@ -134,6 +137,38 @@ async def _memory_consolidation_due(engine: object, settings: Settings) -> bool:
         return True
     reference = last["finished_at"] or last["started_at"]
     return datetime.now(UTC) - reference >= timedelta(hours=settings.kos_memory_consolidation_hours)
+
+
+async def apply_pending_writes(engine: Any) -> tuple[int, int]:
+    """Materializa las escrituras que la API dejó encoladas (doc 14 §5).
+
+    Corre **antes** de encolar la sincronización, así una nota creada desde el
+    chat entra al índice en este mismo ciclo en vez de esperar al siguiente.
+    Devuelve `(aplicadas, fallidas)`.
+    """
+    writers = {
+        "create_note": create_note,
+        "update_note": update_note,
+        "create_folder": create_folder,
+    }
+    applied = 0
+    failed = 0
+    for item in await vault_queue.pending(engine):
+        write_id = item["write_id"]
+        try:
+            writer = writers[item["op"]]
+            vault_path = await get_vault_path(engine, item["source_name"])
+            path = writer(vault_path, **item["payload"])
+        except Exception as exc:
+            # Una escritura rota no puede repetirse cada ciclo: queda marcada con
+            # su error y se sigue con las demás.
+            logger.warning("escritura %s falló: %s", write_id, exc)
+            await vault_queue.mark_failed(engine, write_id, error=str(exc))
+            failed += 1
+            continue
+        await vault_queue.mark_applied(engine, write_id, result_path=str(path))
+        applied += 1
+    return applied, failed
 
 
 def _watchdog(
@@ -252,6 +287,10 @@ def main(argv: list[str] | None = None) -> int:
             if warning:
                 notes.append(warning)
                 logger.warning(warning)
+
+        applied, failed = asyncio.run(apply_pending_writes(engine))
+        if applied or failed:
+            notes.append(f"escrituras al vault: {applied} aplicadas, {failed} fallidas")
 
         if not args.skip_sync:
             app.send_task("kos.sync_all_sources", queue=QUEUE_NAME)

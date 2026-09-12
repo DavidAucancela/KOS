@@ -27,6 +27,9 @@ async def test_sin_confirm_no_escribe(vault: Path, monkeypatch: pytest.MonkeyPat
         raise AssertionError("no debe resolver el vault sin confirm=True")
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._create_note_core(
         None,
@@ -51,6 +54,9 @@ async def test_con_confirm_crea_la_nota(vault: Path, monkeypatch: pytest.MonkeyP
         return vault
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._create_note_core(
         None,
@@ -76,6 +82,9 @@ async def test_source_name_por_defecto_usa_settings(
         return vault
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._create_note_core(
         None,
@@ -97,6 +106,9 @@ def _patched_vault(vault: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return vault
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     return vault
 
 
@@ -107,6 +119,9 @@ async def test_read_note_sin_confirm_no_resuelve(
         raise AssertionError("no debe resolver el vault sin confirm=True")
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._read_note_core(
         None, Settings(), path="Nota.md", source_name="v", confirm=False, trace_id="t"
@@ -137,6 +152,9 @@ async def test_update_note_sin_confirm_no_escribe(
         raise AssertionError("no debe resolver el vault sin confirm=True")
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._update_note_core(
         None, Settings(), path="Nota.md", content="nuevo", source_name="v", confirm=False,
@@ -180,6 +198,9 @@ async def test_create_folder_sin_confirm_no_crea(
         raise AssertionError("no debe resolver el vault sin confirm=True")
 
     monkeypatch.setattr(obsidian_tools, "get_vault_path", fake_get_vault_path)
+    # Las escrituras resuelven el vault dentro de `kos_core.notes` desde que
+    # pueden diferirse (doc 14 §5); la lectura lo sigue haciendo en la tool.
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._create_folder_core(
         None, Settings(), path="Ideas/Sub", source_name="v", confirm=False, trace_id="t"

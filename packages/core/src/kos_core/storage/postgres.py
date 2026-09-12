@@ -261,6 +261,23 @@ cron_runs_table = Table(
 correr es invisible: el worker no es un proceso vivo al que mirarle el pulso."""
 
 
+pending_vault_writes_table = Table(
+    "pending_vault_writes",
+    metadata,
+    Column("write_id", UUID(as_uuid=True), primary_key=True),
+    Column("op", Text, nullable=False),
+    Column("source_name", Text, nullable=False),
+    Column("payload", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("requested_at", DateTime(timezone=True), nullable=False),
+    Column("status", Text, nullable=False, server_default=text("'pending'")),
+    Column("applied_at", DateTime(timezone=True)),
+    Column("result_path", Text),
+    Column("error", Text),
+)
+"""Escrituras al vault pendientes de materializar (doc 14 §5): la API no tiene
+el filesystem del vault, el drain sí."""
+
+
 def create_engine(settings: Settings) -> AsyncEngine:
     """Engine compartido. En `kos_serverless_mode` (doc 14 §2.2) se usa NullPool:
     un pool con conexiones ociosas abiertas emite keepalives, y eso impide que

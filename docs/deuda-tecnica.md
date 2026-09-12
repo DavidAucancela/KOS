@@ -115,7 +115,7 @@ _(sin ítems abiertos — el diseño de la UI se consolidó en
 
 ## Escrituras al vault en el despliegue gestionado (doc 14 §5)
 
-**Estado:** abierto · **Registrado:** 2026-09-12 (fase A del despliegue gestionado)
+**Estado:** cerrado el 2026-09-12 (fase B) · **Registrado:** 2026-09-12 (fase A)
 
 En Railway el vault vive en el volumen del servicio cron, y un volumen se adjunta a un solo
 servicio: la API no tiene filesystem del vault. Las herramientas de escritura (`obsidian.create_note`
@@ -127,5 +127,9 @@ desde el chat aparece en minutos, no al instante.
 `obsidian.read_note` es un caso aparte: no se puede diferir porque es una lectura. En ese modo el
 contenido hay que leerlo de Postgres/R2, no del vault.
 
-Se aborda en la **fase B**, junto a `scripts/railway_drain.py`, que es quien tiene el vault delante.
-Hasta entonces el despliegue gestionado es de solo lectura para el vault.
+**Resuelto en la fase B**: tabla `pending_vault_writes` (migración 0016), decisión centralizada en
+`kos_core.notes.create_note_or_enqueue` / `update_note_or_enqueue` / `create_folder_or_enqueue`, y
+aplicación en `kos_workers.drain.apply_pending_writes` antes de encolar la sincronización, para que
+la nota entre al índice en el mismo ciclo. Una escritura que falla queda marcada con su error y no
+se reintenta: repetir a ciegas volvería a fallar cada ciclo, y una nota ya creada se intentaría dos
+veces. `read_note` sigue sin poder diferirse, y en ese modo lo dice.

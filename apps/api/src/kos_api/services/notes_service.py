@@ -14,9 +14,12 @@ from kos_core.notes import (
     TemplateInfo,
     TemplateNotFoundError,
     VaultSourceNotFoundError,
+    create_folder_or_enqueue,
     create_note,
+    create_note_or_enqueue,
     get_vault_path,
     list_templates,
+    update_note_or_enqueue,
 )
 
 __all__ = [
@@ -24,7 +27,10 @@ __all__ = [
     "TemplateInfo",
     "TemplateNotFoundError",
     "VaultSourceNotFoundError",
+    "create_folder_or_enqueue",
     "create_note",
+    "create_note_or_enqueue",
     "get_vault_path",
     "list_templates",
+    "update_note_or_enqueue",
 ]
