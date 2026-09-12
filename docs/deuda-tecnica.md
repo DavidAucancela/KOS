@@ -112,3 +112,20 @@ _(sin ítems abiertos — el diseño de la UI se consolidó en
 | Ítem | Origen |
 | --- | --- |
 | **Backfill del grafo pendiente**: el pipeline de extracción cambió (doc 12 — resolución indexada, extracción por chunk, relaciones cross-documento y §10 aristas estructurales/co-ocurrencia), pero los documentos ingeridos *antes* de ese cambio nunca volvieron a pasar por el código nuevo. Medido el 2026-09-08: 861 de 2.700 chunks tienen entidades extraídas; el grafo está al 28% de nodos aislados (1.424 de 5.073). `scripts/backfill_graph_extraction.py` re-corre **solo** la extracción sobre los chunks ya existentes (no re-lee el vault, no re-embebe, no re-resume — eso es `kos reindex`) y es idempotente por los MERGE de Neo4j.<br><br>**Coste medido en vivo (no estimado)**: ~70 s/documento contra `llama3.2` local — 10 documentos en 11:47, con ~20% de fallos por `ReadTimeout` que el script salta y hay que reintentar re-corriendo. Para los 755 documentos activos: **~15 h de corrida**. Conviene `nohup` en una noche, y evaluar antes subir el timeout del cliente Ollama para bajar la tasa de timeouts.<br><br>**Trampa de `--limit N`**: toma siempre los primeros N por `doc_id` ordenado, así que correr "en tandas" reprocesa el prefijo anterior cada vez — solo avanza subiendo N.<br><br>**Corre con Ollama local, no con OpenAI**: `graph_sync.py` y `cross_doc_relations.py` instancian `OllamaLLMClient` directo, sin pasar por el factory de proveedor. Es deliberado — [ADR-0007](adr/0007-proveedor-cloud-opt-in-para-planner-y-writing.md) descartó explícitamente cloud para la ingesta/extracción (volumen alto, coste variable por nota, fuga masiva de contenido: la puerta `cloud_safe` es por fuente). Acelerarlo con cloud requeriría un ADR nuevo que revierta esa decisión.<br><br>**No es urgente**: el grafo ya funciona al 72% de nodos conectados y la ingesta nueva sale correcta por sí sola. Lo que se gana es cerrar los huecos de las consultas de grafo sobre notas viejas. Alternativa válida: esperar a una razón concreta (una recomendación mala por falta de aristas). | [doc 12 §10](12-calidad-de-extraccion-de-entidades-y-relaciones.md), aristas estructurales construidas 2026-08-27; medición 2026-09-08 |
+
+## Escrituras al vault en el despliegue gestionado (doc 14 §5)
+
+**Estado:** abierto · **Registrado:** 2026-09-12 (fase A del despliegue gestionado)
+
+En Railway el vault vive en el volumen del servicio cron, y un volumen se adjunta a un solo
+servicio: la API no tiene filesystem del vault. Las herramientas de escritura (`obsidian.create_note`
+/`update_note`/`create_folder`, y el comando `/crear-nota` del chat) escriben hoy directo a disco,
+así que **en el despliegue gestionado fallarían**. El diseño acordado es encolar la intención y que
+el drain la materialice y la empuje al repo (doc 14 §5), con la consecuencia de que una nota creada
+desde el chat aparece en minutos, no al instante.
+
+`obsidian.read_note` es un caso aparte: no se puede diferir porque es una lectura. En ese modo el
+contenido hay que leerlo de Postgres/R2, no del vault.
+
+Se aborda en la **fase B**, junto a `scripts/railway_drain.py`, que es quien tiene el vault delante.
+Hasta entonces el despliegue gestionado es de solo lectura para el vault.
