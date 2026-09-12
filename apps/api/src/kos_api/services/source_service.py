@@ -64,6 +64,10 @@ async def update_source_config(
     """Shallow-merge de `config` en el JSONB existente (`config || :patch`).
     Clave reconocida: `cloud_safe` (bool) — habilita la síntesis cloud para la
     evidencia de esta fuente (ADR-0007). Devuelve None si la fuente no existe.
+
+    Las claves aceptadas las restringe `SourceConfigPatch` en la ruta
+    (`_PATCHABLE_CONFIG_KEYS`): el merge de acá es genérico a propósito, pero el
+    endpoint no deja tocar configuración del conector.
     """
     async with engine.begin() as conn:
         result = await conn.execute(
