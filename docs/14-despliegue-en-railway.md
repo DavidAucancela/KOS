@@ -133,12 +133,17 @@ empuja desde la Mac y desde móvil), y el despliegue lo consume así:
   inicio de cada ejecución. Se sigue usando **`ObsidianConnector`**, no `GitConnector`: el
   conector git trata los `.md` como documentación genérica y perdería wikilinks y frontmatter
   (`packages/connectors/.../obsidian/`). El git es solo transporte.
-- **Camino inmediato (manual, desde la Mac o la web):** `POST /v1/sources/{id}/sync` — ya existe — para
-  forzar la ingesta sin esperar al cron. Con 2 ciclos al día **este camino es parte del uso
-  normal**, no un extra. Con el worker apagado, la API encola y el trabajo se
-  ejecuta en el siguiente ciclo; para respuesta inmediata hace falta que ese endpoint pueda
-  **ejecutar la sync en proceso** (`BackgroundTasks`) cuando `KOS_INLINE_SYNC=true`. Es el único
-  añadido que este camino exige.
+- **Camino inmediato (desde cualquier dispositivo):** `POST /v1/ops/sync-now`. Con 2 ciclos al
+  día **este camino es parte del uso normal**, no un extra.
+
+  La API **no puede ingerir por sí misma**: el vault vive en el volumen del servicio cron y un
+  volumen de Railway se adjunta a un solo servicio, así que el filesystem del vault no existe en
+  el contenedor de la API — y ejecutar el pipeline ahí, además, chocaría con la regla de
+  dependencias del proyecto (`apps/api` no importa `kos_workers`, verificado por `lint-imports`).
+  Lo que hace el endpoint es pedirle a Railway que **ejecute ahora el servicio cron**
+  (`serviceInstanceRedeploy`), que sí tiene el vault. Devuelve 501 fuera del despliegue
+  gestionado, 409 si ya hay un drain corriendo, y está limitado a
+  `KOS_SYNC_NOW_PER_HOUR` disparos por hora porque cada uno arranca un contenedor.
 
 **Consecuencia asumida:** un volumen Railway se adjunta a **un solo servicio**, y lo tiene el cron.
 Por lo tanto `apps/api` **no ve el filesystem del vault**: las herramientas de escritura
@@ -162,7 +167,7 @@ Ninguna de estas piezas existe hoy; todas son requisito, no mejora.
 | Middleware de **claves nombradas** (`KOS_API_KEYS`), Basic auth sobre **todas** las rutas incluida la web, `X-API-Key` para clientes sin navegador, + **rate limit** en memoria | `apps/api/.../middleware.py` | Hoy no hay autenticación: la API expuesta es acceso abierto a todo el conocimiento personal, y un escaneo dispara gasto de LLM cloud. → **ADR-0010**. |
 | Cadena de proveedores cloud (`KOS_LLM_PROVIDER_CHAIN`) en el factory | `apps/api/.../llm/factory.py` | ADR-0008: el fallback deja de ser cloud→local y pasa a ser cloud→cloud; en producción Ollama no entra en la cadena. |
 | Tabla de ejecuciones del cron + `GET /v1/ops/status` + aviso en la web | `apps/api`, `apps/workers`, `apps/web` | ADR-0009: sin esto, que el cron deje de correr es invisible. |
-| `KOS_INLINE_SYNC` en `/v1/sources/{id}/sync` | `apps/api` | Camino inmediato de §5. |
+| `POST /v1/ops/sync-now` → `serviceInstanceRedeploy` de Railway | `apps/api/.../ops/railway.py` | Camino inmediato de §5. Único punto del código acoplado a la plataforma: si el despliegue se muda, se reemplaza este módulo y nada más. |
 | Encolado de `obsidian.*` en vez de escritura directa | `apps/api` + `apps/workers` | Consecuencia del volumen único (§5). |
 | Release command `alembic upgrade head` | Railway | Migraciones antes de cambiar tráfico. Neo4j no tiene migraciones: sus constraints se crean idempotentes al arrancar — verificar que ese arranque tolere Aura. |
 | `kos_guardian_enabled=false`, beat desactivado | config | El `docker_guardian` (doc 09 §8) no aplica en Railway; su equivalente es el serverless. |
@@ -184,7 +189,8 @@ variables por servicio.
 | `KOS_EMBEDDING_BASE_URL` / `KOS_EMBEDDING_API_KEY` / `KOS_EMBEDDING_MODEL` | endpoint bge-m3 hospedado / `bge-m3` | proveedor (§10) |
 | `KOS_API_KEYS` | `web:…,mac:…,movil:…` | ADR-0010 |
 | `VAULT_REPO_URL` / `VAULT_PATH` / deploy key | repo privado del vault / `/data/vault` | GitHub |
-| `KOS_INLINE_SYNC` | `true` en `api` | §5 |
+| `RAILWAY_API_TOKEN` / `RAILWAY_CRON_SERVICE_ID` / `RAILWAY_ENVIRONMENT_ID` | token de cuenta e ids del servicio cron | §5, disparo inmediato |
+| `KOS_SYNC_NOW_PER_HOUR` | `4` | tope de disparos manuales |
 | `KOS_ENV=production`, `KOS_LOG_LEVEL=INFO`, `KOS_GUARDIAN_ENABLED=false` | — | — |
 
 Los secretos viven en shared variables del proyecto Railway; nunca en el repo (doc 09 §5).
@@ -266,7 +272,8 @@ subir a 4×/día o 1×/hora más adelante sin renegociar el techo.
 | **Privacidad**: el conocimiento personal viaja a OpenAI/proveedor de embeddings y vive en Supabase/Aura/R2 | Concesión explícita del modo, registrada en ADR-0008. Quien no la acepte se queda en el modo local de doc 09. Mitigación parcial: proveedor con retención cero / no-training (verificar términos). |
 | **API pública sin auth** | Bloqueante de despliegue, no mejora: claves nombradas + Basic sobre todas las rutas + rate limit antes del primer deploy con datos reales (ADR-0010). |
 | **El cron no termina** → se saltan todas las ejecuciones siguientes y la ingesta muere en silencio | Timeout duro de 30 min en `railway_drain.py` + `GET /v1/ops/status` con aviso en la web si la última ejecución tiene >18 h. Es el fallo más probable del diseño, y el aviso **solo se ve al abrir la app** (ADR-0009). |
-| **Latencia de ingesta de hasta ~12 h** con 2 ciclos al día | Asumido a cambio del coste. El disparo manual (`POST /v1/sources/{id}/sync` con `KOS_INLINE_SYNC`) es el camino cuando hay prisa; si estorba, subir a 4×/día cuesta ~$0.2/mes. |
+| **Latencia de ingesta de hasta ~12 h** con 2 ciclos al día | Asumido a cambio del coste. `POST /v1/ops/sync-now` cubre la prisa desde cualquier dispositivo; si aun así estorba, subir a 4×/día cuesta ~$0.2/mes. |
+| **Token de Railway dentro de la app** para el disparo inmediato | Es un secreto con permisos sobre el proyecto entero: vive solo en las variables del servicio `api`, y el endpoint que lo usa exige credencial y está limitado por hora. Si se filtra, se rota en Railway. |
 | **Dos proveedores cloud** en vez de uno (cadena de ADR-0008) | Más superficie de privacidad: hay que auditar los términos del de reserva igual que los del primario. Su coste se audita como `cost_confidence=unknown` (doc 15 §2.1). |
 | **Basic auth**: cerrar sesión en el navegador es incómodo y las claves viajan en cada petición | TLS obligatorio (Railway lo da por defecto); nunca exponer por HTTP plano. Revocación por cliente gracias a las claves nombradas (ADR-0010). |
 | **La API no duerme** por pools/telemetría | Verificar con la gráfica de uso de Railway en la primera semana; si no baja a cero, el techo no se cumple. |
@@ -295,7 +302,7 @@ Ninguno revierte ADR-0006 ni ADR-0007 para el modo local: los complementan para 
 | Fase | Qué cubre | Criterio de salida |
 |---|---|---|
 | ~~0 — ADRs~~ | 0008, 0009, 0010 | ✅ Cerrada el 2026-09-12: los tres en estado Aceptado |
-| **A — código habilitante** | `DATABASE_URL` en config · cliente de embeddings HTTP · claves nombradas + Basic + rate limit · cadena de proveedores cloud · pools que duermen · `KOS_INLINE_SYNC` · encolado de `obsidian.*` · tabla de ejecuciones + `/v1/ops/status` | Tests verdes; la API arranca contra Supabase+Aura+R2 **desde el Mac**, sin Docker local |
+| **A — código habilitante** | `DATABASE_URL` en config · cliente de embeddings HTTP · claves nombradas + Basic + rate limit · cadena de proveedores cloud · pools que duermen · `/v1/ops/sync-now` · encolado de `obsidian.*` · tabla de ejecuciones + `/v1/ops/status` | Tests verdes; la API arranca contra Supabase+Aura+R2 **desde el Mac**, sin Docker local |
 | **B — imágenes** | `Dockerfile` multi-stage (uv + build de `apps/web`) · `scripts/railway_drain.py` (drena, consolida memoria si toca, timeout 30 min) · `railway.json` | `docker run` local sirve API + web; el drain sale solo con la cola vacía **y también al vencer el timeout** |
 | **C — infra gestionada** | Proyecto Railway (api + workers-cron `0 0,12 * * *` + Redis + volumen) · Supabase · Aura · R2 · repo privado del vault · variables (§7) | Deploy verde; `/health` responde sin credencial y `/` la pide; el cron ejecuta y termina |
 | **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]` |

@@ -62,8 +62,12 @@ nada.
   coste es reescribir la cadena de tasks perdiendo los reintentos, con riesgo de dejar el grafo a
   medias. Queda como palanca de último recurso si la fase E de doc 14 no baja de $3.
 - **Cron externo (GitHub Actions) llamando a `/v1/sources/{id}/sync`** — mantiene la API despierta
-  haciendo el trabajo pesado dentro del servicio web y añade una dependencia fuera de Railway. Se
-  conserva solo como camino manual de disparo, no como scheduler.
+  haciendo el trabajo pesado dentro del servicio web y añade una dependencia fuera de Railway.
+- **Ingesta inmediata dentro de la API** (`BackgroundTasks`) — inviable por dos motivos
+  independientes: el vault vive en el volumen del cron y un volumen solo se adjunta a un servicio,
+  y `apps/api` no puede importar `kos_workers` (regla de dependencias del proyecto). El disparo
+  inmediato se resuelve pidiéndole a Railway que ejecute ahora el servicio cron
+  (`POST /v1/ops/sync-now`, doc 14 §5).
 
 ## Consecuencias
 
@@ -71,7 +75,7 @@ nada.
   observable desde Railway; cero refactor de la cadena de tasks; el estado de ejecución queda
   visible en la propia app.
 - **Negativas / deuda aceptada:** una nota puede tardar **hasta ~12 h** en indexarse si no se
-  dispara la sync a mano — el camino manual deja de ser un extra y pasa a ser parte del uso
+  dispara la sync a mano con `/v1/ops/sync-now` — el camino manual deja de ser un extra y pasa a ser parte del uso
   normal; en días de mucha escritura el grafo puede ir un ciclo por detrás por el timeout de
   30 min; el aviso de cron muerto solo se ve al abrir la web; la consolidación de memoria hereda
   la cadencia del drain (se ejecuta en el primer ciclo tras cumplirse las 24 h, no a una hora fija).

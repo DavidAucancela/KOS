@@ -104,10 +104,15 @@ class Settings(BaseSettings):
     kos_embedding_api_key: str = ""
     kos_embedding_model: str = "bge-m3"
 
-    # Ingesta en el despliegue gestionado (ADR-0009): con el worker apagado
-    # entre ciclos, `POST /v1/sources/{id}/sync` ejecuta en proceso en vez de
-    # encolar y esperar hasta 12h.
-    kos_inline_sync: bool = False
+    # Disparo inmediato de la ingesta (doc 14 §5). Con el worker apagado entre
+    # ciclos y el vault en su volumen, la API no puede ingerir por sí misma: lo
+    # que hace es pedirle a Railway que ejecute ahora el servicio cron.
+    railway_api_token: str = ""
+    railway_cron_service_id: str = ""
+    railway_environment_id: str = ""
+    railway_api_url: str = "https://backboard.railway.com/graphql/v2"
+    # Cada disparo arranca un contenedor: se limita por hora, no por minuto.
+    kos_sync_now_per_hour: int = 4
     # A partir de cuántas horas sin ejecución del cron se considera parada la
     # ingesta (lo que `/v1/ops/status` reporta como `stale`).
     kos_cron_stale_hours: int = 18

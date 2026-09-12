@@ -44,12 +44,16 @@ _MAX_TRACKED_CLIENTS = 2048
 
 
 class RateLimiter:
-    """Ventana deslizante de un minuto por (cliente, bucket), en memoria."""
+    """Ventana deslizante por (cliente, bucket), en memoria. Un minuto por
+    defecto; `window` permite ventanas más largas (el disparo manual del cron
+    se cuenta por hora, porque cada uno arranca un contenedor)."""
 
     def __init__(self) -> None:
         self._hits: dict[tuple[str, str], deque[float]] = {}
 
-    def allow(self, client: str, bucket: str, limit: int) -> bool:
+    def allow(
+        self, client: str, bucket: str, limit: int, *, window: float = _WINDOW_SECONDS
+    ) -> bool:
         if limit <= 0:
             return True
         now = time.monotonic()
@@ -59,7 +63,7 @@ class RateLimiter:
             if len(self._hits) >= _MAX_TRACKED_CLIENTS:
                 self._evict()
             hits = self._hits.setdefault(key, deque())
-        while hits and now - hits[0] > _WINDOW_SECONDS:
+        while hits and now - hits[0] > window:
             hits.popleft()
         if len(hits) >= limit:
             return False

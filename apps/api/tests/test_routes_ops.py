@@ -66,3 +66,44 @@ def test_modo_refleja_el_despliegue(monkeypatch: pytest.MonkeyPatch) -> None:
         assert client.get("/v1/ops/status").json()["mode"] == "managed"
     with _client(monkeypatch, _run(1)) as client:
         assert client.get("/v1/ops/status").json()["mode"] == "local"
+
+
+def test_sync_now_sin_railway_devuelve_501(monkeypatch: pytest.MonkeyPatch) -> None:
+    """En el modo local no existe nada que disparar: se dice, no se finge."""
+    with _client(monkeypatch, _run(1)) as client:
+        response = client.post("/v1/ops/sync-now")
+    assert response.status_code == 501
+
+
+def test_sync_now_con_drain_en_curso_devuelve_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Railway saltaría la ejecución igualmente; mejor decirlo que gastar un
+    contenedor."""
+    en_curso = _run(0.1)
+    en_curso["status"] = "running"
+    en_curso["finished_at"] = None
+    with _client(
+        monkeypatch,
+        en_curso,
+        railway_api_token="tok",
+        railway_cron_service_id="svc",
+        railway_environment_id="env",
+    ) as client:
+        response = client.post("/v1/ops/sync-now")
+    assert response.status_code == 409
+
+
+def test_sync_now_dispara_el_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_trigger(settings: Any, **kwargs: Any) -> str:
+        return "dep-1"
+
+    monkeypatch.setattr("kos_api.routes.ops.railway.trigger_cron_run", fake_trigger)
+    with _client(
+        monkeypatch,
+        _run(5),
+        railway_api_token="tok",
+        railway_cron_service_id="svc",
+        railway_environment_id="env",
+    ) as client:
+        response = client.post("/v1/ops/sync-now")
+    assert response.status_code == 202
+    assert response.json()["deployment_id"] == "dep-1"
