@@ -28,7 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
+from kos_core.llm.factory import make_embedding_client
+from kos_core.llm.ollama import OllamaLLMClient
 from kos_core.ontology import canonicalize
 from kos_core.schemas import EntityCandidate, ParsedDocument, RelationCandidate
 from kos_core.storage import neo4j as neo4j_storage
@@ -600,7 +601,7 @@ async def _sync_graph(
 async def _async_graph_sync(doc_id: uuid.UUID) -> dict[str, Any]:
     settings = get_settings()
     llm = OllamaLLMClient(settings)
-    embedder = OllamaEmbeddingClient(settings)
+    embedder = make_embedding_client(settings)
     engine = create_engine(settings)
     driver = neo4j_storage.create_driver(settings)
 

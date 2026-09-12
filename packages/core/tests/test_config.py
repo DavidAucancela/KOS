@@ -32,3 +32,43 @@ def test_settings_desde_variables_de_entorno(monkeypatch: pytest.MonkeyPatch) ->
     settings = Settings(_env_file=None)
     assert settings.postgres_host == "db.interna"
     assert settings.ollama_embedding_model == "otro-modelo"
+
+
+def test_database_url_gana_sobre_piezas_sueltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los gestionados (Supabase, Railway) entregan una URL, no host/puerto (doc 14 §6)."""
+    monkeypatch.setenv("POSTGRES_HOST", "localhost")
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@db.supabase.co:5432/postgres?sslmode=require")
+    settings = Settings(_env_file=None)
+    assert settings.postgres_dsn == (
+        "postgresql+psycopg://u:p@db.supabase.co:5432/postgres?sslmode=require"
+    )
+
+
+def test_database_url_respeta_driver_explicito(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@host/db")
+    assert Settings(_env_file=None).postgres_dsn == "postgresql+asyncpg://u:p@host/db"
+
+
+def test_api_keys_con_nombre(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-0010: `nombre:clave`, para revocar un cliente sin tocar los demás."""
+    monkeypatch.setenv("KOS_API_KEYS", "web:k1, mac:k2 ,")
+    assert Settings(_env_file=None).api_keys == {"web": "k1", "mac": "k2"}
+
+
+def test_api_keys_sin_nombre_es_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KOS_API_KEYS", "solo-una-clave")
+    assert Settings(_env_file=None).api_keys == {"default": "solo-una-clave"}
+
+
+def test_api_keys_vacias_por_defecto(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KOS_API_KEYS", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.api_keys == {}
+    assert settings.llm_provider_chain == []
+    assert settings.kos_serverless_mode is False
+    assert settings.kos_embedding_provider == "ollama"
+
+
+def test_llm_provider_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KOS_LLM_PROVIDER_CHAIN", "openai, openrouter")
+    assert Settings(_env_file=None).llm_provider_chain == ["openai", "openrouter"]

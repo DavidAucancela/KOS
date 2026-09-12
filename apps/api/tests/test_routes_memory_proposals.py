@@ -120,7 +120,7 @@ def test_patch_proposal_aprueba_escribe_memoria_de_verdad(monkeypatch: pytest.Mo
         updated.update({"status": status, "memory_id": memory_id})
         return {**item, "status": status, "memory_id": memory_id}
 
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     monkeypatch.setattr(postgres_storage, "get_memory_proposal", fake_get)
     monkeypatch.setattr(postgres_storage, "insert_memory", fake_insert_memory)
     monkeypatch.setattr(neo4j_storage, "find_node_ids_by_sources", fake_find_node_ids)

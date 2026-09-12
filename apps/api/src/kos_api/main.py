@@ -25,7 +25,7 @@ from kos_api.routes import (
     sources,
 )
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient
+from kos_core.llm.factory import make_embedding_client
 from kos_core.observability import configure_logging, configure_tracing
 from kos_core.storage import minio as minio_storage
 from kos_core.storage import neo4j as neo4j_storage
@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.neo4j_driver = neo4j_storage.create_driver(settings)
     app.state.redis_client = redis_storage.create_client(settings)
     app.state.minio_client = minio_storage.create_client(settings)
-    app.state.embedding_client = OllamaEmbeddingClient(settings)
+    app.state.embedding_client = make_embedding_client(settings)
     # Planner: cliente único (Ollama, o Fallback(OpenAI→Ollama) si cloud está on).
     app.state.llm_client = make_llm_client(settings, task="planner")
     # WritingAgent: local y cloud por separado — su puerta cloud_safe elige por

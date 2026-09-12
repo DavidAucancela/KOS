@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from kos_core.confidence import ALIAS_BOOST
 from kos_core.config import Settings
@@ -246,6 +247,12 @@ messages_table = Table(
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
+    """Engine compartido. En `kos_serverless_mode` (doc 14 §2.2) se usa NullPool:
+    un pool con conexiones ociosas abiertas emite keepalives, y eso impide que
+    Railway duerma el servicio — que es de donde sale el ahorro del despliegue.
+    Se paga una conexión nueva por request contra el pooler del proveedor."""
+    if settings.kos_serverless_mode:
+        return create_async_engine(settings.postgres_dsn, poolclass=NullPool)
     return create_async_engine(settings.postgres_dsn, pool_pre_ping=True)
 
 

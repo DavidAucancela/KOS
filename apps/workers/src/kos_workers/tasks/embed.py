@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient
+from kos_core.llm.factory import make_embedding_client
 from kos_core.storage.postgres import chunks_table, create_engine
 from kos_workers.celery_app import app
 from kos_workers.tasks.enrich import enrich_document
@@ -68,7 +68,7 @@ async def _embed_pending(
 
 async def _embed_document(doc_id: uuid.UUID) -> int:
     settings = get_settings()
-    client = OllamaEmbeddingClient(settings)
+    client = make_embedding_client(settings)
     engine = create_engine(settings)
     try:
         return await _embed_pending(doc_id, client.embed, engine)

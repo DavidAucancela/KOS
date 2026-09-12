@@ -69,6 +69,49 @@ class Settings(BaseSettings):
     llm_observatory_url: str = ""
     llm_observatory_token: str = ""
 
+    # --- Despliegue gestionado (doc 14; ADR-0008/0009/0010) ---------------
+    # Todo lo de abajo está apagado o vacío por defecto: el modo local-first de
+    # doc 09 no necesita ninguna de estas variables.
+
+    # Postgres/Redis gestionados entregan **una URL**, no cinco piezas sueltas.
+    # Si está puesta, gana sobre postgres_* (ver `postgres_dsn`).
+    database_url: str = ""
+    # Railway duerme un servicio solo si no emite tráfico saliente (doc 14 §2.2):
+    # en este modo los pools no mantienen conexiones ociosas abiertas.
+    kos_serverless_mode: bool = False
+
+    # Autenticación (ADR-0010): lista `nombre:clave` separada por comas. Vacía =
+    # solo conexiones locales, que es el modo local de siempre.
+    kos_api_keys: str = ""
+    kos_rate_limit_per_minute: int = 120
+    # Límite aparte y más estricto para lo que gasta LLM cloud por petición.
+    kos_rate_limit_llm_per_minute: int = 20
+
+    # Cadena de proveedores LLM (ADR-0008): `openai,openrouter`. Vacía = el
+    # comportamiento por tarea de ADR-0007 (cloud → Ollama).
+    kos_llm_provider_chain: str = ""
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_llm_model: str = "openai/gpt-4o-mini"
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_llm_model: str = "llama-3.3-70b-versatile"
+
+    # Embeddings (ADR-0008): sigue siendo bge-m3 a 1024 dimensiones; lo único
+    # que cambia es quién lo sirve. `openai_compatible` = endpoint hospedado.
+    kos_embedding_provider: str = "ollama"
+    kos_embedding_base_url: str = ""
+    kos_embedding_api_key: str = ""
+    kos_embedding_model: str = "bge-m3"
+
+    # Ingesta en el despliegue gestionado (ADR-0009): con el worker apagado
+    # entre ciclos, `POST /v1/sources/{id}/sync` ejecuta en proceso en vez de
+    # encolar y esperar hasta 12h.
+    kos_inline_sync: bool = False
+    # A partir de cuántas horas sin ejecución del cron se considera parada la
+    # ingesta (lo que `/v1/ops/status` reporta como `stale`).
+    kos_cron_stale_hours: int = 18
+
     # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
     # repetida → semántica) y la media vida del decaimiento de `salience`.
     kos_memory_consolidation_hours: int = 24
@@ -85,10 +128,57 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str:
+        """DSN de SQLAlchemy. `database_url` (Supabase, Railway, cualquier
+        gestionado) gana sobre las piezas sueltas: los proveedores entregan una
+        URL completa, con su `?sslmode=require`, no host/puerto por separado."""
+        if self.database_url:
+            return _as_async_dsn(self.database_url)
         return (
             f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def api_keys(self) -> dict[str, str]:
+        """`{nombre: clave}` a partir de `kos_api_keys` (ADR-0010). Una entrada
+        sin `:` se registra con el nombre `default`."""
+        keys: dict[str, str] = {}
+        for raw in self.kos_api_keys.split(","):
+            entry = raw.strip()
+            if not entry:
+                continue
+            name, _, secret = entry.partition(":")
+            if secret:
+                keys[name.strip()] = secret.strip()
+            else:
+                keys["default"] = name.strip()
+        return keys
+
+    @property
+    def llm_provider_chain(self) -> list[str]:
+        """Proveedores en orden de intento (ADR-0008); vacía si no se configuró."""
+        return [item.strip() for item in self.kos_llm_provider_chain.split(",") if item.strip()]
+
+
+_ASYNC_DRIVER = "postgresql+psycopg"
+
+
+def _as_async_dsn(url: str) -> str:
+    """Normaliza la URL de un Postgres gestionado al driver async del proyecto.
+
+    `postgres://` y `postgresql://` (lo que entregan Supabase y Railway) usarían
+    el driver síncrono por defecto de SQLAlchemy. Se respeta el driver si la URL
+    ya trae uno explícito, y se conserva intacto el query string (`sslmode`,
+    `options`), que es obligatorio contra los gestionados.
+    """
+    scheme, separator, rest = url.partition("://")
+    if not separator:
+        return url
+    if "+" in scheme:
+        return url
+    if scheme in {"postgres", "postgresql"}:
+        return f"{_ASYNC_DRIVER}://{rest}"
+    return url
 
 
 @lru_cache
