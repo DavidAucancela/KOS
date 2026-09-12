@@ -7,7 +7,8 @@ from functools import lru_cache
 from typing import Any
 
 from celery import Celery
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, type_coerce, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -54,6 +55,25 @@ async def create_source(
             )
     except IntegrityError:
         return None
+    return await get_source(engine, source_uuid)
+
+
+async def update_source_config(
+    engine: AsyncEngine, source_uuid: uuid.UUID, config: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Shallow-merge de `config` en el JSONB existente (`config || :patch`).
+    Clave reconocida: `cloud_safe` (bool) — habilita la síntesis cloud para la
+    evidencia de esta fuente (ADR-0007). Devuelve None si la fuente no existe.
+    """
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            update(sources_table)
+            .where(sources_table.c.source_uuid == source_uuid)
+            .values(config=sources_table.c.config.op("||")(type_coerce(config, JSONB)))
+            .returning(sources_table.c.source_uuid)
+        )
+        if result.first() is None:
+            return None
     return await get_source(engine, source_uuid)
 
 

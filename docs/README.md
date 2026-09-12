@@ -20,7 +20,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 11 | [Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) | Fase 5 | 🔵 En revisión (implementado, construcción cerrada 2026-08-18; promueve a 🟢 al confirmar el criterio de salida de v1.0) |
 | 12 | [Calidad de extracción: entidades y relaciones cross-documento](12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Mejora sobre Fase 1 | 🟡 Borrador |
 | 13 | [Interfaz de usuario](13-interfaz-de-usuario.md) | Mejora sobre Fase 1+ | 🟡 Borrador (implementado 2026-08-27: colapso de paneles, vista de memoria, animación/caminos del grafo) |
-| 14 | [Despliegue en Railway (single-tenant, mínimo coste)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; requiere ADR de proveedor cloud) |
+| 14 | [Despliegue en Railway (single-tenant, mínimo coste)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; el ADR de proveedor cloud existe: ADR-0007, acotado a Planner/Writing) |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado. Un doc marcado "implementado" ya tiene código
 real construido sobre él — cambiarlo requiere PR igual que cualquier documento en revisión, no
@@ -38,6 +38,7 @@ Las decisiones técnicas puntuales se registran en [`adr/`](adr/). Cada ADR capt
 | [0004](adr/0004-monorepo.md) | Monorepo para todo el sistema |
 | [0005](adr/0005-mcp-como-protocolo-de-herramientas.md) | MCP como protocolo único de herramientas |
 | [0006](adr/0006-local-first-con-ollama.md) | Local-first: Ollama como runtime de LLM por defecto |
+| [0007](adr/0007-proveedor-cloud-opt-in-para-planner-y-writing.md) | Proveedor cloud (OpenAI) opt-in por tarea para Planner y WritingAgent, con puerta por fuente `cloud_safe` |
 
 ## Deuda técnica
 

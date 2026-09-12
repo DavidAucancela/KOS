@@ -65,7 +65,7 @@ warn_unused_ignores = true
 exclude = ["alembic"]
 
 [[tool.mypy.overrides]]
-module = ["minio.*", "pgvector.*", "celery.*"]
+module = ["minio.*", "pgvector.*", "celery.*", "llm_observatory.*"]
 ignore_missing_imports = true
 
 # doc 09 §2: "packages/mcp-tools solo depende de core" — hasta Sprint 16 esta

@@ -11,6 +11,11 @@ dependencies = [
     "uvicorn[standard]>=0.35",
     # Cliente Celery para encolar jobs por nombre (la API no importa kos_workers)
     "celery[redis]>=5.5",
+    # Ruta cloud opt-in para Planner/Writing (ADR-0007). Solo apps/api: los
+    # workers de ingesta siguen 100% locales y no arrastran estas deps.
+    "httpx>=0.28",
+    "openai>=1.40",
+    "llm-observatory[openai] @ git+https://github.com/DavidAucancela/llm-observatory.git#subdirectory=packages/sdk-python",
 ]
 
 [tool.uv.sources]
@@ -21,6 +26,10 @@ kos-agents = { workspace = true }
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# La dep `llm-observatory` se instala desde git (aún no publicada en PyPI, ADR-0007).
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kos_api"]

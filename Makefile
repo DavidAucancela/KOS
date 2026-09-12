@@ -5,9 +5,9 @@
 # (Python ignora los .pth ocultos). Ver docs/09 §1.
 export UV_PROJECT_ENVIRONMENT := $(HOME)/.venvs/kos
 
-.PHONY: up down ps logs clean pull-models obs-up install dev dev-api dev-workers dev-beat dev-web \
-        migrate lint test test-integration demo reindex guardian-watch mcp-inspect mcp-demo \
-        agents-demo help
+.PHONY: up down ps logs clean pull-models obs-up llm-obs-up llm-obs-down install dev dev-api \
+        dev-workers dev-beat dev-web migrate lint test test-integration demo reindex guardian-watch \
+        mcp-inspect mcp-demo agents-demo help
 
 up: ## Levanta la infraestructura base (Postgres, Neo4j, Redis, MinIO, Ollama)
 	docker compose up -d
@@ -23,6 +23,12 @@ logs: ## Logs de todos los servicios (make logs s=postgres para uno)
 
 obs-up: ## Levanta también Prometheus y Grafana
 	docker compose --profile observability up -d
+
+llm-obs-up: ## Levanta llm-observatory self-hosted (auditoría del path cloud, ADR-0007)
+	docker compose --profile llm-observatory up -d
+
+llm-obs-down: ## Detiene llm-observatory
+	docker compose --profile llm-observatory down
 
 pull-models: ## Descarga los modelos (Ollama nativo; cae a Docker si no está)
 	ollama pull bge-m3 || docker exec kos-ollama ollama pull bge-m3

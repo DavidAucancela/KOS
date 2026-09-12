@@ -21,6 +21,8 @@ _OPERATIONS = ("recall", "store")
 
 
 def _memory_evidence(item: dict[str, Any]) -> EvidenceRef:
+    # `cloud_safe` queda en False por defecto (ADR-0007): un ítem de memoria no
+    # tiene fila de fuente que clasificar, así que nunca habilita síntesis cloud.
     return EvidenceRef(
         memory_id=item["memory_id"],
         quote=item.get("content"),

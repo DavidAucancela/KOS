@@ -81,8 +81,17 @@ def _build_context(evidence: list[EvidenceRef]) -> str:
 
 
 class WritingAgent:
-    def __init__(self, llm: LLMClient, tool_caller: ToolCaller | None = None) -> None:
-        self._llm = llm
+    def __init__(
+        self,
+        local_llm: LLMClient,
+        *,
+        cloud_llm: LLMClient | None = None,
+        tool_caller: ToolCaller | None = None,
+    ) -> None:
+        self._local_llm = local_llm
+        # Cliente cloud opcional (ADR-0007): solo se usa para la síntesis si TODA
+        # la evidencia es `cloud_safe`; si no, la síntesis corre en `local_llm`.
+        self._cloud_llm = cloud_llm
         self._tool_caller = tool_caller
 
     def _require_tool_caller(self) -> ToolCaller:
@@ -151,8 +160,13 @@ class WritingAgent:
             f"Evidencia disponible:\n{context}\n\n"
             "Responde a la pregunta usando solo la evidencia anterior y citando con [n]."
         )
+        # Puerta de privacidad (ADR-0007): la síntesis solo va a cloud si toda la
+        # evidencia proviene de fuentes marcadas `cloud_safe`. Cualquier fragmento
+        # de grafo/memoria o de una fuente no marcada mantiene la síntesis local.
+        use_cloud = self._cloud_llm is not None and all(ev.cloud_safe for ev in evidence)
+        llm = self._cloud_llm if use_cloud else self._local_llm
         try:
-            answer = await self._llm.generate(
+            answer = await llm.generate(
                 prompt, system=SYSTEM_PROMPT, timeout=request.constraints.timeout_s
             )
         except Exception as exc:  # solo la síntesis; los pasos previos ya terminaron
@@ -160,7 +174,7 @@ class WritingAgent:
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         return AgentResponse(
-            outputs={"answer": answer},
+            outputs={"answer": answer, "llm_path": "cloud" if use_cloud else "local"},
             evidence=evidence,
             confidence=confidence,
             cost=Cost(ms=elapsed_ms),

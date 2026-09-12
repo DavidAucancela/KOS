@@ -23,6 +23,8 @@ def _node_evidence(node: dict[str, Any]) -> EvidenceRef:
     name = node.get("name") or node.get("canonical_name") or "?"
     node_type = node.get("node_type")
     quote = f"{name} ({node_type})" if node_type else str(name)
+    # `cloud_safe` queda en False por defecto (ADR-0007): un nodo del grafo no
+    # tiene fila de fuente que clasificar, así que nunca habilita síntesis cloud.
     return EvidenceRef(
         node_id=node["id"],
         title=name,

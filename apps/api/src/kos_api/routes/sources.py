@@ -29,6 +29,14 @@ class SourceOut(SourceIn):
     created_at: datetime
 
 
+class SourceConfigPatch(BaseModel):
+    config: dict[str, Any] = Field(
+        examples=[{"cloud_safe": True}],
+        description="Claves a fusionar en sources.config. Reconocida: cloud_safe (bool), "
+        "que habilita la síntesis cloud para la evidencia de esta fuente (ADR-0007).",
+    )
+
+
 class SyncAccepted(BaseModel):
     job_id: str
     source_uuid: uuid.UUID
@@ -49,6 +57,18 @@ async def create_source(
     if created is None:
         raise HTTPException(status_code=409, detail=f"Ya existe una fuente llamada {body.name!r}")
     return created
+
+
+@router.patch("/{source_uuid}", response_model=SourceOut)
+async def patch_source(
+    source_uuid: uuid.UUID,
+    body: SourceConfigPatch,
+    engine: AsyncEngine = Depends(postgres_engine),
+) -> dict[str, Any]:
+    updated = await source_service.update_source_config(engine, source_uuid, body.config)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Fuente no registrada")
+    return updated
 
 
 @router.post("/{source_uuid}/sync", response_model=SyncAccepted, status_code=202)

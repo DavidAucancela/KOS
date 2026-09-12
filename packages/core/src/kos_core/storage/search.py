@@ -43,6 +43,7 @@ class SearchHit(BaseModel):
     source_id: str | None = None
     heading: str | None = None
     doc_type: str | None = None
+    cloud_safe: bool = False
 
 
 def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
@@ -59,6 +60,7 @@ def evidence_from_hit(hit: SearchHit) -> EvidenceRef:
         connector=hit.connector,
         score=hit.score,
         doc_type=hit.doc_type,
+        cloud_safe=hit.cloud_safe,
     )
 
 
@@ -86,9 +88,11 @@ _LEXICAL_SQL = sql_text(
     """
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
            d.title, d.connector, d.source_id, d.doc_type,
+           COALESCE((s.config ->> 'cloud_safe')::boolean, false) AS cloud_safe,
            ts_rank_cd(c.text_search, websearch_to_tsquery('simple', :query)) AS score
     FROM chunks AS c
     JOIN documents AS d ON d.doc_id = c.doc_id
+    LEFT JOIN sources AS s ON s.source_uuid = d.source_uuid
     WHERE c.text_search @@ websearch_to_tsquery('simple', :query)
       AND (CAST(:doc_type AS text) IS NULL OR d.doc_type = CAST(:doc_type AS text))
     ORDER BY score DESC, c.chunk_id
@@ -112,9 +116,11 @@ _TITLE_SQL = sql_text(
         HAVING MAX(word_similarity(t.term, d.title)) > :threshold
     )
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
-           d.title, d.connector, d.source_id, d.doc_type, ds.score
+           d.title, d.connector, d.source_id, d.doc_type,
+           COALESCE((s.config ->> 'cloud_safe')::boolean, false) AS cloud_safe, ds.score
     FROM doc_scores AS ds
     JOIN documents AS d ON d.doc_id = ds.doc_id
+    LEFT JOIN sources AS s ON s.source_uuid = d.source_uuid
     JOIN LATERAL (
         SELECT * FROM chunks AS c WHERE c.doc_id = d.doc_id ORDER BY c.position ASC LIMIT 1
     ) AS c ON true
@@ -251,9 +257,11 @@ _VECTOR_SQL = sql_text(
     """
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
            d.title, d.connector, d.source_id, d.doc_type,
+           COALESCE((s.config ->> 'cloud_safe')::boolean, false) AS cloud_safe,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS score
     FROM chunks AS c
     JOIN documents AS d ON d.doc_id = c.doc_id
+    LEFT JOIN sources AS s ON s.source_uuid = d.source_uuid
     WHERE c.embedding IS NOT NULL
       AND (CAST(:doc_type AS text) IS NULL OR d.doc_type = CAST(:doc_type AS text))
     ORDER BY c.embedding <=> CAST(:qvec AS vector), c.chunk_id
@@ -281,6 +289,7 @@ def _hit_from_row(row: Mapping[Any, Any], *, score: float, source: SearchSource)
         source_id=row.get("source_id"),
         heading=heading if isinstance(heading, str) else None,
         doc_type=row.get("doc_type"),
+        cloud_safe=bool(row.get("cloud_safe", False)),
     )
 
 
@@ -350,9 +359,11 @@ _SIMILARITY_BAND_SQL = sql_text(
     """
     SELECT c.chunk_id, c.doc_id, c.text, c.metadata,
            d.title, d.connector, d.source_id, d.doc_type,
+           COALESCE((s.config ->> 'cloud_safe')::boolean, false) AS cloud_safe,
            1 - (c.embedding <=> CAST(:qvec AS vector)) AS score
     FROM chunks AS c
     JOIN documents AS d ON d.doc_id = c.doc_id
+    LEFT JOIN sources AS s ON s.source_uuid = d.source_uuid
     WHERE c.embedding IS NOT NULL
       AND c.doc_id != :exclude_doc_id
       AND 1 - (c.embedding <=> CAST(:qvec AS vector)) BETWEEN :floor AND :ceiling
