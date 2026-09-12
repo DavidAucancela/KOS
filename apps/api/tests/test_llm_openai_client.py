@@ -67,3 +67,29 @@ async def test_error_del_sdk_se_reenvela_como_cloud_llm_error() -> None:
 
     with pytest.raises(CloudLLMError):
         await client.generate("x")
+
+
+async def test_respuesta_sin_choices_es_cloud_llm_error() -> None:
+    """Un proveedor OpenAI-compatible puede devolver `choices: []` (content
+    filter). Antes salía un IndexError, que se escapaba del contrato que
+    `FallbackLLMClient` espera para caer a local."""
+
+    class _SinChoices(_FakeCompletions):
+        async def create(self, **params: Any) -> Any:
+            self.last_params = params
+            return type("_R", (), {"choices": []})()
+
+    client = OpenAILLMClient(_settings(), task="writing", client=_FakeMonitored(_SinChoices()))
+
+    with pytest.raises(CloudLLMError, match="sin choices"):
+        await client.generate("x")
+
+
+async def test_el_error_reenvuelto_conserva_el_tipo_original() -> None:
+    """En el log, un fallo permanente (key revocada) tiene que distinguirse de
+    uno transitorio; `str(exc)` a secas aplana ambos."""
+    comp = _FakeCompletions(error=PermissionError("401 invalid api key"))
+    client = OpenAILLMClient(_settings(), task="planner", client=_FakeMonitored(comp))
+
+    with pytest.raises(CloudLLMError, match="PermissionError: 401 invalid api key"):
+        await client.generate("x")

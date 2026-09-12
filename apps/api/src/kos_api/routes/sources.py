@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_api.deps import postgres_engine, settings_dep
@@ -29,12 +29,34 @@ class SourceOut(SourceIn):
     created_at: datetime
 
 
+# Claves que este PATCH puede fusionar en `sources.config`. Es una allowlist a
+# propósito: el resto de `config` es configuración del conector (`vault_path`,
+# etc.), que se fija al registrar la fuente y no debe poder repuntarse desde el
+# endpoint que existe para el interruptor de privacidad de ADR-0007.
+_PATCHABLE_CONFIG_KEYS = {"cloud_safe"}
+
+
 class SourceConfigPatch(BaseModel):
     config: dict[str, Any] = Field(
         examples=[{"cloud_safe": True}],
-        description="Claves a fusionar en sources.config. Reconocida: cloud_safe (bool), "
+        description="Claves a fusionar en sources.config. Única aceptada: cloud_safe (bool), "
         "que habilita la síntesis cloud para la evidencia de esta fuente (ADR-0007).",
     )
+
+    @field_validator("config")
+    @classmethod
+    def _solo_claves_permitidas(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value:
+            raise ValueError("config vacío: no hay nada que actualizar")
+        rechazadas = sorted(set(value) - _PATCHABLE_CONFIG_KEYS)
+        if rechazadas:
+            permitidas = ", ".join(sorted(_PATCHABLE_CONFIG_KEYS))
+            raise ValueError(
+                f"claves no permitidas en config: {', '.join(rechazadas)} (solo: {permitidas})"
+            )
+        if not isinstance(value.get("cloud_safe"), bool):
+            raise ValueError("cloud_safe debe ser booleano")
+        return value
 
 
 class SyncAccepted(BaseModel):
