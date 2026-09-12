@@ -37,7 +37,9 @@ def test_settings_desde_variables_de_entorno(monkeypatch: pytest.MonkeyPatch) ->
 def test_database_url_gana_sobre_piezas_sueltas(monkeypatch: pytest.MonkeyPatch) -> None:
     """Los gestionados (Supabase, Railway) entregan una URL, no host/puerto (doc 14 §6)."""
     monkeypatch.setenv("POSTGRES_HOST", "localhost")
-    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@db.supabase.co:5432/postgres?sslmode=require")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgres://u:p@db.supabase.co:5432/postgres?sslmode=require"
+    )
     settings = Settings(_env_file=None)
     assert settings.postgres_dsn == (
         "postgresql+psycopg://u:p@db.supabase.co:5432/postgres?sslmode=require"

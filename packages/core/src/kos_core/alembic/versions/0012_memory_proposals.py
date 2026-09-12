@@ -2,8 +2,8 @@
 docs/deuda-tecnica.md: `memory.store` elegido por el Planner nunca se
 auto-aprueba — un intento sin `confirm=true` queda acá para revisión humana).
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0012a
+Revises: 0012 (conversations)
 Create Date: 2026-08-26
 
 """
@@ -12,8 +12,11 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "0012"
-down_revision: str | None = "0011"
+# Id propio: 0012_conversations ya ocupaba "0012" y dos revisiones con el mismo
+# id dejaban el árbol con dos heads — `alembic upgrade head` fallaba, que es
+# justo lo que Railway corre como release command (doc 14 §6).
+revision: str = "0012a"
+down_revision: str | None = "0012"
 branch_labels: str | None = None
 depends_on: str | None = None
 

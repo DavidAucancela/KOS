@@ -24,7 +24,9 @@ def _client(handler: httpx.MockTransport) -> OpenAICompatibleEmbeddingClient:
     return OpenAICompatibleEmbeddingClient(
         settings,
         client=httpx.AsyncClient(
-            base_url="https://proveedor.test/v1", transport=handler, timeout=5.0,
+            base_url="https://proveedor.test/v1",
+            transport=handler,
+            timeout=5.0,
             headers={"Authorization": "Bearer k-secreta"},
         ),
     )

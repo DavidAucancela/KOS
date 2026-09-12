@@ -279,9 +279,7 @@ def _note_key(source_id: str) -> str:
     return canonicalize(stem)
 
 
-async def _merge_document_node(
-    driver: Any, *, source_id: str, title: str, doc_id: str
-) -> str:
+async def _merge_document_node(driver: Any, *, source_id: str, title: str, doc_id: str) -> str:
     """Nodo `Document` por nota (doc 12 §10.4.1), keyed por `source_id`."""
     return await neo4j_storage.merge_node(
         driver,

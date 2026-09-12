@@ -54,3 +54,17 @@ def test_health_devuelve_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
         response = client.get("/health")
 
     assert response.headers["X-Trace-Id"]
+
+
+def test_health_no_sondea_ollama_en_despliegue_gestionado() -> None:
+    """En Railway no hay Ollama (doc 14 §2.1): sondearlo dejaría /health en
+    `degraded` para siempre y el aviso perdería su valor."""
+    from kos_api.routes.health import _active_checks
+    from kos_core.config import Settings
+
+    gestionado = Settings(
+        _env_file=None, kos_serverless_mode=True, kos_embedding_provider="openai_compatible"
+    )
+    assert "ollama" not in _active_checks(gestionado)
+    assert "postgres" in _active_checks(gestionado)
+    assert "ollama" in _active_checks(Settings(_env_file=None))

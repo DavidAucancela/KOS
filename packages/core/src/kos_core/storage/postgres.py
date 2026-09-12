@@ -246,6 +246,21 @@ messages_table = Table(
 )
 
 
+cron_runs_table = Table(
+    "cron_runs",
+    metadata,
+    Column("run_id", UUID(as_uuid=True), primary_key=True),
+    Column("job", Text, nullable=False, server_default=text("'drain'")),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True)),
+    Column("status", Text, nullable=False, server_default=text("'running'")),
+    Column("tasks_drained", Integer, nullable=False, server_default=text("0")),
+    Column("detail", Text),
+)
+"""Ejecuciones del drain programado (ADR-0009). Sin esto, que el cron deje de
+correr es invisible: el worker no es un proceso vivo al que mirarle el pulso."""
+
+
 def create_engine(settings: Settings) -> AsyncEngine:
     """Engine compartido. En `kos_serverless_mode` (doc 14 §2.2) se usa NullPool:
     un pool con conexiones ociosas abiertas emite keepalives, y eso impide que
@@ -258,6 +273,54 @@ def create_engine(settings: Settings) -> AsyncEngine:
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def start_cron_run(engine: AsyncEngine, *, job: str = "drain") -> uuid_lib.UUID:
+    """Marca el inicio de una ejecución del cron y devuelve su id (ADR-0009)."""
+    run_id = uuid_lib.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            cron_runs_table.insert().values(
+                run_id=run_id, job=job, started_at=datetime.now(UTC), status="running"
+            )
+        )
+    return run_id
+
+
+async def finish_cron_run(
+    engine: AsyncEngine,
+    run_id: uuid_lib.UUID,
+    *,
+    status: str,
+    tasks_drained: int = 0,
+    detail: str | None = None,
+) -> None:
+    """Cierra la ejecución. `status`: `ok`, `truncated` (venció el timeout de
+    30 min, doc 14 §4) o `error`."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            cron_runs_table.update()
+            .where(cron_runs_table.c.run_id == run_id)
+            .values(
+                finished_at=datetime.now(UTC),
+                status=status,
+                tasks_drained=tasks_drained,
+                detail=detail,
+            )
+        )
+
+
+async def last_cron_run(engine: AsyncEngine, *, job: str = "drain") -> dict[str, Any] | None:
+    """Última ejecución registrada, o None si el cron nunca corrió."""
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(cron_runs_table)
+            .where(cron_runs_table.c.job == job)
+            .order_by(cron_runs_table.c.started_at.desc())
+            .limit(1)
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
 
 async def ping(engine: AsyncEngine) -> None:
