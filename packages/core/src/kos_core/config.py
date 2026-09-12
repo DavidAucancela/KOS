@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     # A partir de cuántas horas sin ejecución del cron se considera parada la
     # ingesta (lo que `/v1/ops/status` reporta como `stale`).
     kos_cron_stale_hours: int = 18
+    # Build estático de `apps/web` servido por la propia API (doc 14 §3): un
+    # servicio menos en Railway. Vacío en local, donde el web corre en Vite.
+    kos_web_dist: str = ""
 
     # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
     # repetida → semántica) y la media vida del decaimiento de `salience`.

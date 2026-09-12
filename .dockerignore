@@ -1,0 +1,9 @@
+**/node_modules
+**/__pycache__
+**/.venv
+**/dist
+.git
+.env
+celerybeat-schedule.db
+docs
+scripts/__pycache__
