@@ -78,12 +78,23 @@ class OpenAILLMClient:
 
         try:
             response = await self._client.chat.completions.create(**params)
+            # Dentro del try a propósito: un proveedor OpenAI-compatible puede
+            # devolver `choices: []` (content filter), y un IndexError acá se
+            # escaparía del contrato `CloudLLMError` que espera el caller.
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                raise CloudLLMError("el proveedor devolvió una respuesta sin choices")
+            content = choices[0].message.content
+        except CloudLLMError:
+            raise
         except TimeoutError as exc:
             raise CloudLLMError(f"timeout tras {timeout}s") from exc
         except Exception as exc:  # cualquier error del SDK/OpenAI: el caller cae a local
-            raise CloudLLMError(str(exc)) from exc
+            # El tipo va en el mensaje: `CloudLLMError(str(exc))` a secas aplana
+            # un 401 permanente y un corte de red transitorio al mismo log.
+            raise CloudLLMError(f"{type(exc).__name__}: {exc}") from exc
 
-        return response.choices[0].message.content or ""
+        return content or ""
 
     async def aclose(self) -> None:
         inner = getattr(self._client, "_client", None)

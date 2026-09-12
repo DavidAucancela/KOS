@@ -47,7 +47,9 @@ class FallbackLLMClient:
                 timeout=timeout,
             )
         except Exception as exc:
-            logger.warning("cloud LLM falló (%s); reintentando local", exc)
+            # El tipo, no solo el mensaje: distinguir en el log un fallo permanente
+            # (key revocada, modelo inexistente) de uno transitorio (red, 429).
+            logger.warning("cloud LLM falló (%s: %s); reintentando local", type(exc).__name__, exc)
             return await self._fallback.generate(
                 prompt,
                 system=system,
