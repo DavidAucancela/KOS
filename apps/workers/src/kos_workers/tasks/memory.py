@@ -23,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kos_agents.learning import LearningAgent
 from kos_agents.memory import MemoryAgent
 from kos_core.config import Settings, get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient
+from kos_core.llm.base import EmbeddingClient
+from kos_core.llm.factory import make_embedding_client
 from kos_core.memory_learn import INITIAL_SALIENCE as INITIAL_SALIENCE
 from kos_core.schemas.agents import AgentRequest
 from kos_core.storage import neo4j as neo4j_storage
@@ -54,7 +55,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 async def _learn_via_agent_core(
     engine: AsyncEngine,
     driver: Any,
-    embedder: OllamaEmbeddingClient,
+    embedder: EmbeddingClient,
     settings: Settings,
     *,
     query: str,
@@ -93,7 +94,7 @@ async def _async_memory_learn(
 ) -> dict[str, Any]:
     settings = get_settings()
     engine = create_engine(settings)
-    embedder = OllamaEmbeddingClient(settings)
+    embedder = make_embedding_client(settings)
     driver = neo4j_storage.create_driver(settings)
 
     try:

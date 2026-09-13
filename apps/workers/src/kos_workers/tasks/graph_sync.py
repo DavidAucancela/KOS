@@ -28,7 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
+from kos_core.llm.factory import make_embedding_client
+from kos_core.llm.ollama import OllamaLLMClient
 from kos_core.ontology import canonicalize
 from kos_core.schemas import EntityCandidate, ParsedDocument, RelationCandidate
 from kos_core.storage import neo4j as neo4j_storage
@@ -278,9 +279,7 @@ def _note_key(source_id: str) -> str:
     return canonicalize(stem)
 
 
-async def _merge_document_node(
-    driver: Any, *, source_id: str, title: str, doc_id: str
-) -> str:
+async def _merge_document_node(driver: Any, *, source_id: str, title: str, doc_id: str) -> str:
     """Nodo `Document` por nota (doc 12 §10.4.1), keyed por `source_id`."""
     return await neo4j_storage.merge_node(
         driver,
@@ -600,7 +599,7 @@ async def _sync_graph(
 async def _async_graph_sync(doc_id: uuid.UUID) -> dict[str, Any]:
     settings = get_settings()
     llm = OllamaLLMClient(settings)
-    embedder = OllamaEmbeddingClient(settings)
+    embedder = make_embedding_client(settings)
     engine = create_engine(settings)
     driver = neo4j_storage.create_driver(settings)
 

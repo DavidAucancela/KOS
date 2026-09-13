@@ -20,7 +20,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 11 | [Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) | Fase 5 | 🔵 En revisión (implementado, construcción cerrada 2026-08-18; promueve a 🟢 al confirmar el criterio de salida de v1.0) |
 | 12 | [Calidad de extracción: entidades y relaciones cross-documento](12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Mejora sobre Fase 1 | 🟡 Borrador |
 | 13 | [Interfaz de usuario](13-interfaz-de-usuario.md) | Mejora sobre Fase 1+ | 🟡 Borrador (implementado 2026-08-27: colapso de paneles, vista de memoria, animación/caminos del grafo) |
-| 14 | [Despliegue en Railway (single-tenant, mínimo coste)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; el ADR de proveedor cloud existe: ADR-0007, acotado a Planner/Writing) |
+| 14 | [Despliegue en Railway (single-tenant, techo de $3/mes)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; ADR-0008/0009/0010 aceptados; fases 0/A/B cerradas 2026-09-12 — código habilitante + imagen + drain construidos y verificados; falta C: infra Railway real) |
 | 15 | [Multiproveedor LLM](15-multiproveedor-llm.md) | Extiende ADR-0007 sobre ADR-0006 | 🟡 Borrador (proveedores OpenAI-compatibles ya usables sin código; §5 requiere ADR-0008) |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado. Un doc marcado "implementado" ya tiene código
@@ -40,6 +40,9 @@ Las decisiones técnicas puntuales se registran en [`adr/`](adr/). Cada ADR capt
 | [0005](adr/0005-mcp-como-protocolo-de-herramientas.md) | MCP como protocolo único de herramientas |
 | [0006](adr/0006-local-first-con-ollama.md) | Local-first: Ollama como runtime de LLM por defecto |
 | [0007](adr/0007-proveedor-cloud-opt-in-para-planner-y-writing.md) | Proveedor cloud (OpenAI) opt-in por tarea para Planner y WritingAgent, con puerta por fuente `cloud_safe` |
+| [0008](adr/0008-proveedor-cloud-por-defecto-en-despliegue-gestionado.md) | Cloud (LLM + embeddings bge-m3 hospedado) como default del entorno en el despliegue gestionado, con cadena de dos proveedores cloud y `cloud_safe=false` = fuente no ingerida |
+| [0009](adr/0009-planificacion-por-cron-de-railway.md) | La planificación la hace el cron de Railway (2×/día); el worker drena la cola con timeout de 30 min y sale (sin Celery beat) |
+| [0010](adr/0010-autenticacion-por-api-key.md) | Claves nombradas + Basic auth sobre todas las rutas (incluida la web) + rate limit para cualquier despliegue expuesto |
 
 ## Deuda técnica
 

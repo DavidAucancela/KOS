@@ -22,35 +22,58 @@ class CloudLLMError(Exception):
     (factory `FallbackLLMClient`) la captura para reintentar en local."""
 
 
-def _build_monitored_client(settings: Settings, *, task: Task) -> Any:
+def _build_monitored_client(
+    settings: Settings,
+    *,
+    task: Task,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    provider: str = "openai",
+) -> Any:
     from llm_observatory import AsyncMonitoredOpenAI
 
     kwargs: dict[str, Any] = {}
-    if settings.openai_base_url:
-        kwargs["base_url"] = settings.openai_base_url
+    resolved_base_url = base_url or settings.openai_base_url
+    if resolved_base_url:
+        kwargs["base_url"] = resolved_base_url
     return AsyncMonitoredOpenAI(
-        api_key=settings.openai_api_key,
+        api_key=api_key or settings.openai_api_key,
         observatory_url=settings.llm_observatory_url or "http://localhost:3001",
         observatory_token=settings.llm_observatory_token or None,
-        tags={"app": "kos", "task": task},
+        tags={"app": "kos", "task": task, "provider": provider},
         **kwargs,
     )
 
 
 class OpenAILLMClient:
+    """Cliente para OpenAI y para cualquier proveedor con su mismo wire format.
+
+    `model`/`base_url`/`api_key` permiten apuntar el mismo cliente a OpenRouter,
+    Groq o similares sin código nuevo (ADR-0008, doc 15 §2.1). El coste de esos
+    proveedores se audita como `cost_confidence="unknown"`: no están en
+    `OPENAI_PRICING`. `provider` solo etiqueta la métrica.
+    """
+
     def __init__(
         self,
         settings: Settings,
         *,
         task: Task,
         client: Any | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        provider: str = "openai",
     ) -> None:
-        self._model = settings.openai_llm_model
+        self._model = model or settings.openai_llm_model
         self._task = task
+        self._provider = provider
         if client is not None:
             self._client = client
         else:
-            self._client = _build_monitored_client(settings, task=task)
+            self._client = _build_monitored_client(
+                settings, task=task, api_key=api_key, base_url=base_url, provider=provider
+            )
 
     async def generate(
         self,

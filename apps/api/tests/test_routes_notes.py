@@ -25,6 +25,9 @@ def test_crea_nota_desde_plantilla(vault: Path, monkeypatch: pytest.MonkeyPatch)
         return vault
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     with TestClient(create_app()) as client:
         response = client.post(
@@ -42,6 +45,9 @@ def test_nota_existente_es_409(vault: Path, monkeypatch: pytest.MonkeyPatch) -> 
         return vault
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     (vault / "Docker.md").write_text("ya existe", encoding="utf-8")
 
     with TestClient(create_app()) as client:
@@ -57,6 +63,9 @@ def test_plantilla_inexistente_es_404(vault: Path, monkeypatch: pytest.MonkeyPat
         return vault
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     with TestClient(create_app()) as client:
         response = client.post(
@@ -71,6 +80,9 @@ def test_fuente_no_registrada_es_404(monkeypatch: pytest.MonkeyPatch) -> None:
         raise notes_service.VaultSourceNotFoundError(f"Fuente no registrada: {source_name!r}")
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     with TestClient(create_app()) as client:
         response = client.post(

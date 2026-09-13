@@ -21,9 +21,15 @@ from kos_core.ontology import is_valid_node_type, is_valid_relation_type
 
 
 def create_driver(settings: Settings) -> AsyncDriver:
-    return AsyncGraphDatabase.driver(
-        settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password)
-    )
+    """Driver compartido. En `kos_serverless_mode` (doc 14 §2.2) las conexiones
+    del pool se reciclan rápido y el pool se mantiene mínimo: una conexión Bolt
+    ociosa cuenta como tráfico saliente y evitaría que el servicio duerma."""
+    kwargs: dict[str, Any] = {"auth": (settings.neo4j_user, settings.neo4j_password)}
+    if settings.kos_serverless_mode:
+        kwargs["max_connection_lifetime"] = 60
+        kwargs["max_connection_pool_size"] = 4
+        kwargs["liveness_check_timeout"] = 0
+    return AsyncGraphDatabase.driver(settings.neo4j_uri, **kwargs)
 
 
 async def ping(driver: AsyncDriver) -> None:

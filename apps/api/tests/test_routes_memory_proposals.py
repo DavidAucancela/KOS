@@ -6,8 +6,9 @@ auto-aprueba."""
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -120,7 +121,7 @@ def test_patch_proposal_aprueba_escribe_memoria_de_verdad(monkeypatch: pytest.Mo
         updated.update({"status": status, "memory_id": memory_id})
         return {**item, "status": status, "memory_id": memory_id}
 
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     monkeypatch.setattr(postgres_storage, "get_memory_proposal", fake_get)
     monkeypatch.setattr(postgres_storage, "insert_memory", fake_insert_memory)
     monkeypatch.setattr(neo4j_storage, "find_node_ids_by_sources", fake_find_node_ids)
@@ -150,16 +151,12 @@ def test_patch_proposal_404_si_no_existe_o_ya_resuelta(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(postgres_storage, "update_memory_proposal_status", fake_update)
     with TestClient(create_app()) as client:
-        response = client.patch(
-            f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "rejected"}
-        )
+        response = client.patch(f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "rejected"})
 
     assert response.status_code == 404
 
 
 def test_patch_proposal_status_invalido_es_422() -> None:
     with TestClient(create_app()) as client:
-        response = client.patch(
-            f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "pending"}
-        )
+        response = client.patch(f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "pending"})
     assert response.status_code == 422

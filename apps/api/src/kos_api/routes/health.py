@@ -81,11 +81,25 @@ async def _run_check(name: str, checker: Checker, request: Request) -> tuple[str
     return name, ServiceStatus(status="ok", latency_ms=latency_ms)
 
 
+def _active_checks(settings: Settings) -> dict[str, Checker]:
+    """Los servicios que este despliegue usa de verdad.
+
+    En el despliegue gestionado no hay Ollama (Railway no tiene GPU, doc 14 §2.1):
+    sondearlo dejaría `/health` en `degraded` para siempre y el aviso perdería
+    todo su valor.
+    """
+    checks = dict(CHECKS)
+    if settings.kos_embedding_provider != "ollama" or settings.kos_serverless_mode:
+        checks.pop("ollama", None)
+    return checks
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
     """Verifica todos los servicios en paralelo; responde 200 siempre."""
+    settings: Settings = request.app.state.settings
     results = await asyncio.gather(
-        *(_run_check(name, checker, request) for name, checker in CHECKS.items())
+        *(_run_check(name, checker, request) for name, checker in _active_checks(settings).items())
     )
     services = dict(results)
     all_ok = all(service.status == "ok" for service in services.values())

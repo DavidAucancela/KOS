@@ -121,7 +121,7 @@ def test_con_hits_devuelve_respuesta_evidencia_y_plan(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, llm)
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
@@ -152,7 +152,7 @@ def test_respuesta_exitosa_encola_memoria_episodica(
         return [hit]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _EchoLLM())
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
@@ -174,9 +174,12 @@ def test_comando_no_encola_memoria(
         return Path("/vault-falso")
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", lambda vault_path, **kwargs: Path("x.md"))
 
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _EchoLLM())
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
@@ -193,7 +196,7 @@ def test_sin_hits_no_alucina(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, llm)
         response = client.post("/v1/query", json={"query": "algo que no existe"})
@@ -213,7 +216,7 @@ def test_hybrid_degrada_a_lexica_si_falla_el_embedder(monkeypatch: pytest.Monkey
         return [_hit(source="lexical")]
 
     monkeypatch.setattr(search_storage, "lexical_search", fake_lexical)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FailingEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FailingEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _EchoLLM())
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
@@ -231,7 +234,7 @@ def test_llm_caido_con_hits_es_503(monkeypatch: pytest.MonkeyPatch) -> None:
         return [_hit()]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _FailingLLM())
         response = client.post("/v1/query", json={"query": "¿qué es KOS?"})
@@ -249,7 +252,7 @@ def test_evidencia_cloud_safe_enruta_la_sintesis_al_cliente_cloud(
         return [_hit(cloud_safe=True)]
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     planner_llm, cloud = _EchoLLM(), _EchoLLM()
     with TestClient(create_app()) as client:
         _use_llm(client, planner_llm, cloud=cloud)
@@ -267,7 +270,7 @@ def test_evidencia_no_cloud_safe_se_queda_local(monkeypatch: pytest.MonkeyPatch)
         return [_hit()]  # cloud_safe=False por defecto
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     local, cloud = _EchoLLM(), _EchoLLM()
     with TestClient(create_app()) as client:
         _use_llm(client, local, cloud=cloud)
@@ -297,10 +300,14 @@ def test_comando_nueva_maquina_crea_nota_sin_llamar_al_llm(
         return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
     llm = _EchoLLM()
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, llm)
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})
@@ -340,10 +347,14 @@ def test_comando_crear_nota_generico_crea_nota_sin_llamar_al_llm(
         return vault_path / kwargs["folder"] / f"{kwargs['title']}.md"
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
     llm = _EchoLLM()
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, llm)
         response = client.post(
@@ -367,7 +378,7 @@ def test_comando_crear_nota_mal_formado_cae_al_pipeline_normal(
         return []
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _EchoLLM())
         response = client.post("/v1/query", json={"query": "/crear-nota Proyecto | Proyectos"})
@@ -393,7 +404,7 @@ def test_pregunta_por_plantilla_no_fabrica_responde_sin_llm(
 
     monkeypatch.setattr(search_storage, "hybrid_search", fake_hybrid)
     llm = _EchoLLM()
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, llm)
         response = client.post(
@@ -434,9 +445,13 @@ def test_comando_nueva_maquina_nota_existente_responde_conflicto(
         raise notes_service.NoteAlreadyExistsError("Ya existe una nota en: /vault-falso/x/Fawn.md")
 
     monkeypatch.setattr(notes_service, "get_vault_path", fake_get_vault_path)
+    # La creación resuelve el vault dentro de `kos_core.notes` desde que puede
+    # diferirse (doc 14 §5).
+    monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
     monkeypatch.setattr(notes_service, "create_note", fake_create_note)
+    monkeypatch.setattr("kos_core.notes.create_note", fake_create_note)
 
-    monkeypatch.setattr(kos_api_main, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(kos_api_main, "make_embedding_client", lambda settings: _FakeEmbedder())
     with TestClient(create_app()) as client:
         _use_llm(client, _EchoLLM())
         response = client.post("/v1/query", json={"query": "/nueva-maquina Fawn"})

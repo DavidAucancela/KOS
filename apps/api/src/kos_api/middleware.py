@@ -1,4 +1,5 @@
-"""Middleware transversal de la API: trace_id, errores RFC 9457 y CORS (doc 10 §2)."""
+"""Middleware transversal de la API: autenticación, trace_id, errores RFC 9457 y CORS
+(doc 10 §2; ADR-0010)."""
 
 from __future__ import annotations
 
@@ -12,16 +13,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from kos_api import auth
 from kos_api.ops import docker_guardian
 from kos_core.config import get_settings
 from kos_core.observability import bind_trace_id, get_tracer, http_request_duration_seconds
 
 _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _tracer = get_tracer("kos-api")
+_rate_limiter = auth.RateLimiter()
 
 # /health y /metrics no deben despertar la infra ni contar como actividad:
 # son sondeos, no uso real (doc 09 §9).
 _GUARDIAN_EXEMPT_PATHS = {"/health", "/metrics"}
+
+
+def _problem(status: int, detail: str, *, headers: dict[str, str] | None = None) -> JSONResponse:
+    """Error en formato RFC 9457, igual que el resto de la API."""
+    return JSONResponse(
+        status_code=status,
+        content={
+            "type": "about:blank",
+            "title": HTTPStatus(status).phrase,
+            "status": status,
+            "detail": detail,
+        },
+        media_type="application/problem+json",
+        headers=headers,
+    )
 
 
 def install(app: FastAPI) -> None:
@@ -62,6 +80,54 @@ def install(app: FastAPI) -> None:
                 },
                 media_type="application/problem+json",
                 headers={"Retry-After": "5"},
+            )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def auth_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Credencial en **todas** las rutas, incluido el HTML de la web (ADR-0010).
+
+        Solo `/health` queda abierto: Railway y el monitoreo lo sondean sin
+        credencial. El preflight CORS tampoco lleva cabeceras de auth.
+        """
+        settings = get_settings()
+        path = request.url.path
+        if request.method == "OPTIONS" or path in auth.PUBLIC_PATHS:
+            return await call_next(request)
+
+        keys = settings.api_keys
+        if not keys:
+            # Modo local de doc 09: sin claves configuradas no se expone nada
+            # fuera de la máquina.
+            if not auth.is_local(request):
+                return _problem(
+                    401,
+                    "La API no tiene KOS_API_KEYS configurada: solo acepta conexiones locales.",
+                )
+            return await call_next(request)
+
+        client_name = auth.authenticate(request, settings)
+        if client_name is None:
+            return _problem(
+                401,
+                "Credencial ausente o inválida.",
+                headers={"WWW-Authenticate": 'Basic realm="KOS"'},
+            )
+        request.state.api_client = client_name
+
+        bucket = "llm" if path.startswith(auth.LLM_PATH_PREFIXES) else "general"
+        limit = (
+            settings.kos_rate_limit_llm_per_minute
+            if bucket == "llm"
+            else settings.kos_rate_limit_per_minute
+        )
+        if not _rate_limiter.allow(auth.client_ip(request), bucket, limit):
+            return _problem(
+                429,
+                f"Límite de {limit} peticiones/minuto superado para {bucket}.",
+                headers={"Retry-After": "60"},
             )
         return await call_next(request)
 

@@ -7,10 +7,9 @@ con `-m integration`.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from datetime import UTC, datetime, timedelta
 
 from kos_core.config import get_settings
 from kos_core.schemas.agents import Cost

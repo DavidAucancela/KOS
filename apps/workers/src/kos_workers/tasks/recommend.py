@@ -42,7 +42,8 @@ from typing import Any
 
 from kos_agents.recommender import RecommenderAgent
 from kos_core.config import get_settings
-from kos_core.llm.ollama import OllamaEmbeddingClient, OllamaLLMClient
+from kos_core.llm.factory import make_embedding_client
+from kos_core.llm.ollama import OllamaLLMClient
 from kos_core.schemas.agents import AgentRequest, EvidenceRef
 from kos_core.storage import neo4j as neo4j_storage
 from kos_core.storage import postgres as postgres_storage
@@ -247,7 +248,7 @@ async def _async_recommend(
     settings = get_settings()
     engine = create_engine(settings)
     driver = neo4j_storage.create_driver(settings)
-    embedder = OllamaEmbeddingClient(settings)
+    embedder = make_embedding_client(settings)
     llm = OllamaLLMClient(settings)
     try:
         mcp_context = MCPAppContext(

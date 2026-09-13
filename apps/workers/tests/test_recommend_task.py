@@ -212,7 +212,7 @@ def _patch_infra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         recommend_module.neo4j_storage, "create_driver", lambda settings: _FakeDriver()
     )
-    monkeypatch.setattr(recommend_module, "OllamaEmbeddingClient", lambda settings: _FakeEmbedder())
+    monkeypatch.setattr(recommend_module, "make_embedding_client", lambda settings: _FakeEmbedder())
     monkeypatch.setattr(recommend_module, "OllamaLLMClient", lambda settings: _FakeLLM())
 
     async def fake_recent_seed_chunks(engine: Any, **kwargs: Any) -> list[dict[str, Any]]:

@@ -22,6 +22,9 @@ class NoteIn(BaseModel):
 
 class NoteOut(BaseModel):
     path: str
+    deferred: bool = False
+    """True cuando la nota quedó encolada porque este proceso no tiene el vault
+    (doc 14 §5): la ruta es la prevista, todavía no existe el archivo."""
 
 
 @router.post("", response_model=NoteOut, status_code=201)
@@ -31,9 +34,13 @@ async def create_note(
     settings: Settings = Depends(settings_dep),
 ) -> NoteOut:
     try:
-        vault_path = await notes_service.get_vault_path(engine, settings.kos_default_vault_source)
-        note_path = notes_service.create_note(
-            vault_path, template_name=body.template, folder=body.folder, title=body.title
+        note_path, deferred = await notes_service.create_note_or_enqueue(
+            engine,
+            settings,
+            source_name=settings.kos_default_vault_source,
+            template_name=body.template,
+            folder=body.folder,
+            title=body.title,
         )
     except notes_service.VaultSourceNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -41,4 +48,4 @@ async def create_note(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except notes_service.NoteAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return NoteOut(path=str(note_path))
+    return NoteOut(path=note_path, deferred=deferred)
