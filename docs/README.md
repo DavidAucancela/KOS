@@ -20,7 +20,7 @@ Estos documentos son la **fuente de verdad del diseño**. Ninguna fase de desarr
 | 11 | [Recomendador e inteligencia proactiva](11-recomendador-e-inteligencia-proactiva.md) | Fase 5 | 🔵 En revisión (implementado, construcción cerrada 2026-08-18; promueve a 🟢 al confirmar el criterio de salida de v1.0) |
 | 12 | [Calidad de extracción: entidades y relaciones cross-documento](12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Mejora sobre Fase 1 | 🟡 Borrador |
 | 13 | [Interfaz de usuario](13-interfaz-de-usuario.md) | Mejora sobre Fase 1+ | 🟡 Borrador (implementado 2026-08-27: colapso de paneles, vista de memoria, animación/caminos del grafo) |
-| 14 | [Despliegue en Railway (single-tenant, techo de $3/mes)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; revisado 2026-09-12 para el techo de $3; ADR-0008/0009/0010 aceptados, fase 0 cerrada) |
+| 14 | [Despliegue en Railway (single-tenant, techo de $3/mes)](14-despliegue-en-railway.md) | Opción de despliegue sobre doc 09 §7 | 🟡 Borrador (no planificado en roadmap; ADR-0008/0009/0010 aceptados; fases 0/A/B cerradas 2026-09-12 — código habilitante + imagen + drain construidos y verificados; falta C: infra Railway real) |
 | 15 | [Multiproveedor LLM](15-multiproveedor-llm.md) | Extiende ADR-0007 sobre ADR-0006 | 🟡 Borrador (proveedores OpenAI-compatibles ya usables sin código; §5 requiere ADR-0008) |
 
 Estados: 🟡 Borrador → 🔵 En revisión → 🟢 Aprobado. Un doc marcado "implementado" ya tiene código

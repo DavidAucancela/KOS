@@ -1,6 +1,6 @@
 # 14 — Despliegue en Railway (single-tenant, techo de $3/mes)
 
-**Estado:** 🟡 Borrador · **Última actualización:** 2026-09-12 · **Habilita:** una opción concreta
+**Estado:** 🟡 Borrador (fases 0/A/B construidas y verificadas; falta C — infra Railway real) · **Última actualización:** 2026-09-12 · **Habilita:** una opción concreta
 de despliegue para la etapa "v1.0 / self-hosting single-node" de
 [09 — Guía de desarrollo y despliegue](09-guia-desarrollo-y-despliegue.md) §7
 
@@ -309,8 +309,8 @@ Ninguno revierte ADR-0006 ni ADR-0007 para el modo local: los complementan para 
 | Fase | Qué cubre | Criterio de salida |
 |---|---|---|
 | ~~0 — ADRs~~ | 0008, 0009, 0010 | ✅ Cerrada el 2026-09-12: los tres en estado Aceptado |
-| **A — código habilitante** | `DATABASE_URL` en config · cliente de embeddings HTTP · claves nombradas + Basic + rate limit · cadena de proveedores cloud · pools que duermen · `/v1/ops/sync-now` · tabla de ejecuciones + `/v1/ops/status` | Tests verdes; la API arranca contra Supabase+Aura+R2 **desde el Mac**, sin Docker local |
-| **B — imágenes** | `Dockerfile` multi-stage (uv + build de `apps/web`) · `scripts/railway_drain.py` (drena, consolida memoria si toca, timeout 30 min) · **encolado de `obsidian.*`** (va aquí porque quien materializa las escrituras es el drain, que tiene el vault delante) · `railway.json` | `docker run` local sirve API + web; el drain sale solo con la cola vacía **y también al vencer el timeout** |
+| ~~A — código habilitante~~ | `DATABASE_URL` en config · cliente de embeddings HTTP (falla si el proveedor no devuelve 1024 dim) · claves nombradas + Basic + rate limit · cadena de proveedores cloud (`ChainLLMClient`) · pools que duermen (NullPool en Postgres, sin keepalive en Redis, vida corta en Neo4j) · `POST /v1/ops/sync-now` vía `serviceInstanceRedeploy` · tabla `cron_runs` + `GET /v1/ops/status` | ✅ Cerrada el 2026-09-12. Verificado: 505 tests, `mypy --strict` limpio en `core`, `lint-imports` sin contratos rotos. De paso se corrigió `alembic upgrade head` (0012 tenía dos migraciones con el mismo id — el release command de Railway habría fallado). |
+| ~~B — imágenes~~ | `Dockerfile` multi-stage (uv + build de `apps/web`) · `kos_workers/drain.py` (drena, consolida memoria si toca, timeout de 30 min con salida forzada si el worker no para) · `pending_vault_writes` + encolado de `obsidian.*` (decisión centralizada en `kos_core.notes.*_or_enqueue`) · `railway.json` | ✅ Cerrada el 2026-09-12. Verificado con la imagen real contra la infra local: 401 sin credencial, `/health` 200 abierto, HTML servido con credencial, `python -m kos_workers.drain` saliendo con código 0, y `POST /v1/notes` encolando de verdad (sin crear el archivo) contra Postgres real. |
 | **C — infra gestionada** | Proyecto Railway (api + workers-cron `0 0,12 * * *` + Redis + volumen) · Supabase · Aura · R2 · repo privado del vault · variables (§7) | Deploy verde; `/health` responde sin credencial y `/` la pide; el cron ejecuta y termina |
 | **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]` |
 | **E — corte y medición** | Obsidian Git empujando al repo; uso normal 7 días | **Factura Railway proyectada < $3/mes**; las 2 ejecuciones diarias del cron aparecen en `/v1/ops/status` sin intervención; la API llega a dormir (gráfica de uso a cero entre sesiones) |
@@ -318,3 +318,8 @@ Ninguno revierte ADR-0006 ni ADR-0007 para el modo local: los complementan para 
 El criterio de salida de la fase E es el que decide si este modo se queda. Si no baja de $3, la
 palanca siguiente es eliminar Redis y el servicio cron (ingesta síncrona en la API), que **sí**
 exige refactorizar la cadena de tasks y su propio ADR.
+
+**Deuda que las fases A/B no cierran** (no bloquea C): la migración del `.env.example` documenta
+las variables pero nadie las ha usado contra un Supabase/Aura reales todavía — la fase C es la
+primera vez que este código corre contra infraestructura gestionada de verdad, no solo contra la
+infra local con las banderas de modo gestionado activadas.
