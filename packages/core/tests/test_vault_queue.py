@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from kos_core import vault_queue
 from kos_core.config import Settings
 from kos_core.notes import (
     create_folder_or_enqueue,

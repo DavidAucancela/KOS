@@ -157,7 +157,12 @@ async def test_update_note_sin_confirm_no_escribe(
     monkeypatch.setattr("kos_core.notes.get_vault_path", fake_get_vault_path)
 
     result = await obsidian_tools._update_note_core(
-        None, Settings(), path="Nota.md", content="nuevo", source_name="v", confirm=False,
+        None,
+        Settings(),
+        path="Nota.md",
+        content="nuevo",
+        source_name="v",
+        confirm=False,
         trace_id="t",
     )
 
@@ -170,7 +175,12 @@ async def test_update_note_con_confirm_sobreescribe(_patched_vault: Path) -> Non
     (_patched_vault / "Nota.md").write_text("viejo", encoding="utf-8")
 
     result = await obsidian_tools._update_note_core(
-        None, Settings(), path="Nota.md", content="nuevo", source_name="v", confirm=True,
+        None,
+        Settings(),
+        path="Nota.md",
+        content="nuevo",
+        source_name="v",
+        confirm=True,
         trace_id="t",
     )
 
@@ -181,7 +191,12 @@ async def test_update_note_con_confirm_sobreescribe(_patched_vault: Path) -> Non
 
 async def test_update_note_inexistente_reporta_y_no_crea(_patched_vault: Path) -> None:
     result = await obsidian_tools._update_note_core(
-        None, Settings(), path="NoExiste.md", content="x", source_name="v", confirm=True,
+        None,
+        Settings(),
+        path="NoExiste.md",
+        content="x",
+        source_name="v",
+        confirm=True,
         trace_id="t",
     )
 

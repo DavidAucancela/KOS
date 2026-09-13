@@ -6,8 +6,9 @@ auto-aprueba."""
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -150,16 +151,12 @@ def test_patch_proposal_404_si_no_existe_o_ya_resuelta(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(postgres_storage, "update_memory_proposal_status", fake_update)
     with TestClient(create_app()) as client:
-        response = client.patch(
-            f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "rejected"}
-        )
+        response = client.patch(f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "rejected"})
 
     assert response.status_code == 404
 
 
 def test_patch_proposal_status_invalido_es_422() -> None:
     with TestClient(create_app()) as client:
-        response = client.patch(
-            f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "pending"}
-        )
+        response = client.patch(f"/v1/memory/proposals/{uuid.uuid4()}", json={"status": "pending"})
     assert response.status_code == 422
