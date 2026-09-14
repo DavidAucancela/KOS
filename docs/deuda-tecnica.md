@@ -93,9 +93,17 @@ el Recomendador (Sprint 22-26).
 
 ## UI/UX — baja prioridad, sin sprint asignado
 
-_(sin ítems abiertos — el diseño de la UI se consolidó en
-[doc 13 — Interfaz de usuario](13-interfaz-de-usuario.md) y los tres frentes se construyeron el
-2026-08-27; ver "Resuelta")_
+Los tres frentes de la ronda anterior se construyeron el 2026-08-27 (ver "Resuelta"). Discutiendo
+qué faltaba antes de pasar a wireframes (2026-09-13) aparecieron cuatro frentes nuevos, diseñados
+en [doc 13](13-interfaz-de-usuario.md) §8–§11, ninguno construido todavía:
+
+| Ítem | Origen |
+|---|---|
+| El badge del ícono "Estado" del rail solo cuenta recomendaciones pendientes; una API/servicio caído no tiene ninguna señal fuera de entrar a la vista Estado | Diseño ad-hoc 2026-09-13, [doc 13](13-interfaz-de-usuario.md) §8 |
+| Sin canal de mensajes transitorios (toasts), sin patrón único de estado vacío ni de estado de error — cada feature resuelve loading/error/vacío a mano y distinto | Diseño ad-hoc 2026-09-13, [doc 13](13-interfaz-de-usuario.md) §9 |
+| Recomendaciones nuevas del `RecommenderAgent` no tienen aviso mientras el usuario está en otra vista — `useRecommendations()` solo trae datos una vez al montar el shell | Hallazgo en el propio comentario de `App.tsx` (2026-09-13), [doc 13](13-interfaz-de-usuario.md) §9.4 |
+| `obsidian.create_note`/`create_folder` no tienen ningún resultado visible distinto de un mensaje de chat normal; `update_note` sobrescribe sin preview ni confirmación pese a no tener deshacer | Diseño ad-hoc 2026-09-13, [doc 13](13-interfaz-de-usuario.md) §10 — resuelto el mismo día: reusar el patrón `memory_proposals` completo (tabla `note_update_proposals` + `GET/PATCH /v1/notes/proposals` + panel), no una confirmación armada solo en el frontend |
+| `GET/POST /v1/sources` y `POST /v1/sources/{id}/sync` (Fase 1, doc 06 §3) no tienen ninguna pantalla en `apps/web` — sincronizar una fuente a mano hoy requiere llamar a la API directo | Diseño ad-hoc 2026-09-13, [doc 13](13-interfaz-de-usuario.md) §11 |
 
 ## Calidad / ajuste fino — sin sprint asignado
 
