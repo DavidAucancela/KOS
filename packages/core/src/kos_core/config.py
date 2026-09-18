@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     minio_root_user: str = "kos"
     minio_root_password: str = "kos_dev_password"
     minio_bucket: str = "kos-documents"
+    # MinIO local no tiene TLS; R2 (doc 14 §7) lo exige siempre.
+    minio_secure: bool = False
 
     # Ollama (ADR-0006: local-first)
     ollama_base_url: str = "http://localhost:11434"
