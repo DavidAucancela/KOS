@@ -189,7 +189,7 @@ variables por servicio.
 | `DATABASE_URL` | URL de Supabase (pooler, `sslmode=require`) | Supabase dashboard |
 | `REDIS_URL` | `${{Redis.REDIS_URL}}` | servicio Railway |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | `neo4j+s://<id>.databases.neo4j.io` | Neo4j Aura console |
-| `MINIO_ENDPOINT` / `*_ACCESS_KEY` / `*_SECRET_KEY` / `*_BUCKET` | endpoint y token de R2 | Cloudflare dashboard |
+| `MINIO_ENDPOINT` / `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` / `MINIO_BUCKET` / `MINIO_SECURE=true` | endpoint (sin esquema) y token de R2 | Cloudflare dashboard |
 | `KOS_LLM_PROVIDER_CHAIN` | `openai,openrouter` | ADR-0008 |
 | `OPENAI_API_KEY` / `OPENAI_LLM_MODEL` | secreto / `gpt-4o-mini` | proveedor primario |
 | `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` | secreto / `https://openrouter.ai/api/v1` | proveedor de reserva (ADR-0008) |
