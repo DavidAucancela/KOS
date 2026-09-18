@@ -89,10 +89,29 @@ def _run_git(repo: Path, *args: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def vault_pull(vault_path: Path) -> str | None:
-    """Trae los cambios del repo del vault. Devuelve un aviso si no pudo."""
+def vault_pull(vault_path: Path, *, repo_url: str = "") -> str | None:
+    """Trae los cambios del repo del vault. Si el volumen está vacío (primer
+    arranque o volumen recreado) y hay `repo_url`, clona antes de seguir —
+    `git clone` exige un directorio vacío, así que un volumen con archivos
+    sueltos (pero sin `.git`) no se toca y sigue el camino de siempre.
+    Devuelve un aviso si no pudo."""
     if not (vault_path / ".git").is_dir():
-        return f"{vault_path} no es un repo git: se ingiere lo que haya en el volumen"
+        is_empty = not vault_path.exists() or not any(vault_path.iterdir())
+        if not repo_url or not is_empty:
+            return f"{vault_path} no es un repo git: se ingiere lo que haya en el volumen"
+        try:
+            vault_path.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(
+                ["git", "clone", repo_url, str(vault_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            return f"clon inicial del vault falló: {exc}"
+        if result.returncode != 0:
+            return f"clon inicial del vault falló: {result.stderr.strip()}"
+        return None
     try:
         _run_git(vault_path, "pull", "--ff-only")
     except subprocess.CalledProcessError as exc:
@@ -283,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     memory_run_id: uuid.UUID | None = None
     try:
         if args.vault_path:
-            warning = vault_pull(Path(args.vault_path))
+            warning = vault_pull(Path(args.vault_path), repo_url=settings.vault_repo_url)
             if warning:
                 notes.append(warning)
                 logger.warning(warning)
