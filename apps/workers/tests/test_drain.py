@@ -54,7 +54,7 @@ def test_queue_is_empty(
 
 def _git_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "vault"
-    repo.mkdir()
+    repo.mkdir(parents=True)
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "kos@test"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "KOS"], check=True)
@@ -70,6 +70,28 @@ def test_pull_sin_repo_avisa_y_sigue(tmp_path: Path) -> None:
     warning = drain.vault_pull(tmp_path / "vault")
     assert warning is not None
     assert "no es un repo git" in warning
+
+
+def test_pull_sin_repo_con_url_clona(tmp_path: Path) -> None:
+    """Volumen vacío + VAULT_REPO_URL: el drain se autorepara clonando."""
+    origin = _git_repo(tmp_path / "origin_base")
+    target = tmp_path / "vault"
+    warning = drain.vault_pull(target, repo_url=str(origin))
+    assert warning is None
+    assert (target / ".git").is_dir()
+    assert (target / "nota.md").exists()
+
+
+def test_pull_directorio_con_archivos_sin_git_no_clona(tmp_path: Path) -> None:
+    """`git clone` exige directorio vacío: con archivos sueltos no se toca."""
+    origin = _git_repo(tmp_path / "origin_base")
+    target = tmp_path / "vault_con_archivos"
+    target.mkdir()
+    (target / "existente.md").write_text("nota previa", encoding="utf-8")
+    warning = drain.vault_pull(target, repo_url=str(origin))
+    assert warning is not None
+    assert "no es un repo git" in warning
+    assert not (target / ".git").is_dir()
 
 
 def test_pull_fallido_no_aborta(tmp_path: Path) -> None:

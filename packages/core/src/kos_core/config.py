@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     # §5): las escrituras se encolan y las materializa el drain. `true` solo en
     # el servicio `api`; el servicio cron escribe directo.
     kos_defer_vault_writes: bool = False
+    # Repo privado del vault (doc 14 §5/§7): el drain clona ahí si el volumen
+    # está vacío (primer arranque o volumen recreado), y hace pull/push normal
+    # una vez que existe. Vacío = no clonar (modo local, o volumen ya poblado).
+    vault_repo_url: str = ""
 
     # Memoria (v0.4, doc 04 §3): cada cuánto corre la consolidación (episódica
     # repetida → semántica) y la media vida del decaimiento de `salience`.
