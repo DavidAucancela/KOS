@@ -1,160 +1,112 @@
 # KOS — Knowledge Operating System
 
-> Un motor de conocimiento independiente, donde Obsidian es solo uno de los conectores.
+A source-independent knowledge engine. It ingests your notes and documents, turns them into a
+knowledge graph with long-term memory, and answers questions through a team of agents — always
+with evidence. Obsidian is just one connector.
 
-KOS construye una **representación digital de tu conocimiento**: ingesta cualquier fuente (Obsidian, PDF, Git, email, web…), la transforma en entidades y relaciones dentro de un grafo de conocimiento, mantiene memoria de largo plazo y razona sobre todo ello mediante agentes coordinados por un planner.
+> How do I make an AI think with exactly the same knowledge I have, but better organized than my
+> own memory?
 
-**La pregunta que responde el sistema:**
+**Status:** v1.0 feature-complete, but **not closed** — the exit criterion (≥1 useful
+recommendation per week) was measured on 2026-09-19 and was not met. Details in
+[`docs/07-roadmap-versiones.md`](docs/07-roadmap-versiones.md). Managed deployment on Railway is
+live; data migration is next ([doc 14](docs/14-despliegue-en-railway.md)).
 
-> ¿Cómo hago que una IA piense utilizando exactamente el mismo conocimiento que tengo yo, pero mejor organizado que mi propia memoria?
+## What it does
 
-## Estado del proyecto
-
-**v1.0 — Recomendador, construcción completa** (2026-08-18, Sprints 22–26, ver [`docs/sprints/`](docs/sprints/)). El sistema ya no solo responde: un `RecommenderAgent` se dispara ante cambios reales del grafo (`graph.updated`, encadenado desde `kos.graph_sync` y desde las correcciones manuales) y propone dos tipos de recomendación — lagunas de conocimiento y contradicciones — con feedback loop real (`PATCH /v1/recommendations/{id}` aceptar/descartar) y deduplicación por firma. **El criterio de salida de v1.0 (≥1 recomendación útil/semana durante un mes) está en ventana de medición real, 2026-08-18 → 2026-09-18** — el código está terminado, pero la versión no se declara cerrada hasta verificar el ritmo real con `scripts/recommendations_report.py` (`docs/eval/recomendaciones.md`).
-
-Se llega ahí sobre **v0.5 — Orquestación de agentes** (cerrado 2026-08-16, Sprints 16–21): `/v1/query` no corre un pipeline fijo — un **Planner** real (LLM) genera un plan dinámico eligiendo entre los agentes `Retrieval`, `Graph`, `Research` (GitHub/web), `Memory` y `Writing`, ejecuta los pasos sin dependencias entre sí en paralelo, y dispara un post-paso de `Learning` que aprende de cada interacción — todo vía un servidor MCP real (`packages/mcp-tools`, 13 herramientas) con gate de aprobación para las de escritura. Si el LLM no puede generar un plan válido, degrada a un pipeline fijo en vez de fallar (`degraded: true`, auditable en `GET /v1/plans/{id}`).
-
-Sobre esa base, el trabajo posterior (deuda técnica y calidad, sin sprint numerado) ya tocó dos frentes: la **interfaz** ([doc 13](docs/13-interfaz-de-usuario.md), construido 2026-08-27 — colapso persistente de paneles, vista de auditoría de memoria con corrección manual, y grafo con reacomodo animado + resaltado de caminos) y la **calidad de extracción del grafo** ([doc 12 §10](docs/12-calidad-de-extraccion-de-entidades-y-relaciones.md), construido 2026-08-27): el grafo quedaba 84% desconectado porque el LLM local no rinde para extraer relaciones, así que ahora la conectividad viene sobre todo de la **estructura del vault** — un nodo `Document` por nota, aristas desde los `[[wikilinks]]`, tags compartidos, frontmatter, y co-ocurrencia de entidades — de forma determinística, con el LLM como refuerzo opcional. El backfill sobre el grafo existente aún no se ha corrido en producción.
-
-Detalle completo en [Servicios funcionales](#servicios-funcionales) más abajo, progreso sprint a sprint en [doc 08](docs/08-plan-de-sprints.md), y **próximo paso** (no un sprint nuevo, sino tres frentes en paralelo) en [Próximo paso](#próximo-paso).
-
-## Documentación de arquitectura
-
-Toda decisión de diseño vive en [`docs/`](docs/README.md):
-
-| Documento | Contenido |
+| Category | Summary |
 |---|---|
-| [00 — Visión y objetivos](docs/00-vision-y-objetivos.md) | Qué es KOS, para quién, y qué NO es |
-| [01 — Arquitectura general](docs/01-arquitectura-general.md) | Los 10 dominios del sistema y sus fronteras |
-| [02 — Modelo de dominio y ontología](docs/02-modelo-de-dominio-y-ontologia.md) | Entidades, relaciones y esquema del grafo |
-| [03 — Arquitectura de agentes](docs/03-arquitectura-de-agentes.md) | Planner, agentes especializados y coordinación MCP |
-| [04 — Memoria y aprendizaje](docs/04-memoria-y-aprendizaje.md) | Tipos de memoria y aprendizaje continuo |
-| [05 — Ingesta y actualización](docs/05-ingesta-y-actualizacion.md) | Pipeline de conectores → parser → grafo |
-| [06 — APIs y contratos](docs/06-apis-y-contratos.md) | Contratos entre servicios y API pública |
-| [07 — Roadmap por versiones](docs/07-roadmap-versiones.md) | v0.1 → v1.0 |
-| [08 — Plan de sprints](docs/08-plan-de-sprints.md) | Implementación sprint a sprint |
-| [09 — Guía de desarrollo y despliegue](docs/09-guia-desarrollo-y-despliegue.md) | Convenciones, entorno local, CI/CD, monitoreo |
-| [10 — Estructura del proyecto](docs/10-estructura-del-proyecto.md) | Árbol de archivos objetivo y dónde vive cada cosa |
-| [11 — Recomendador e inteligencia proactiva](docs/11-recomendador-e-inteligencia-proactiva.md) | RecommenderAgent, tipos de recomendación, feedback loop |
-| [12 — Calidad de extracción: entidades y relaciones](docs/12-calidad-de-extraccion-de-entidades-y-relaciones.md) | Resolución de entidades indexada, relaciones cross-documento, y (§10) aristas desde la estructura del vault |
-| [13 — Interfaz de usuario](docs/13-interfaz-de-usuario.md) | Layout de cuatro zonas, colapso de paneles, vista de memoria, animación y caminos del grafo |
-| [14 — Despliegue en Railway](docs/14-despliegue-en-railway.md) | Opción gestionada de mínimo coste (no planificada; requiere ADR de proveedor cloud) |
-| [ADRs](docs/adr/) | Architecture Decision Records |
-| [Deuda técnica](docs/deuda-tecnica.md) | Registro vivo de lo pendiente — punto de partida del próximo paso |
+| **Ingestion** | Connectors for Obsidian, PDF and Git feed a pipeline that parses, chunks and embeds documents. Automatic polling sync; removed documents are retired from the graph. |
+| **Knowledge graph** | Entities and relations in Neo4j. Connectivity comes mostly from vault structure (`[[wikilinks]]`, shared tags, frontmatter, co-occurrence), with the LLM as an optional booster. Manual correction of nodes and relations. |
+| **Search & Q&A** | Semantic search over pgvector. `POST /v1/query` returns an answer with `evidence[]` — an answer without evidence is a bug. |
+| **Agents** | An LLM **Planner** builds a dynamic plan and picks among Retrieval, Graph, Research (GitHub/web), Memory and Writing agents; independent steps run in parallel. If no valid plan can be produced, it degrades to a fixed pipeline. Every plan is auditable at `GET /v1/plans/{id}`. |
+| **Memory** | A Learning agent records each interaction as episodic memory; a consolidation job groups repeats into semantic memory. Items can be audited, corrected and locked by hand. |
+| **Recommendations** | A Recommender agent reacts to real graph changes, detects knowledge gaps and contradictions, and learns from accept/dismiss feedback. Deduplicated by signature. |
+| **Tools (MCP)** | 16 tools behind a single MCP server (vector, docs, graph, memory, GitHub, web, Obsidian, recommendations). Write tools require `confirm=true` through a real permission gate — the LLM never approves its own writes. |
+| **Interface** | React web app with Chat + citations, Graph explorer, Plan traces, Memory audit, Metrics and Status (with recommendations). |
+| **Observability** | Structured logs, OpenTelemetry traces, Prometheus `/metrics` including business metrics for planner, agents and recommender (computed from Postgres on each scrape). |
+| **LLM providers** | Local-first with Ollama. Cloud providers are opt-in per task (Planner and Writing only); ingestion, graph extraction and embeddings stay local by default. |
+| **Deployment** | Local Docker Compose, or a low-cost managed mode on Railway + Supabase + Aura + R2 with a cron-driven worker so the API can sleep. |
 
-## Estructura del monorepo
+## Architecture
 
 ```
-kos/
-├── docs/                 # Documentos de arquitectura y ADRs
-├── apps/
-│   ├── api/              # FastAPI — API pública y orquestación (activo)
-│   ├── web/              # React + TS + Vite + Tailwind + shadcn/ui (activo)
-│   └── workers/          # Celery — ingesta, embeddings, grafo (activo)
-├── packages/
-│   ├── core/             # Modelo de dominio, ontología, contratos internos
-│   ├── connectors/       # Conectores de ingesta (Obsidian, PDF, Git…)
-│   ├── agents/           # Planner, Retrieval, Graph, Research, Memory, Writing, Learning, Recommender (activo)
-│   └── mcp-tools/        # Servidor MCP: 13 herramientas + gate de permisos (activo)
-├── infra/                # Configuración de servicios (init de Postgres, etc.)
-├── docker-compose.yml    # Infraestructura local completa
-└── Makefile              # Atajos de desarrollo
+apps/
+  api/          FastAPI — public API and orchestration
+  web/          React + TypeScript + Vite + Tailwind + shadcn/ui
+  workers/      Celery — ingestion, embeddings, graph sync, memory, recommendations
+packages/
+  core/         Domain model, ontology, schemas, storage, observability
+  connectors/   Source connectors (Obsidian, PDF, Git)
+  agents/       Planner + Retrieval, Graph, Research, Memory, Writing, Learning, Recommender
+  mcp-tools/    MCP server, tools and permission gate
+docs/           Architecture documents, ADRs, sprint history
+infra/          Service configuration
+scripts/        Reports, backfills, evals, demos
 ```
 
-## Stack tecnológico
+The core knows no concrete source ([ADR-0001](docs/adr/0001-nucleo-independiente-de-fuentes.md));
+everything crossing a boundary uses schemas from `packages/core`.
 
-| Capa | Tecnología |
+## Tech stack
+
+| Layer | Technology |
 |---|---|
-| Backend | FastAPI + Pydantic |
-| Frontend | React + TypeScript + Vite + Tailwind + shadcn/ui |
-| Agentes | Arquitectura propia + MCP |
-| LLM local | Ollama |
-| Embeddings | bge-m3 / nomic-embed-text |
-| Vector DB | PostgreSQL + pgvector |
-| Grafo | Neo4j |
-| Cache / colas | Redis + Celery |
-| Almacenamiento | MinIO (S3 compatible) |
-| Observabilidad | OpenTelemetry + Prometheus + Grafana |
-| Contenedores | Docker Compose (Kubernetes más adelante) |
+| Backend | Python, FastAPI, Pydantic, Celery |
+| Frontend | React, TypeScript, Vite, Tailwind, shadcn/ui |
+| Agents | Custom orchestration + MCP |
+| LLM / embeddings | Ollama (local), bge-m3 |
+| Vector store | PostgreSQL + pgvector |
+| Graph | Neo4j |
+| Queue / cache | Redis |
+| Object storage | MinIO (S3-compatible) |
+| Observability | OpenTelemetry, Prometheus, Grafana |
+| Packaging | uv + pnpm workspaces, Docker |
 
-Las decisiones detrás de cada elección están registradas como [ADRs](docs/adr/).
+## Quick start
 
-## Arranque rápido
-
-Requisitos: Docker Desktop, `make`, `uv` y `pnpm`.
+Requirements: Docker Desktop, `make`, `uv`, `pnpm`, and Ollama.
 
 ```bash
-cp .env.example .env    # ajusta credenciales si quieres
-make install             # dependencias del workspace (uv + pnpm)
-make up                  # levanta Postgres, Neo4j, Redis, MinIO y Ollama
-make pull-models         # descarga bge-m3 + el LLM local
-make migrate             # aplica migraciones Alembic
-make dev                 # API + workers + beat + web + vigía de ahorro de recursos
+cp .env.example .env    # adjust credentials if you want
+make install            # workspace dependencies (uv + pnpm)
+make up                 # Postgres, Neo4j, Redis, MinIO, Ollama
+make pull-models        # bge-m3 + the local LLM
+make migrate            # Alembic migrations
+make dev                # API + workers + beat + web
 ```
 
-Infraestructura:
-
-| Servicio | URL | Credenciales por defecto |
-|---|---|---|
-| PostgreSQL + pgvector | `localhost:5432` | `kos` / ver `.env` |
-| Neo4j Browser | http://localhost:7474 | `neo4j` / ver `.env` |
-| Redis | `localhost:6379` | — |
-| MinIO Console | http://localhost:9001 | ver `.env` |
-| Ollama (nativo en Mac) | http://localhost:11434 | — |
-| Grafana / Prometheus (`make obs-up`) | http://localhost:3000 | ver `.env` |
-
-Aplicación:
-
-| Servicio | URL |
+| Service | URL |
 |---|---|
-| API (FastAPI, OpenAPI en `/docs`) | http://localhost:8000 |
+| API (OpenAPI at `/docs`) | http://localhost:8000 |
 | Web | http://localhost:5173 |
+| Neo4j Browser | http://localhost:7474 |
+| MinIO Console | http://localhost:9001 |
+| Grafana / Prometheus (`make obs-up`) | http://localhost:3000 |
 
-`make down` detiene todo; `make clean` además borra los volúmenes de datos locales.
+Other useful targets: `make test`, `make lint`, `make down`, and `make clean` (⚠️ deletes local
+data volumes). Run `make help` for the full list.
 
-El `ResearchAgent` (`github.*`/`web.*`) funciona sin configuración extra para GitHub (cuota liviana
-anónima); `web.search`/`web.open` necesitan `BRAVE_SEARCH_API_KEY` en `.env` — sin ella, esos pasos
-degradan en vez de romper la respuesta. `GITHUB_TOKEN` es opcional, solo sube la cuota.
+Optional: `BRAVE_SEARCH_API_KEY` enables `web.search`/`web.open`; `GITHUB_TOKEN` raises the GitHub
+quota. Without them those steps degrade instead of failing.
 
-## Servicios funcionales
+## Documentation
 
-Estado real a la fecha (v1.0 en construcción completa, ventana de medición en curso), no
-aspiracional — detalle sprint a sprint en [`docs/sprints/`](docs/sprints/):
+Design lives in [`docs/`](docs/README.md) (written in Spanish). Start here:
 
-- **API (`apps/api`)** — `GET /health` (Postgres/Neo4j/Redis), `/metrics` (Prometheus), `sources` (alta y sincronización de fuentes), `notes` (crear notas desde el chat), `documents` (listado/detalle/chunks), `search` (búsqueda semántica sobre pgvector), `query` (consulta con evidencia, mediada por el Planner real), `graph` (lectura de nodos/vecindario/camino más corto y corrección manual de nodos y relaciones vía `PATCH`/`DELETE`), `memory` (auditoría de memoria vía `GET`/`DELETE /v1/memory` y corrección manual con `PATCH /v1/memory/{id}`, que fija el ítem `locked`), `plans` (`GET /v1/plans/{id}`: traza completa del plan ejecutado, incluido el post-paso de aprendizaje), `recommendations` (`GET /v1/recommendations` listado paginado, `PATCH /v1/recommendations/{id}` aceptar/descartar).
-- **Agentes (`packages/agents`)** — `Planner` (LLM genera un plan JSON dinámico, con reintento y fallback a un plan fijo si no valida), `RetrievalAgent`/`GraphAgent`/`ResearchAgent`/`MemoryAgent` como pasos de evidencia elegidos por el LLM según lo que la pregunta necesite, `WritingAgent` para la síntesis final con citas, `LearningAgent` como post-paso fijo (no elegido por el LLM) que registra cada interacción en memoria episódica, y `RecommenderAgent` — no vive en el plan de `/v1/query`: se dispara vía Celery cuando `graph.updated` ocurre de verdad (sync automático o corrección manual), detecta lagunas de conocimiento y contradicciones, y persiste vía `recommendations.store` (MCP, con dedup por firma `type + target_entities`). Presupuestos de tiempo/pasos por plan (`Constraints`) se hacen cumplir de verdad, con degradación observable (`degraded_reason`).
-- **Herramientas MCP (`packages/mcp-tools`)** — 13 herramientas reales tras un único servidor: `vector.search`, `docs.read_document`, `graph.get_node`/`find_path`/`query`, `memory.recall`/`store`, `obsidian.create_note`, `github.search_repos`/`search_commits`, `web.search`/`open`, `recommendations.store`. Las de escritura (`memory.store`, `obsidian.create_note`, `recommendations.store`) exigen `confirm=true` vía un gate real (`permissions.py`), auditado en logs estructurados.
-- **Web (`apps/web`)** — seis vistas en el rail: **Chat** (con panel de citas/evidencia y sidebar de conversaciones, ambos colapsables con la elección persistida en `localStorage`), **Grafo** (visualización de fuerzas con zoom/pan, reacomodo animado ante cambios de datos, resaltado del camino más corto entre dos nodos, toggle a tabla, detalle con vecindario, corrección y rechazo de relaciones), **Trazas** (inspección de un plan ejecutado por `plan_id`), **Memoria** (listado con filtros por tipo y texto, corrección manual inline que fija `locked`, archivado), **Métricas** (latencia media por agente) y **Estado** (salud de servicios en vivo + panel de **Recomendaciones** embebido: pendientes con aceptar/descartar, historial, badge de conteo en el nav).
-- **Workers (`apps/workers`)** — ingesta del conector Obsidian, sincronización automática por polling, detección de `doc_type` e intención de plantilla, retiro de evidencia del grafo cuando un documento se tumba, el pipeline de memoria (`kos.memory_learn` construye un `LearningAgent` real sobre un servidor MCP embebido por invocación, `kos.memory_consolidate` agrupa episódicas repetidas en semánticas), y la cadena de tareas que dispara `kos.graph_sync`: resolución de entidades indexada (pgvector) y extracción por chunk, aristas estructurales desde la estructura del vault (doc 12 §10), y luego `kos.discover_cross_document_relations`, `kos.discover_cooccurrence_relations` y `kos.recommend_from_graph_update` — este último también tras las correcciones manuales de grafo.
-- **Infraestructura** — Postgres+pgvector, Neo4j (con APOC), Redis, MinIO y Ollama funcionando localmente; un vigía (`make guardian-watch`, activable con `KOS_GUARDIAN_ENABLED=true`) apaga y enciende la infraestructura Docker según uso real.
+| Topic | Documents |
+|---|---|
+| Vision & architecture | [00 Vision](docs/00-vision-y-objetivos.md) · [01 Architecture](docs/01-arquitectura-general.md) · [02 Domain model](docs/02-modelo-de-dominio-y-ontologia.md) |
+| Agents, memory & ingestion | [03 Agents](docs/03-arquitectura-de-agentes.md) · [04 Memory](docs/04-memoria-y-aprendizaje.md) · [05 Ingestion](docs/05-ingesta-y-actualizacion.md) · [11 Recommender](docs/11-recomendador-e-inteligencia-proactiva.md) · [12 Extraction quality](docs/12-calidad-de-extraccion-de-entidades-y-relaciones.md) |
+| API & UI | [06 APIs](docs/06-apis-y-contratos.md) · [13 User interface](docs/13-interfaz-de-usuario.md) |
+| Delivery | [07 Roadmap](docs/07-roadmap-versiones.md) · [08 Sprint plan](docs/08-plan-de-sprints.md) · [09 Dev & deploy guide](docs/09-guia-desarrollo-y-despliegue.md) · [10 Project structure](docs/10-estructura-del-proyecto.md) |
+| Deployment & LLM providers | [14 Railway](docs/14-despliegue-en-railway.md) · [15 Multi-provider LLM](docs/15-multiproveedor-llm.md) |
+| Decisions & backlog | [ADRs](docs/adr/) · [Technical debt](docs/deuda-tecnica.md) |
 
-## Próximo paso
+## Principles
 
-Con la construcción de v1.0 completa (código terminado, ventana de medición 2026-08-18 →
-2026-09-18 corriendo), el trabajo activo no es un sprint numerado nuevo — son tres frentes en
-paralelo sobre [`docs/deuda-tecnica.md`](docs/deuda-tecnica.md):
-
-1. **Deuda técnica** — ítems "sin sprint asignado", evaluando primero el riesgo real de cada uno
-   antes de implementar (no todo ítem de deuda es seguro de cerrar sin pensarlo: ver el caso de
-   `memory.store` en el catálogo del Planner, evaluado y dejado abierto a propósito por riesgo de
-   escritura sin aprobación humana).
-2. **Mejoras de calidad** — desambiguación léxica en búsqueda, clasificación de entidades,
-   umbrales de similitud sin ajustar con uso real, precisión conservadora del veredicto de
-   contradicción con el modelo local. La conectividad del grafo ya se atacó por aquí (doc 12 §10);
-   queda correr el backfill en producción y medir el criterio de éxito (% de nodos con grado ≥ 1).
-3. **Monitoreo** — hoy las métricas de negocio (doc 09 §6) cubren ingesta/búsqueda; no hay
-   métricas sobre el Planner, los agentes ni el Recomendador (tasa de degradación por tipo,
-   distribución de agentes elegidos, latencia por paso, ritmo real de recomendaciones útiles vs.
-   lo que reporta `scripts/recommendations_report.py`).
-
-v1.1 (Plataforma: SDK de conectores, API pública estable, empaquetado) no se planifica en sprints
-hasta cerrar el criterio de salida de v1.0 — misma regla del roadmap (doc 07: "no se empieza una
-versión sin cerrar el criterio de salida de la anterior").
-
-## Principios
-
-1. **El núcleo no depende de ninguna fuente.** Obsidian, Notion o Gmail son conectores intercambiables.
-2. **El activo es el modelo de conocimiento** (ontología + grafo + memoria), no el LLM.
-3. **El LLM nunca accede directamente a los datos**: siempre pasa por el planner.
-4. **Local-first**: todo funciona en tu máquina sin enviar conocimiento a terceros.
-5. **Docs antes que código**: ninguna fase empieza sin su diseño cerrado.
+1. **The core is source-independent.** Obsidian, Notion or Gmail are interchangeable connectors.
+2. **The asset is the knowledge model** (ontology + graph + memory), not the LLM.
+3. **The LLM never touches data directly** — the Planner always mediates.
+4. **Local-first.** Everything runs on your machine; cloud is opt-in.
+5. **Docs before code.** No phase starts without an approved design.
