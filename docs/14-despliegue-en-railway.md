@@ -218,9 +218,26 @@ Una sola vez, con el sistema local como origen de verdad:
 
 **Correcciones a este procedimiento, verificadas el 2026-09-19** contra la base local y Supabase:
 
-- **`pg_dump --data-only`, no un dump completo.** El esquema ya existe en Supabase (lo creó el
-  `releaseCommand` en `0016`, igual que local); un dump completo chocaría con las tablas
-  existentes. Con `--data-only` y `--disable-triggers`, en orden de FKs. `alembic_version` no se copia.
+- **Solo datos, no un dump completo.** El esquema ya existe en Supabase (lo creó el
+  `releaseCommand`, igual que local); un dump completo chocaría con las tablas existentes.
+  `alembic_version` no se copia. **`--disable-triggers` no sirve y no hace falta**: exige superusuario
+  y el rol `postgres` de Supabase no lo es (`is_superuser = off`), y la base no tiene triggers de
+  usuario; solo 4 FKs, así que basta el orden `sources → documents → chunks`. Además `chunks.text_search`
+  es una columna **generada** (`to_tsvector`): un `COPY` tiene que excluirla de la lista de columnas.
+  Por eso la carga es un script (`scripts/migrate_to_managed.py`, fase D) y no un `pg_dump | psql`.
+- **Dos brechas del esquema, halladas el 2026-09-21 y cerradas por la migración `0017`**: (1) **`pg_trgm`
+  no existía en Supabase** — `search.py` usa `word_similarity` en la rama de título de la búsqueda
+  híbrida y solo `infra/postgres/init.sql` (el init del contenedor local) creaba la extensión, así
+  que toda búsqueda fallaba en Railway, con o sin datos; (2) **RLS desactivado en las 13 tablas**
+  de `public`, expuestas a la clave `anon` de la Data API (advisory crítico de Supabase). `0017` crea
+  la extensión y activa RLS **sin políticas** en las tablas existentes: bloquea a `anon`/`authenticated`
+  y no afecta a la app, que conecta como `postgres` (`BYPASSRLS = true`, verificado). Regla desde
+  ahora: **toda tabla nueva activa RLS en su propia migración**; `test_rls_integration.py` falla si
+  alguna tabla de `public` queda sin RLS.
+- **Alcance decidido (2026-09-21): solo conocimiento.** Se migran `sources` (solo `vault-real`),
+  `documents`, `chunks`, `node_embeddings`, `memory_items` y `recommendations`. **No** las
+  conversaciones (536), mensajes (1.028) ni planes (569) locales: son casi todo ruido de pruebas
+  (180 veces "¿qué es KOS?", 126 "/nueva-maquina Fawn"; solo 12 conversaciones con más de 2 mensajes).
 - **Las fuentes no se copian tal cual.** La tabla `sources` local tiene 3 filas: `mini-vault` (3 docs,
   fixture de tests) y `vault-auto` (0 activos, un directorio temporal) son basura de pruebas y **no
   se migran**; `vault-real` (756 activos, 48 tombstones) guarda `vault_path` =
@@ -334,7 +351,7 @@ Ninguno revierte ADR-0006 ni ADR-0007 para el modo local: los complementan para 
 | ~~A — código habilitante~~ | `DATABASE_URL` en config · cliente de embeddings HTTP (falla si el proveedor no devuelve 1024 dim) · claves nombradas + Basic + rate limit · cadena de proveedores cloud (`ChainLLMClient`) · pools que duermen (NullPool en Postgres, sin keepalive en Redis, vida corta en Neo4j) · `POST /v1/ops/sync-now` vía `serviceInstanceRedeploy` · tabla `cron_runs` + `GET /v1/ops/status` | ✅ Cerrada el 2026-09-12. Verificado: 505 tests, `mypy --strict` limpio en `core`, `lint-imports` sin contratos rotos. De paso se corrigió `alembic upgrade head` (0012 tenía dos migraciones con el mismo id — el release command de Railway habría fallado). |
 | ~~B — imágenes~~ | `Dockerfile` multi-stage (uv + build de `apps/web`) · `kos_workers/drain.py` (drena, consolida memoria si toca, timeout de 30 min con salida forzada si el worker no para) · `pending_vault_writes` + encolado de `obsidian.*` (decisión centralizada en `kos_core.notes.*_or_enqueue`) · `railway.json` | ✅ Cerrada el 2026-09-12. Verificado con la imagen real contra la infra local: 401 sin credencial, `/health` 200 abierto, HTML servido con credencial, `python -m kos_workers.drain` saliendo con código 0, y `POST /v1/notes` encolando de verdad (sin crear el archivo) contra Postgres real. |
 | ~~C — infra gestionada~~ | Proyecto Railway (api + workers-cron `0 0,12 * * *` + Redis + volumen) · Supabase · Aura · R2 · repo privado del vault · variables (§7) | ✅ Cerrada y verificada el 2026-09-19. Proyecto `KOS` con 3 servicios en vivo (`redis`, `api`, `workers-cron` con volumen `vault` de 5 GB en `/data/vault`), último deploy `SUCCESS` (commit `1315434`). Contra la URL pública: `/health` 200 **sin** credencial con Postgres, Neo4j, Redis y R2 en `ok` (es la primera vez que este código corre contra Supabase/Aura/R2 reales); `/`, `/metrics` y `/v1/ops/status` responden 401. El cron corrió a las 00:00 UTC del 20-sep: `cola vacía: se para el worker` → `drain ok: 3 tareas` y salió. Supabase en `alembic 0016` (igual que local). Costó tres correcciones que solo aparecieron contra infra real (PRs #30–#32): el cliente de R2 forzaba HTTP (`MINIO_SECURE`), el drain no clonaba el vault en un volumen vacío, y faltaba `releaseCommand` — **las migraciones nunca habían corrido en Railway**. Lección: un *redeploy* reusa el build y **no** corre el pre-deploy command; hace falta un deploy nuevo de verdad. |
-| **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]`. **Estado 2026-09-19: no iniciada** — Supabase tiene el esquema pero 0 documentos, 0 chunks, 0 fuentes (los 4 planes y 2 conversaciones son de probar la app vacía). Ver correcciones a §8 abajo |
+| **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]`. **Estado 2026-09-21: en curso.** Fase 0 hecha (migración `0017`: `pg_trgm` + RLS, sin ella la búsqueda no funcionaba en Railway); pendiente de desplegar y de la carga en sí. Supabase sigue con el esquema y 0 documentos, 0 chunks, 0 fuentes (los 4 planes y 2 conversaciones son de probar la app vacía). Ver correcciones a §8 abajo |
 | **E — corte y medición** | Obsidian Git empujando al repo; uso normal 7 días | **Factura Railway proyectada < $3/mes**; las 2 ejecuciones diarias del cron aparecen en `/v1/ops/status` sin intervención; la API llega a dormir (gráfica de uso a cero entre sesiones) |
 
 El criterio de salida de la fase E es el que decide si este modo se queda. Si no baja de $3, la
