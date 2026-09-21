@@ -12,6 +12,17 @@ from kos_api.main import create_app
 from kos_core.config import Settings, get_settings
 
 
+@pytest.fixture(autouse=True)
+def _sin_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`GET /v1/sources` es el endpoint con el que se prueba la autenticación, pero
+    lista fuentes desde Postgres: aquí solo importa el 200/401, no los datos."""
+
+    async def fake_list_sources(engine: object) -> list[dict[str, object]]:
+        return []
+
+    monkeypatch.setattr("kos_api.services.source_service.list_sources", fake_list_sources)
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     def _settings() -> Settings:

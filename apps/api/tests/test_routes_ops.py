@@ -17,6 +17,10 @@ def _client(monkeypatch: pytest.MonkeyPatch, row: dict[str, Any] | None, **over:
     async def fake_last_cron_run(engine: Any, *, job: str = "drain") -> dict[str, Any] | None:
         return row
 
+    async def fake_count_pending(engine: Any) -> int:
+        return 0
+
+    monkeypatch.setattr("kos_core.vault_queue.count_pending", fake_count_pending)
     monkeypatch.setattr("kos_core.storage.postgres.last_cron_run", fake_last_cron_run, raising=True)
     monkeypatch.setattr("kos_api.routes.ops.postgres_storage.last_cron_run", fake_last_cron_run)
     monkeypatch.setattr("kos_api.deps.get_settings", lambda: Settings(_env_file=None, **over))

@@ -98,11 +98,16 @@ def test_sync_source_propaga_tombstone_al_grafo(monkeypatch: pytest.MonkeyPatch)
         def delay(self, doc_id: str) -> None:
             delayed.append(doc_id)
 
+    class _FakeMemoryRetire:
+        def delay(self, doc_id: str) -> None:
+            return None
+
     monkeypatch.setattr(ingest_module, "_load_source", fake_load_source)
     monkeypatch.setattr(ingest_module, "_build_connector", lambda source: _FakeConnector())
     monkeypatch.setattr(ingest_module, "_known_hashes", fake_known_hashes)
     monkeypatch.setattr(ingest_module, "_retire_missing", fake_retire_missing)
     monkeypatch.setattr(ingest_module, "graph_retire_document", _FakeGraphRetire())
+    monkeypatch.setattr(ingest_module, "memory_retire_document", _FakeMemoryRetire())
     monkeypatch.setattr(
         ingest_module.redis_storage, "create_sync_client", lambda settings: _FakeRedisClient()
     )
