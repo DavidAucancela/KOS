@@ -18,10 +18,11 @@ genera planes dinámicos), 6 agentes (Retrieval/Graph/Research/Memory/Writing/Le
 herramientas MCP reales, planes auditables (`GET /v1/plans/{id}`).
 
 **Próximo paso**: no hay sprint numerado en curso. Orden vigente desde 2026-09-19: **monitoreo**
-(las métricas del Planner/agentes/Recomendador ya están en `/metrics`, doc 09 §6; falta una señal de
-que el Recomendador corrió) y **Railway fase D** (doc 14: migrar los datos locales — la infra real de
-la fase C está viva y verificada desde 2026-09-19, pero Supabase tiene 0 documentos y `sources` vacío,
-así que el cron drena una cola vacía). **Diferidos a propósito**: el diseño de UI de
+(las métricas del Planner/agentes/Recomendador ya están en `/metrics`, doc 09 §6, incluida cada
+pasada del Recomendador — `kos_recommender_runs`; faltan alertas y dashboard de Grafana) y
+**Railway fase D** (doc 14: migrar los datos locales — la infra real de la fase C está viva y
+verificada desde 2026-09-19, pero Supabase tiene 0 documentos y `sources` vacío, así que el cron
+drena una cola vacía). **Diferidos a propósito**: el diseño de UI de
 doc 13 §8–§11 y el backfill del grafo. Siguen abiertos en `docs/deuda-tecnica.md` la deuda técnica
 y las mejoras de calidad (desambiguación léxica, clasificación de entidades, umbrales sin tuning,
 y ahora el ruido de las lagunas). v1.1 (Plataforma) no se planifica hasta cerrar el criterio de
