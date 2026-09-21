@@ -47,6 +47,8 @@ class TableCopy:
     table: str
     where: str | None = None
     overrides: Mapping[str, str] = field(default_factory=dict)
+    # Clave primaria: con ella `verify` compara la *identidad* de las filas, no solo cuántas hay.
+    key: str | None = None
 
 
 def copy_plan(vault_path: str = DEFAULT_VAULT_PATH) -> list[TableCopy]:
@@ -70,12 +72,13 @@ def copy_plan(vault_path: str = DEFAULT_VAULT_PATH) -> list[TableCopy]:
             overrides={
                 "config": f"jsonb_set(config, '{{vault_path}}', to_jsonb('{vault_path}'::text))"
             },
+            key="source_uuid",
         ),
-        TableCopy("documents", where=f"source_uuid IN ({vault_sources})"),
-        TableCopy("chunks", where=f"doc_id IN ({vault_docs})"),
-        TableCopy("node_embeddings"),
-        TableCopy("memory_items"),
-        TableCopy("recommendations"),
+        TableCopy("documents", where=f"source_uuid IN ({vault_sources})", key="doc_id"),
+        TableCopy("chunks", where=f"doc_id IN ({vault_docs})", key="chunk_id"),
+        TableCopy("node_embeddings", key="node_id"),
+        TableCopy("memory_items", key="memory_id"),
+        TableCopy("recommendations", key="recommendation_id"),
     ]
 
 
@@ -97,6 +100,19 @@ def count_sql(table_copy: TableCopy) -> str:
     return f"{sql} WHERE {table_copy.where}" if table_copy.where else sql
 
 
+def fingerprint_sql(table_copy: TableCopy, *, filtered: bool) -> str | None:
+    """Huella `md5` del conjunto de claves primarias. En el origen se filtra con el `WHERE`
+    del plan; el destino solo tiene lo copiado (se exige vacío antes), así que va entero."""
+    if table_copy.key is None:
+        return None
+    key = _ident(table_copy.key)
+    sql = (
+        f"SELECT md5(coalesce(string_agg({key}::text, ',' ORDER BY {key}), '')) "
+        f"FROM {_ident(table_copy.table)}"
+    )
+    return f"{sql} WHERE {table_copy.where}" if filtered and table_copy.where else sql
+
+
 def copy_columns(cur: Cursor, table: str) -> list[str]:
     """Columnas copiables de `table`, en orden, sin las generadas."""
     cur.execute(
@@ -106,6 +122,19 @@ def copy_columns(cur: Cursor, table: str) -> list[str]:
         (table,),
     )
     return [row[0] for row in cur.fetchall()]
+
+
+def copy_column_types(cur: Cursor, table: str) -> list[tuple[str, str]]:
+    """`(columna, tipo exacto)` de las columnas copiables, sin las generadas. El tipo viene
+    de `format_type`, que distingue `vector(1024)` de `vector(768)`; `information_schema`
+    solo diría `USER-DEFINED`."""
+    cur.execute(
+        "SELECT a.attname, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+        "WHERE a.attrelid = to_regclass(%s) AND a.attnum > 0 AND NOT a.attisdropped "
+        "AND a.attgenerated = '' ORDER BY a.attnum",
+        (f"public.{_ident(table)}",),
+    )
+    return [(row[0], row[1]) for row in cur.fetchall()]
 
 
 def source_conninfo(settings: Settings) -> str:
@@ -175,12 +204,14 @@ def check_destination(cur: Cursor, plan: list[TableCopy]) -> list[str]:
 
 
 def check_parity(source: Cursor, destination: Cursor, plan: list[TableCopy]) -> list[str]:
-    """Las columnas copiables deben ser las mismas, en el mismo orden, en ambos lados."""
+    """Las columnas copiables deben coincidir en nombre, **tipo exacto** y orden."""
     problems: list[str] = []
     for table_copy in plan:
-        src_cols = copy_columns(source, table_copy.table)
-        dst_cols = copy_columns(destination, table_copy.table)
-        if src_cols != dst_cols:
+        src_cols = copy_column_types(source, table_copy.table)
+        dst_cols = copy_column_types(destination, table_copy.table)
+        if not src_cols or not dst_cols:
+            problems.append(f"la tabla {table_copy.table} no existe en alguno de los dos lados")
+        elif src_cols != dst_cols:
             problems.append(f"columnas distintas en {table_copy.table}: {src_cols} vs {dst_cols}")
     return problems
 
@@ -192,6 +223,21 @@ def source_counts(cur: Cursor, plan: list[TableCopy]) -> dict[str, int]:
         row = cur.fetchone()
         counts[table_copy.table] = int(row[0]) if row else 0
     return counts
+
+
+def check_source(counts: Mapping[str, int]) -> list[str]:
+    """El origen debe tener lo que se va a copiar. Sin esto, si `vault-real` no existiera en
+    la base local, la copia seguiría con 0 fuentes/documentos/chunks y cargaría igual el resto
+    (`node_embeddings`, memoria…): un destino incoherente que solo `verify` señalaría, ya
+    confirmada la transacción."""
+    problems: list[str] = []
+    if counts.get("sources", 0) != 1:
+        problems.append(
+            f"el origen tiene {counts.get('sources', 0)} fuentes {SOURCE_NAME!r}, se esperaba 1"
+        )
+    if counts.get("documents", 0) == 0:
+        problems.append(f"la fuente {SOURCE_NAME!r} del origen no tiene documentos")
+    return problems
 
 
 def run_copy(source: Connection, destination: Connection, plan: list[TableCopy]) -> dict[str, int]:
@@ -236,6 +282,20 @@ def verify(
         if actual != expected[table_copy.table]:
             problems.append(
                 f"{table_copy.table}: origen {expected[table_copy.table]} vs destino {actual}"
+            )
+
+    for table_copy in plan:
+        src_sql = fingerprint_sql(table_copy, filtered=True)
+        dst_sql = fingerprint_sql(table_copy, filtered=False)
+        if src_sql is None or dst_sql is None:
+            continue
+        source.execute(src_sql)
+        destination.execute(dst_sql)
+        src_hash, dst_hash = source.fetchone(), destination.fetchone()
+        if src_hash != dst_hash:
+            problems.append(
+                f"{table_copy.table}: mismas cantidades pero filas distintas "
+                f"(huella de claves {src_hash and src_hash[0]} vs {dst_hash and dst_hash[0]})"
             )
 
     active = "SELECT count(*) FROM documents WHERE deleted_at IS NULL"

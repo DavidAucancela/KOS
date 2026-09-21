@@ -28,6 +28,8 @@ import os
 import sys
 from urllib.parse import urlsplit
 
+import psycopg
+
 from kos_core import data_migration as dm
 from kos_core.config import get_settings
 
@@ -36,6 +38,13 @@ def _describe(conninfo_url: str) -> str:
     """Host/base sin credenciales, para mostrar a qué se está conectando."""
     parts = urlsplit(conninfo_url)
     return f"{parts.hostname}:{parts.port or 5432}{parts.path}"
+
+
+def _short(exc: BaseException) -> str:
+    """Primera línea del error de conexión: basta para diagnosticar y no arrastra el
+    contexto completo del traceback."""
+    lines = str(exc).strip().splitlines()
+    return f"{type(exc).__name__}: {lines[0] if lines else ''}"
 
 
 def _report(title: str, problems: list[str]) -> bool:
@@ -73,8 +82,22 @@ def main(argv: list[str] | None = None) -> int:
 
     writes = args.command == "copy" and args.yes
     print(f"origen : local (solo lectura)\ndestino: {_describe(destination_url)}\n")
-    source = dm.connect(source_info, read_only=True)
-    destination = dm.connect(destination_url, read_only=not writes)
+    try:
+        source = dm.connect(source_info, read_only=True)
+    except psycopg.Error as exc:
+        print(f"✗ no se pudo conectar al origen (¿`make up`?): {_short(exc)}", file=sys.stderr)
+        return 1
+    try:
+        destination = dm.connect(destination_url, read_only=not writes)
+    except psycopg.Error as exc:
+        source.close()
+        print(
+            f"✗ no se pudo conectar al destino: {_short(exc)}\n"
+            "  Revisa que SUPABASE_DB_URL sea la del pooler en modo sesión (puerto 5432) y "
+            "lleve ?sslmode=require.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         with source.cursor() as scur, destination.cursor() as dcur:
             if args.command == "verify":
@@ -87,13 +110,17 @@ def main(argv: list[str] | None = None) -> int:
                     else 1
                 )
 
-            ready = _report("destino listo", dm.check_destination(dcur, plan))
+            counts = dm.source_counts(scur, plan)
+            ready = _report("origen con datos para copiar", dm.check_source(counts))
+            ready = _report("destino listo", dm.check_destination(dcur, plan)) and ready
             ready = (
-                _report("esquemas con las mismas columnas", dm.check_parity(scur, dcur, plan))
+                _report(
+                    "esquemas con las mismas columnas y tipos", dm.check_parity(scur, dcur, plan)
+                )
                 and ready
             )
             print("\nfilas a copiar desde el origen:")
-            for table, count in dm.source_counts(scur, plan).items():
+            for table, count in counts.items():
                 print(f"    {table:<18}{count:>8}")
             if not ready:
                 return 1

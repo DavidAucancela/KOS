@@ -118,6 +118,8 @@ def _seed(conn: psycopg.Connection[object]) -> tuple[uuid.UUID, uuid.UUID]:
 
 @pytest.fixture
 def databases() -> Iterator[tuple[str, str]]:
+    """Devuelve solo los *nombres*: las cadenas de conexión (con contraseña) se arman dentro
+    del test, para que un fallo de pytest no las imprima como argumento del fixture."""
     settings = get_settings()
     _recreate(settings, SRC_DB)
     _recreate(settings, DST_DB)
@@ -126,7 +128,7 @@ def databases() -> Iterator[tuple[str, str]]:
         _migrate(DST_DB)
         with psycopg.connect(_conninfo(settings, SRC_DB)) as conn:
             _seed(conn)
-        yield _conninfo(settings, SRC_DB), _conninfo(settings, DST_DB)
+        yield SRC_DB, DST_DB
     finally:
         _drop(settings, SRC_DB)
         _drop(settings, DST_DB)
@@ -138,7 +140,8 @@ def _counts(conninfo: str, tables: list[str]) -> dict[str, int]:
 
 
 def test_la_copia_lleva_solo_el_conocimiento_de_vault_real(databases: tuple[str, str]) -> None:
-    src_info, dst_info = databases
+    settings = get_settings()
+    src_info, dst_info = (_conninfo(settings, name) for name in databases)
     plan = dm.copy_plan("/data/vault")
     tables = [t.table for t in plan]
 
@@ -152,6 +155,12 @@ def test_la_copia_lleva_solo_el_conocimiento_de_vault_real(databases: tuple[str,
             assert dm.check_destination(dcur, plan) == []
             assert dm.check_parity(scur, dcur, plan) == []
             expected = dm.source_counts(scur, plan)
+            assert dm.check_source(expected) == []
+
+            # Tipos exactos según pg_attribute: `vector(1024)` y sin la columna generada.
+            assert ("embedding", "vector(1024)") in dm.copy_column_types(dcur, "node_embeddings")
+            chunk_columns = [name for name, _ in dm.copy_column_types(dcur, "chunks")]
+            assert "text_search" not in chunk_columns and "text" in chunk_columns
         # `mini-vault` y su documento no cuentan: 1 fuente, 4 documentos, 6 chunks.
         assert expected == {
             "sources": 1,
@@ -197,6 +206,30 @@ def test_la_copia_lleva_solo_el_conocimiento_de_vault_real(databases: tuple[str,
     finally:
         src.close()
         dst.close()
+
+    # Mismo conteo pero una fila distinta: solo la huella de claves lo detecta.
+    with psycopg.connect(dst_info) as conn:
+        conn.execute(
+            "UPDATE chunks SET chunk_id = gen_random_uuid() "
+            "WHERE chunk_id = (SELECT chunk_id FROM chunks LIMIT 1)"
+        )
+        conn.commit()
+    with (
+        psycopg.connect(src_info) as src_conn,
+        psycopg.connect(dst_info) as dst_conn,
+        src_conn.cursor() as scur,
+        dst_conn.cursor() as dcur,
+    ):
+        problems = dm.verify(scur, dcur, plan, "/data/vault")
+    assert any("chunks" in p and "filas distintas" in p for p in problems)
+    assert not any("origen 6 vs destino" in p for p in problems)  # el conteo sí coincide
+
+    # Origen sin `vault-real`: la guarda aborta antes de escribir nada.
+    with psycopg.connect(src_info) as conn:
+        conn.execute("UPDATE sources SET name = 'renombrada' WHERE name = 'vault-real'")
+        conn.commit()
+        with conn.cursor() as cur:
+            assert any("0 fuentes" in p for p in dm.check_source(dm.source_counts(cur, plan)))
 
     # Segunda copia sobre lo ya copiado: `check` la rechaza (solo carga sobre vacío).
     with psycopg.connect(dst_info) as conn, conn.cursor() as cur:
