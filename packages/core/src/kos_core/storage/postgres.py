@@ -246,6 +246,10 @@ messages_table = Table(
 )
 
 
+# `cron_runs.job` de las pasadas del Recomendador: lo escribe el worker
+# (`kos_workers.tasks.recommend`) y lo lee `business_metrics_snapshot`.
+RECOMMENDER_JOB = "recommender"
+
 cron_runs_table = Table(
     "cron_runs",
     metadata,
@@ -262,8 +266,6 @@ correr es invisible: el worker no es un proceso vivo al que mirarle el pulso.
 
 `job` distingue quién corrió: `drain`, `memory_consolidate` y `RECOMMENDER_JOB`
 (cada pasada real del Recomendador, con sus conteos en `detail`)."""
-
-RECOMMENDER_JOB = "recommender"
 
 
 pending_vault_writes_table = Table(

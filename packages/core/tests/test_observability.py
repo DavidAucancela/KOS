@@ -83,3 +83,28 @@ def test_metricas_incrementan_en_el_registro_propio() -> None:
         'kos_llm_tokens_total{kind="prompt",model="test-model",operation="generate"} 42.0'
         in exposed
     )
+
+
+def test_snapshot_de_negocio_sin_pasadas_ni_recomendaciones_no_falla() -> None:
+    """Base recién creada: `last_run_at`/`last_created_at` llegan como `None` (el
+    `max()` de cero filas es NULL, no una excepción) y no hay series de pasadas."""
+    empty_window = {"summary": {"total": 0, "degraded": 0, "avg_ms": 0.0}, "degradation": []}
+    observability.record_business_snapshot(
+        {
+            "plans": {
+                "24h": {**empty_window, "agents": [], "agent_latency": []},
+            },
+            "recommender": {"runs": {"7d": [], "30d": []}, "last_run_at": None},
+            "recommendations": {
+                "by_group": [],
+                "created": {"7d": 0, "30d": 0},
+                "last_created_at": None,
+            },
+        }
+    )
+
+    exposed = generate_latest(observability.BUSINESS_REGISTRY).decode()
+    assert "kos_business_metrics_up 1.0" in exposed
+    assert "kos_recommender_last_run_timestamp_seconds 0.0" in exposed
+    assert "kos_recommendation_last_created_timestamp_seconds 0.0" in exposed
+    assert "kos_recommender_runs{" not in exposed
