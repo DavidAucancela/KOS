@@ -45,12 +45,9 @@ async def test_busqueda_lexica_vectorial_e_hibrida() -> None:
         assert all(hit.score > 0 for hit in vector)
 
         hybrid_limit = 5
-        hybrid = await hybrid_search(
-            engine, "contenedores", query_embedding, limit=hybrid_limit
-        )
+        hybrid = await hybrid_search(engine, "contenedores", query_embedding, limit=hybrid_limit)
         assert hybrid, "la búsqueda híbrida no devolvió resultados"
         assert all(hit.source == "hybrid" for hit in hybrid)
-        title = await title_search(engine, "contenedores", limit=5)
 
         # `hybrid_search` trae candidatos de cada señal con `limit*2` antes de
         # fusionar con RRF (search.py, `hybrid_search`) — un chunk que rankea

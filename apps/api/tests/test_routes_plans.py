@@ -117,9 +117,7 @@ def test_get_plan_metrics_expone_agent_latency(monkeypatch: pytest.MonkeyPatch) 
     """docs/deuda-tecnica.md "Monitoreo": promedio de cost.ms por agente,
     para saber en agregado si research/memory es el cuello de botella."""
 
-    async def fake_plan_metrics(
-        engine: Any, *, since: datetime, bucket: str
-    ) -> dict[str, Any]:
+    async def fake_plan_metrics(engine: Any, *, since: datetime, bucket: str) -> dict[str, Any]:
         return {
             "since": since,
             "current_period": {
