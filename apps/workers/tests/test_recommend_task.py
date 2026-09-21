@@ -4,6 +4,7 @@ mockeados, sin infra real — mismo estilo que `test_memory_task.py`."""
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -552,6 +553,118 @@ async def test_async_recommend_contradiccion_par_ya_pendiente_no_llama_al_llm(
     )
 
     assert result == _no_op_result()
+
+
+def _patch_run_log(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Captura lo que `_async_recommend` registra en `cron_runs` (sin Postgres)."""
+    log: dict[str, Any] = {"started": [], "finished": []}
+    run_id = uuid.uuid4()
+
+    async def fake_start(engine: Any, *, job: str = "drain") -> uuid.UUID:
+        log["started"].append(job)
+        return run_id
+
+    async def fake_finish(engine: Any, rid: uuid.UUID, **kwargs: Any) -> None:
+        log["finished"].append({"run_id": rid, **kwargs})
+
+    monkeypatch.setattr(postgres_module, "start_cron_run", fake_start)
+    monkeypatch.setattr(postgres_module, "finish_cron_run", fake_finish)
+    log["run_id"] = run_id
+    return log
+
+
+async def test_async_recommend_registra_la_pasada_como_ok_con_sus_conteos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin este rastro, `kos_recommendations_created = 0` no distingue "corrió y no
+    había nada nuevo" de "el disparo nunca llegó" (deuda técnica, Monitoreo)."""
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [_gap_candidate()]
+
+    async def fake_has_pending(engine: Any, **kwargs: Any) -> bool:
+        return True  # ya hay una pendiente: la pasada corre pero no crea nada
+
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+    _patch_infra(monkeypatch)
+    log = _patch_run_log(monkeypatch)
+
+    await recommend_module._async_recommend(
+        node_ids=["node-1", "node-2"], relation_ids=["rel-1"], trace_id="trace-1"
+    )
+
+    assert log["started"] == [postgres_module.RECOMMENDER_JOB]
+    [finished] = log["finished"]
+    assert finished["run_id"] == log["run_id"]
+    assert finished["status"] == "ok"
+    assert json.loads(finished["detail"]) == {
+        **_no_op_result(candidates_found=1),
+        "node_ids": 2,
+        "relation_ids": 1,
+    }
+
+
+async def test_async_recommend_registra_el_error_y_lo_relanza(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        raise RuntimeError("neo4j caído")
+
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", failing_gaps)
+    _patch_infra(monkeypatch)
+    log = _patch_run_log(monkeypatch)
+
+    # El servidor MCP embebido envuelve el fallo en un ExceptionGroup (task group
+    # de anyio); el registro debe guardar la causa real, no el envoltorio.
+    with pytest.raises(ExceptionGroup):
+        await recommend_module._async_recommend(
+            node_ids=["node-1"], relation_ids=[], trace_id="trace-1"
+        )
+
+    [finished] = log["finished"]
+    assert finished["status"] == "error"
+    assert finished["detail"] == "RuntimeError: neo4j caído"
+
+
+async def test_async_recommend_sigue_aunque_falle_el_registro(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El registro es telemetría: que Postgres no lo acepte no debe costar las
+    recomendaciones que la pasada iba a generar."""
+    inserted: list[dict[str, Any]] = []
+
+    async def fake_insert(engine: Any, **kwargs: Any) -> None:
+        inserted.append(kwargs)
+
+    async def fake_gaps(driver: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [_gap_candidate()]
+
+    async def fake_has_pending(engine: Any, **kwargs: Any) -> bool:
+        return False
+
+    async def failing_start(engine: Any, **kwargs: Any) -> uuid.UUID:
+        raise ConnectionError("postgres caído")
+
+    finished: list[object] = []
+
+    async def fake_finish(engine: Any, rid: uuid.UUID, **kwargs: Any) -> None:
+        finished.append(rid)
+
+    monkeypatch.setattr(postgres_module, "insert_recommendation", fake_insert)
+    monkeypatch.setattr(postgres_module, "has_active_recommendation", fake_has_pending)
+    monkeypatch.setattr(postgres_module, "start_cron_run", failing_start)
+    monkeypatch.setattr(postgres_module, "finish_cron_run", fake_finish)
+    monkeypatch.setattr(recommend_module.neo4j_storage, "gaps_by_prerequisite", fake_gaps)
+    _patch_infra(monkeypatch)
+
+    result = await recommend_module._async_recommend(
+        node_ids=["node-1"], relation_ids=[], trace_id="trace-1"
+    )
+
+    assert result == _no_op_result(candidates_found=1, recommendations_created=1)
+    assert len(inserted) == 1
+    assert finished == []  # sin run_id no hay nada que cerrar
 
 
 def test_las_tasks_estan_registradas_con_nombre_de_evento() -> None:

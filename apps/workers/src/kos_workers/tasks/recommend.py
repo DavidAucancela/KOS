@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -54,6 +55,8 @@ from kos_mcp.client import EmbeddedToolCaller
 from kos_mcp.server import AppContext as MCPAppContext
 from kos_mcp.server import create_server as create_mcp_server
 from kos_workers.celery_app import app
+
+logger = logging.getLogger(__name__)
 
 # Ventana de agrupamiento (doc 11 §3.2): parámetro de un algoritmo, no
 # configuración de despliegue — mismo criterio que `SIMILARITY_THRESHOLD`
@@ -89,6 +92,42 @@ _CONTRADICTION_SYSTEM = (
     'respondé {"contradicts": false, "explanation": ""} — más seguro que un '
     "falso positivo."
 )
+
+
+async def _start_run(engine: Any) -> uuid.UUID | None:
+    """Registra el inicio de una pasada en `cron_runs` (`job=recommender`). Es
+    telemetría: si Postgres no responde, la pasada sigue sin registro en vez de
+    perder las recomendaciones que iba a generar."""
+    try:
+        return await postgres_storage.start_cron_run(engine, job=postgres_storage.RECOMMENDER_JOB)
+    except Exception:
+        logger.warning("recomendador_pasada_no_registrada", exc_info=True)
+        return None
+
+
+async def _finish_run(
+    engine: Any, run_id: uuid.UUID | None, *, status: str, detail: dict[str, Any] | str
+) -> None:
+    if run_id is None:
+        return
+    try:
+        await postgres_storage.finish_cron_run(
+            engine,
+            run_id,
+            status=status,
+            detail=detail if isinstance(detail, str) else json.dumps(detail),
+        )
+    except Exception:
+        logger.warning("recomendador_pasada_sin_cierre", exc_info=True)
+
+
+def _describe_error(exc: BaseException) -> str:
+    """El servidor MCP embebido corre en un task group de anyio, que envuelve
+    cualquier fallo en un `ExceptionGroup` ("unhandled errors in a TaskGroup"):
+    se registra la causa real, no el envoltorio."""
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(_describe_error(sub) for sub in exc.exceptions)
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _decode(value: bytes | str) -> str:
@@ -251,27 +290,43 @@ async def _async_recommend(
     embedder = make_embedding_client(settings)
     llm = OllamaLLMClient(settings)
     try:
-        mcp_context = MCPAppContext(
-            settings=settings,
-            postgres_engine=engine,
-            neo4j_driver=driver,
-            embedding_client=embedder,
-        )
-        server = create_mcp_server(mcp_context)
-        async with EmbeddedToolCaller(server) as caller:
-            agent = RecommenderAgent(caller)
-            gap_candidates, gap_created = await _run_gap_recommendations(
-                driver, engine, agent, trace_id=trace_id
+        # Cada pasada deja rastro en Postgres (no en memoria: en Railway el worker
+        # sale al drenar, ADR-0009) para que `kos_recommender_runs` distinga
+        # "corrió y no había nada nuevo" de "no corrió" o "corrió y falló".
+        run_id = await _start_run(engine)
+        try:
+            mcp_context = MCPAppContext(
+                settings=settings,
+                postgres_engine=engine,
+                neo4j_driver=driver,
+                embedding_client=embedder,
             )
-            contradiction_checked, contradiction_created = await _run_contradiction_recommendations(
-                engine, llm, agent, trace_id=trace_id
-            )
-        return {
+            server = create_mcp_server(mcp_context)
+            async with EmbeddedToolCaller(server) as caller:
+                agent = RecommenderAgent(caller)
+                gap_candidates, gap_created = await _run_gap_recommendations(
+                    driver, engine, agent, trace_id=trace_id
+                )
+                (
+                    contradiction_checked,
+                    contradiction_created,
+                ) = await _run_contradiction_recommendations(engine, llm, agent, trace_id=trace_id)
+        except Exception as exc:
+            await _finish_run(engine, run_id, status="error", detail=_describe_error(exc))
+            raise
+        result = {
             "candidates_found": gap_candidates,
             "recommendations_created": len(gap_created) + len(contradiction_created),
             "contradiction_candidates_checked": contradiction_checked,
             "contradiction_recommendations_created": len(contradiction_created),
         }
+        await _finish_run(
+            engine,
+            run_id,
+            status="ok",
+            detail={**result, "node_ids": len(node_ids), "relation_ids": len(relation_ids)},
+        )
+        return result
     finally:
         await llm.aclose()
         await embedder.aclose()
