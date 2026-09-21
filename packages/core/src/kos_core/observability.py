@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -28,7 +28,7 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
 )
 from opentelemetry.trace import Tracer
-from prometheus_client import CollectorRegistry, Counter, Histogram
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
 _trace_id_var: ContextVar[str | None] = ContextVar("kos_trace_id", default=None)
 _tracer_provider_configured = False
@@ -69,6 +69,120 @@ http_request_duration_seconds = Histogram(
     ["method", "route", "status"],
     registry=METRICS_REGISTRY,
 )
+
+
+# Métricas de negocio del Planner, los agentes y el Recomendador (doc 09 §6).
+# Registry aparte de `METRICS_REGISTRY`: solo la API lo sirve (`GET /metrics`),
+# porque son *gauges* que se recalculan desde Postgres en cada scrape
+# (`postgres.business_metrics_snapshot`) — un worker que los expusiera en su
+# puerto mostraría ceros engañosos. No son contadores en memoria a propósito:
+# en Railway la API duerme y el worker sale al drenar (ADR-0009), y un
+# contador de proceso se perdería.
+BUSINESS_REGISTRY = CollectorRegistry()
+
+business_metrics_up = Gauge(
+    "kos_business_metrics_up",
+    "1 si el último scrape pudo leer las métricas de negocio de Postgres, 0 si falló.",
+    registry=BUSINESS_REGISTRY,
+)
+plans_gauge = Gauge(
+    "kos_plans",
+    "Planes generados por el Planner en la ventana (24h|7d).",
+    ["window"],
+    registry=BUSINESS_REGISTRY,
+)
+plans_degraded_gauge = Gauge(
+    "kos_plans_degraded",
+    "Planes degradados en la ventana, por `degraded_reason`.",
+    ["window", "reason"],
+    registry=BUSINESS_REGISTRY,
+)
+plan_latency_avg_ms_gauge = Gauge(
+    "kos_plan_latency_avg_ms",
+    "Latencia promedio de un plan en la ventana (ms).",
+    ["window"],
+    registry=BUSINESS_REGISTRY,
+)
+plan_agent_steps_gauge = Gauge(
+    "kos_plan_agent_steps",
+    "Pasos de plan en la ventana, por agente elegido por el LLM.",
+    ["window", "agent"],
+    registry=BUSINESS_REGISTRY,
+)
+plan_agent_latency_avg_ms_gauge = Gauge(
+    "kos_plan_agent_latency_avg_ms",
+    "Promedio de `cost.ms` por paso en la ventana, por agente (solo pasos con `cost.ms`).",
+    ["window", "agent"],
+    registry=BUSINESS_REGISTRY,
+)
+recommendations_gauge = Gauge(
+    "kos_recommendations",
+    "Recomendaciones existentes, por tipo (gap|contradiction) y estado.",
+    ["type", "status"],
+    registry=BUSINESS_REGISTRY,
+)
+recommendations_created_gauge = Gauge(
+    "kos_recommendations_created",
+    "Recomendaciones creadas en la ventana (7d|30d): el ritmo del criterio de salida de v1.0.",
+    ["window"],
+    registry=BUSINESS_REGISTRY,
+)
+recommendation_last_created_gauge = Gauge(
+    "kos_recommendation_last_created_timestamp_seconds",
+    "Instante (unix) de la recomendación más reciente; 0 si nunca hubo ninguna.",
+    registry=BUSINESS_REGISTRY,
+)
+
+_BUSINESS_LABELLED_GAUGES = (
+    plans_gauge,
+    plans_degraded_gauge,
+    plan_latency_avg_ms_gauge,
+    plan_agent_steps_gauge,
+    plan_agent_latency_avg_ms_gauge,
+    recommendations_gauge,
+    recommendations_created_gauge,
+)
+
+
+def _clear_business_gauges() -> None:
+    for gauge in _BUSINESS_LABELLED_GAUGES:
+        gauge.clear()
+    recommendation_last_created_gauge.set(0)
+
+
+def mark_business_metrics_unavailable() -> None:
+    """Postgres no respondió: vacía los gauges (mejor sin dato que un dato viejo
+    que parezca vigente) y baja `kos_business_metrics_up` a 0."""
+    _clear_business_gauges()
+    business_metrics_up.set(0)
+
+
+def record_business_snapshot(snapshot: Mapping[str, Any]) -> None:
+    """Vuelca la foto de `business_metrics_snapshot` a los gauges. Sin `await`
+    dentro: el vaciado y la carga son atómicos respecto de otro scrape."""
+    _clear_business_gauges()
+    for window, data in snapshot["plans"].items():
+        summary = data["summary"]
+        plans_gauge.labels(window=window).set(summary["total"])
+        plan_latency_avg_ms_gauge.labels(window=window).set(float(summary["avg_ms"]))
+        for row in data["degradation"]:
+            reason = row["degraded_reason"] or "unknown"
+            plans_degraded_gauge.labels(window=window, reason=reason).set(row["count"])
+        for row in data["agents"]:
+            plan_agent_steps_gauge.labels(window=window, agent=row["agent"]).set(row["count"])
+        for row in data["agent_latency"]:
+            plan_agent_latency_avg_ms_gauge.labels(window=window, agent=row["agent"]).set(
+                float(row["avg_ms"])
+            )
+    recommendations = snapshot["recommendations"]
+    for row in recommendations["by_group"]:
+        recommendations_gauge.labels(type=row["type"], status=row["status"]).set(row["count"])
+    for window, count in recommendations["created"].items():
+        recommendations_created_gauge.labels(window=window).set(count)
+    last_created_at = recommendations["last_created_at"]
+    if last_created_at is not None:
+        recommendation_last_created_gauge.set(last_created_at.timestamp())
+    business_metrics_up.set(1)
 
 
 def bind_trace_id(trace_id: str | None) -> None:

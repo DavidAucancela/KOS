@@ -136,3 +136,53 @@ async def test_plan_window_agent_latency_promedia_cost_ms_por_agente() -> None:
     finally:
         await _cleanup(engine, [plan_id])
         await engine.dispose()
+
+
+async def test_business_metrics_snapshot_agrega_planes_y_recomendaciones() -> None:
+    """La foto de `/metrics` (doc 09 §6) cuenta planes por ventana, degradación,
+    pasos por agente y recomendaciones, sobre datos reales de Postgres."""
+    engine = create_engine(get_settings())
+    now = datetime.now(UTC)
+    plan_id = uuid.uuid4()
+    try:
+        await postgres_storage.insert_plan(
+            engine,
+            Plan(
+                plan_id=plan_id,
+                query="¿métricas?",
+                steps=[
+                    PlanStep(
+                        id="s1",
+                        agent="retrieval",
+                        task="buscar",
+                        cost=Cost(ms=120.0, tokens=0),
+                    ),
+                ],
+                degraded=True,
+                degraded_reason="step_failure",
+                trace_id="trace-business-metrics",
+                elapsed_ms=300.0,
+            ),
+        )
+        before = await postgres_storage.business_metrics_snapshot(
+            engine, now=now - timedelta(days=30)
+        )
+        snapshot = await postgres_storage.business_metrics_snapshot(
+            engine, now=now + timedelta(seconds=1)
+        )
+
+        recent = snapshot["plans"]["24h"]
+        assert recent["summary"]["total"] >= 1
+        assert recent["summary"]["degraded"] >= 1
+        reasons = {row["degraded_reason"]: row["count"] for row in recent["degradation"]}
+        assert reasons.get("step_failure", 0) >= 1
+        assert any(row["agent"] == "retrieval" for row in recent["agents"])
+        assert "recommendations" in snapshot and set(snapshot["recommendations"]["created"]) == {
+            "7d",
+            "30d",
+        }
+        # Desplazar `now` 30 días atrás deja fuera el plan recién creado.
+        assert before["plans"]["24h"]["summary"]["total"] <= recent["summary"]["total"] - 1
+    finally:
+        await _cleanup(engine, [plan_id])
+        await engine.dispose()
