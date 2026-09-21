@@ -14,7 +14,7 @@ abierta: no declararla cerrada hasta decidir si se extiende la ventana o se corr
 no es lo mismo que versión cerrada (ver doc 07, regla del roadmap).
 
 Se construye sobre **v0.5 — Orquestación de agentes** (cerrado 2026-08-16): Planner real (LLM
-genera planes dinámicos), 6 agentes (Retrieval/Graph/Research/Memory/Writing/Learning) sobre 13
+genera planes dinámicos), 6 agentes (Retrieval/Graph/Research/Memory/Writing/Learning) sobre 16
 herramientas MCP reales, planes auditables (`GET /v1/plans/{id}`).
 
 **Próximo paso**: no hay sprint numerado en curso. Orden vigente desde 2026-09-19: **monitoreo**

@@ -413,6 +413,18 @@ async def test_extract_entities_and_relations_pide_relaciones_si_el_chunk_mencio
     assert relations[0].chunk_ids == [chunk_id]
 
 
+@pytest.fixture(autouse=True)
+def _sin_broker_para_cooccurrence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`kos.graph_sync` encadena `discover_cooccurrence_relations.delay` cuando hay
+    `node_ids` (doc 12 §10.5). Sin este stub, cada test que no lo mockee
+    intentaría hablar con Redis."""
+    from kos_workers.tasks import cooccurrence_relations as cooccurrence_module
+
+    monkeypatch.setattr(
+        cooccurrence_module.discover_cooccurrence_relations, "delay", lambda **kwargs: None
+    )
+
+
 def test_la_task_esta_registrada_con_nombre_de_evento() -> None:
     assert "kos.graph_sync" in app.tasks
 

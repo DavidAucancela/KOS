@@ -23,9 +23,7 @@ depends_on: str | None = None
 def upgrade() -> None:
     op.add_column(
         "memory_items",
-        sa.Column(
-            "locked", sa.Boolean(), nullable=False, server_default=sa.text("false")
-        ),
+        sa.Column("locked", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
 
 

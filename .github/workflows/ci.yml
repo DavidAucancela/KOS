@@ -23,8 +23,8 @@ jobs:
               echo "::error file=$file::enlace roto -> $link"
               fail=1
             fi
-          done < <(grep -RhoE --include='*.md' -H '\]\((\.\.?/[^)#]+|[^)/:#]+\.md)[^)]*\)' docs README.md \
-                   | sed -E 's/\]\(([^)]*)\)/:\1/' | sed -E 's/:(.*)#.*/:\1/')
+          done < <(grep -RHoE --include='*.md' '\]\((\.\.?/[^)#]+|[^)/:#]+\.md)[^)]*\)' docs README.md \
+                   | sed -E 's/:\]\(([^)]*)\)/:\1/' | sed -E 's/:(.*)#.*/:\1/')
           exit $fail
 
   python:

@@ -116,9 +116,7 @@ def test_correct_memory_devuelve_memoria_locked(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(postgres_storage, "correct_memory", fake_correct)
     with TestClient(create_app()) as client:
-        response = client.patch(
-            f"/v1/memory/{uuid.uuid4()}", json={"content": "texto corregido"}
-        )
+        response = client.patch(f"/v1/memory/{uuid.uuid4()}", json={"content": "texto corregido"})
 
     assert response.status_code == 200
     body = response.json()
