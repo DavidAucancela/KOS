@@ -246,6 +246,10 @@ messages_table = Table(
 )
 
 
+# `cron_runs.job` de las pasadas del Recomendador: lo escribe el worker
+# (`kos_workers.tasks.recommend`) y lo lee `business_metrics_snapshot`.
+RECOMMENDER_JOB = "recommender"
+
 cron_runs_table = Table(
     "cron_runs",
     metadata,
@@ -258,7 +262,10 @@ cron_runs_table = Table(
     Column("detail", Text),
 )
 """Ejecuciones del drain programado (ADR-0009). Sin esto, que el cron deje de
-correr es invisible: el worker no es un proceso vivo al que mirarle el pulso."""
+correr es invisible: el worker no es un proceso vivo al que mirarle el pulso.
+
+`job` distingue quién corrió: `drain`, `memory_consolidate` y `RECOMMENDER_JOB`
+(cada pasada real del Recomendador, con sus conteos en `detail`)."""
 
 
 pending_vault_writes_table = Table(
@@ -1402,9 +1409,11 @@ async def business_metrics_snapshot(
     """Foto de las métricas de negocio del Planner, los agentes y el Recomendador.
 
     Reusa las agregaciones de `plan_metrics` (`_plan_window_*`) sobre ventanas
-    fijas y suma las de `recommendations`. Devuelve tipos simples (sin schemas de
-    Prometheus): `kos_core.observability.record_business_snapshot` la vuelca a
-    los gauges. `last_recommendation_at` es `None` si nunca hubo ninguna."""
+    fijas y suma las de `recommendations` y las pasadas del Recomendador
+    (`cron_runs` con `job=RECOMMENDER_JOB`). Devuelve tipos simples (sin schemas
+    de Prometheus): `kos_core.observability.record_business_snapshot` la vuelca
+    a los gauges. `last_created_at` y `last_run_at` son `None` si nunca hubo
+    ninguna recomendación / pasada."""
     now = now or datetime.now(UTC)
     plans: dict[str, dict[str, Any]] = {}
     async with engine.connect() as conn:
@@ -1416,6 +1425,30 @@ async def business_metrics_snapshot(
                 "agents": await _plan_window_agents(conn, start=start, end=now),
                 "agent_latency": await _plan_window_agent_latency(conn, start=start, end=now),
             }
+        recommender_runs: dict[str, list[dict[str, Any]]] = {}
+        for label, span in BUSINESS_RECOMMENDATION_WINDOWS.items():
+            run_rows = (
+                (
+                    await conn.execute(
+                        select(cron_runs_table.c.status, func.count().label("count"))
+                        .where(
+                            cron_runs_table.c.job == RECOMMENDER_JOB,
+                            cron_runs_table.c.started_at >= now - span,
+                        )
+                        .group_by(cron_runs_table.c.status)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            recommender_runs[label] = [dict(row) for row in run_rows]
+        last_recommender_run_at = (
+            await conn.execute(
+                select(func.max(cron_runs_table.c.started_at)).where(
+                    cron_runs_table.c.job == RECOMMENDER_JOB
+                )
+            )
+        ).scalar_one()
         by_group = (
             (
                 await conn.execute(
@@ -1449,6 +1482,7 @@ async def business_metrics_snapshot(
         )
     return {
         "plans": plans,
+        "recommender": {"runs": recommender_runs, "last_run_at": last_recommender_run_at},
         "recommendations": {
             "by_group": [dict(row) for row in by_group],
             "created": {

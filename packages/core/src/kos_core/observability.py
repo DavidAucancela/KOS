@@ -133,6 +133,19 @@ recommendation_last_created_gauge = Gauge(
     registry=BUSINESS_REGISTRY,
 )
 
+recommender_runs_gauge = Gauge(
+    "kos_recommender_runs",
+    "Pasadas del Recomendador en la ventana (7d|30d), por estado (ok|error|running). "
+    'Distingue "corrió y no había nada nuevo" de "no corrió".',
+    ["window", "status"],
+    registry=BUSINESS_REGISTRY,
+)
+recommender_last_run_gauge = Gauge(
+    "kos_recommender_last_run_timestamp_seconds",
+    "Instante (unix) de la última pasada del Recomendador; 0 si nunca corrió.",
+    registry=BUSINESS_REGISTRY,
+)
+
 _BUSINESS_LABELLED_GAUGES = (
     plans_gauge,
     plans_degraded_gauge,
@@ -141,6 +154,7 @@ _BUSINESS_LABELLED_GAUGES = (
     plan_agent_latency_avg_ms_gauge,
     recommendations_gauge,
     recommendations_created_gauge,
+    recommender_runs_gauge,
 )
 
 
@@ -148,6 +162,7 @@ def _clear_business_gauges() -> None:
     for gauge in _BUSINESS_LABELLED_GAUGES:
         gauge.clear()
     recommendation_last_created_gauge.set(0)
+    recommender_last_run_gauge.set(0)
 
 
 def mark_business_metrics_unavailable() -> None:
@@ -182,6 +197,13 @@ def record_business_snapshot(snapshot: Mapping[str, Any]) -> None:
     last_created_at = recommendations["last_created_at"]
     if last_created_at is not None:
         recommendation_last_created_gauge.set(last_created_at.timestamp())
+    recommender = snapshot["recommender"]
+    for window, rows in recommender["runs"].items():
+        for row in rows:
+            recommender_runs_gauge.labels(window=window, status=row["status"]).set(row["count"])
+    last_run_at = recommender["last_run_at"]
+    if last_run_at is not None:
+        recommender_last_run_gauge.set(last_run_at.timestamp())
     business_metrics_up.set(1)
 
 

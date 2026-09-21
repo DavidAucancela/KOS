@@ -38,6 +38,13 @@ def _snapshot() -> dict[str, Any]:
                 "agent_latency": [],
             },
         },
+        "recommender": {
+            "runs": {
+                "7d": [{"status": "ok", "count": 2}, {"status": "error", "count": 1}],
+                "30d": [{"status": "ok", "count": 5}],
+            },
+            "last_run_at": datetime(2026, 9, 20, 12, 0, tzinfo=UTC),
+        },
         "recommendations": {
             "by_group": [
                 {"type": "gap", "status": "pending", "count": 20},
@@ -66,6 +73,15 @@ def test_metrics_incluye_metricas_de_negocio_desde_postgres(
     assert 'kos_plan_agent_latency_avg_ms{agent="writing",window="24h"} 2500.0' in text
     assert 'kos_recommendations{status="pending",type="gap"} 20.0' in text
     assert 'kos_recommendations_created{window="7d"} 3.0' in text
+    assert 'kos_recommender_runs{status="ok",window="7d"} 2.0' in text
+    assert 'kos_recommender_runs{status="error",window="7d"} 1.0' in text
+    assert 'kos_recommender_runs{status="ok",window="30d"} 5.0' in text
+    [run_line] = [
+        row
+        for row in text.splitlines()
+        if row.startswith("kos_recommender_last_run_timestamp_seconds ")
+    ]
+    assert float(run_line.split()[1]) == datetime(2026, 9, 20, 12, 0, tzinfo=UTC).timestamp()
     [line] = [
         row
         for row in text.splitlines()
@@ -106,3 +122,5 @@ def test_metrics_no_deja_datos_viejos_tras_una_falla(monkeypatch: pytest.MonkeyP
     assert "kos_business_metrics_up 0.0" in after_failure
     assert "kos_plans{" not in after_failure
     assert "kos_recommendations{" not in after_failure
+    assert "kos_recommender_runs{" not in after_failure
+    assert "kos_recommender_last_run_timestamp_seconds 0.0" in after_failure

@@ -107,6 +107,8 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
   > | `kos_recommendations` | `type`, `status` | recomendaciones existentes y cuántas se decidieron |
   > | `kos_recommendations_created` | `window` (7d, 30d) | el ritmo del criterio de salida de v1.0 |
   > | `kos_recommendation_last_created_timestamp_seconds` | — | alerta "sin recomendaciones en N días" (0 = nunca) |
+  > | `kos_recommender_runs` | `window` (7d, 30d), `status` (ok, error, running) | ¿corrió el Recomendador, y con qué resultado? |
+  > | `kos_recommender_last_run_timestamp_seconds` | — | alerta "el Recomendador no corre hace N días" (0 = nunca) |
   > | `kos_business_metrics_up` | — | 1 si el scrape leyó Postgres, 0 si falló |
   >
   > **Por qué gauges desde Postgres y no contadores en memoria:** en el despliegue gestionado la API
@@ -118,10 +120,23 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
   > como vigentes). Consecuencia en Railway: cada scrape despierta a Postgres, así que no conviene
   > un scrape de alta frecuencia contra un despliegue que debe dormir.
   >
-  > **Sigue sin cubrirse:** una señal de que el Recomendador *corrió* (contador de pasadas /
-  > disparos recibidos). Hoy `kos_recommendations_created{window="7d"} = 0` no distingue "no hubo
-  > nada que recomendar" de "el disparo nunca llegó" — ver `docs/deuda-tecnica.md`, "Monitoreo".
-  > Tampoco el path local de LLM (Ollama) ni el coste en tokens del Planner por consulta.
+  > **Cómo leer un cero en `kos_recommendations_created`** (2026-09-21): cada pasada real del
+  > Recomendador deja una fila en `cron_runs` con `job='recommender'` — `ok` con los conteos en
+  > `detail` (`candidates_found`, `recommendations_created`, `contradiction_*`, tamaño del disparo),
+  > o `error` con la causa real (el `ExceptionGroup` del servidor MCP embebido se desenvuelve). Se
+  > reusa `cron_runs` (mismo patrón que `memory_consolidate`) en vez de una tabla nueva: sin
+  > migración, y persiste aunque el worker ya haya salido (ADR-0009). Con eso:
+  >
+  > | Lo que se ve | Qué significa |
+  > |---|---|
+  > | `kos_recommender_runs{status="ok"} > 0` y `created = 0` | corrió y no había nada nuevo (deduplicación por firma, tope por pasada o sin candidatos): mirar `detail` |
+  > | `kos_recommender_runs{status="error"} > 0` | corrió y falló (Neo4j u Ollama caídos, etc.) |
+  > | sin serie `kos_recommender_runs` (o `last_run` en 0) con ingesta reciente | no hubo pasada: el disparo `graph.updated` no llegó, o un flush posterior lo superó (debounce) |
+  >
+  > Los flush superados (`superseded`) y los vacíos no cuentan como pasada: no ejecutan el
+  > Recomendador. **Sigue sin cubrirse:** contar los disparos recibidos por separado de las pasadas
+  > (hoy "el disparo no llegó" se infiere por ausencia), el path local de LLM (Ollama) y el coste en
+  > tokens del Planner por consulta.
 
 ## 7. Despliegue
 

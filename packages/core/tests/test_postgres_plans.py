@@ -145,6 +145,14 @@ async def test_business_metrics_snapshot_agrega_planes_y_recomendaciones() -> No
     now = datetime.now(UTC)
     plan_id = uuid.uuid4()
     try:
+        # Fotos previas al insert: la base local ya tiene planes, así que se
+        # comparan deltas en vez de asumir una base vacía.
+        old_before = await postgres_storage.business_metrics_snapshot(
+            engine, now=now - timedelta(days=30)
+        )
+        recent_before = await postgres_storage.business_metrics_snapshot(
+            engine, now=now + timedelta(seconds=1)
+        )
         await postgres_storage.insert_plan(
             engine,
             Plan(
@@ -164,7 +172,7 @@ async def test_business_metrics_snapshot_agrega_planes_y_recomendaciones() -> No
                 elapsed_ms=300.0,
             ),
         )
-        before = await postgres_storage.business_metrics_snapshot(
+        old_after = await postgres_storage.business_metrics_snapshot(
             engine, now=now - timedelta(days=30)
         )
         snapshot = await postgres_storage.business_metrics_snapshot(
@@ -181,8 +189,52 @@ async def test_business_metrics_snapshot_agrega_planes_y_recomendaciones() -> No
             "7d",
             "30d",
         }
-        # Desplazar `now` 30 días atrás deja fuera el plan recién creado.
-        assert before["plans"]["24h"]["summary"]["total"] <= recent["summary"]["total"] - 1
+        # El plan recién creado suma exactamente uno en la ventana actual y ninguno
+        # si se desplaza `now` 30 días atrás.
+        assert recent["summary"]["total"] == recent_before["plans"]["24h"]["summary"]["total"] + 1
+        assert (
+            old_after["plans"]["24h"]["summary"]["total"]
+            == old_before["plans"]["24h"]["summary"]["total"]
+        )
     finally:
         await _cleanup(engine, [plan_id])
+        await engine.dispose()
+
+
+async def test_business_metrics_snapshot_cuenta_las_pasadas_del_recomendador() -> None:
+    """`kos_recommender_runs` sale de `cron_runs` filtrando `job=recommender`: una
+    pasada `ok` y una `error` cuentan, una ejecución del drain no. Se compara contra
+    una foto previa (deltas) para no depender de lo que ya haya en la base."""
+    from sqlalchemy import delete
+
+    from kos_core.storage.postgres import RECOMMENDER_JOB, cron_runs_table
+
+    engine = create_engine(get_settings())
+    run_ids: list[uuid.UUID] = []
+    try:
+        baseline = await postgres_storage.business_metrics_snapshot(engine)
+        ok_run = await postgres_storage.start_cron_run(engine, job=RECOMMENDER_JOB)
+        error_run = await postgres_storage.start_cron_run(engine, job=RECOMMENDER_JOB)
+        drain_run = await postgres_storage.start_cron_run(engine, job="drain")
+        run_ids = [ok_run, error_run, drain_run]
+        await postgres_storage.finish_cron_run(engine, ok_run, status="ok", detail="{}")
+        await postgres_storage.finish_cron_run(
+            engine, error_run, status="error", detail="RuntimeError: neo4j caído"
+        )
+        await postgres_storage.finish_cron_run(engine, drain_run, status="ok")
+
+        snapshot = await postgres_storage.business_metrics_snapshot(engine)
+
+        def counts(data: dict[str, object], window: str) -> dict[str, int]:
+            runs = data["recommender"]["runs"][window]  # type: ignore[index]
+            return {row["status"]: row["count"] for row in runs}
+
+        for window in ("7d", "30d"):
+            before, after = counts(baseline, window), counts(snapshot, window)
+            assert after.get("ok", 0) - before.get("ok", 0) == 1  # el drain no suma
+            assert after.get("error", 0) - before.get("error", 0) == 1
+        assert snapshot["recommender"]["last_run_at"] is not None
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(cron_runs_table).where(cron_runs_table.c.run_id.in_(run_ids)))
         await engine.dispose()
