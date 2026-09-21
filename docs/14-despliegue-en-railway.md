@@ -234,6 +234,18 @@ Una sola vez, con el sistema local como origen de verdad:
   y no afecta a la app, que conecta como `postgres` (`BYPASSRLS = true`, verificado). Regla desde
   ahora: **toda tabla nueva activa RLS en su propia migración**; `test_rls_integration.py` falla si
   alguna tabla de `public` queda sin RLS.
+- **Copia de Postgres: `scripts/migrate_to_managed.py`** (lógica en `kos_core.data_migration`). Tres
+  subcomandos: `check` (solo lectura: `alembic_version = 0017`, `pg_trgm`, RLS, tablas destino
+  vacías, mismas columnas), `copy --yes` (una **sola transacción** en el destino: un fallo no deja nada
+  a medias) y `verify` (conteos, activos/tombstones, huérfanos, `vault_path` y `cloud_safe`). El
+  destino sale de `SUPABASE_DB_URL` (URL del **pooler en modo sesión**, puerto 5432; no el
+  transaccional 6543 ni el host directo IPv6), leída del entorno para que no quede en el historial.
+  El origen se abre en **solo lectura** y se rechaza que origen y destino sean la misma base (si el
+  shell tiene `DATABASE_URL` apuntando a Supabase, `Settings.postgres_dsn` lo daría como origen).
+  **Ensayo verificado el 2026-09-21** copiando el `kos` local real a una base desechable local:
+  1 fuente, 804 documentos (756 activos + 48 tombstones), 2.717 chunks, 4.550 `node_embeddings`,
+  78 `memory_items` y 21 `recommendations`; `verify` coincidió y una segunda copia fue rechazada.
+  Deshacer tras el commit: `TRUNCATE` de esas 6 tablas en Supabase (estaban vacías).
 - **Alcance decidido (2026-09-21): solo conocimiento.** Se migran `sources` (solo `vault-real`),
   `documents`, `chunks`, `node_embeddings`, `memory_items` y `recommendations`. **No** las
   conversaciones (536), mensajes (1.028) ni planes (569) locales: son casi todo ruido de pruebas
