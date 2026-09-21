@@ -3,10 +3,11 @@
 **Estado:** 🔵 En revisión, implementado · **Última actualización:** 2026-08-18 · **Habilita:** Fase 5
 
 > **Construcción completa 2026-08-18** (Sprints 22–26): `RecommenderAgent`, dos tipos de
-> recomendación (lagunas, contradicciones), feedback loop, UI. El criterio de salida de v1.0 sigue
-> en ventana de medición real hasta 2026-09-18 (doc 07) — por eso este doc queda en 🔵 y no 🟢
-> todavía: promoverlo a Aprobado espera a que el criterio de salida se confirme cumplido, no solo
-> a que el código esté terminado.
+> recomendación (lagunas, contradicciones), feedback loop, UI. **Primera ventana de medición
+> cerrada 2026-09-18, medida 2026-09-19: criterio NO cumplido** (21 recomendaciones, todas `gap`,
+> ninguna revisada; 2 de 5 semanas con alguna — detalle en doc 07). Este doc sigue en 🔵 y no 🟢:
+> promoverlo a Aprobado espera a que el criterio de salida se confirme cumplido, no solo a que el
+> código esté terminado.
 
 ## 1. Principio
 
@@ -207,6 +208,12 @@ evaluación grande: una recomendación cuenta como **útil** si se marca `accept
 `dismissed` dentro de los 7 días de creada. Registro manual simple durante la ventana de uso real
 (mismo patrón que `docs/eval/` para búsqueda) — no se construye infraestructura de medición nueva
 para esto en v1.0.
+
+**Resultado de la primera ventana (2026-08-18 → 2026-09-18):** 21 recomendaciones, 0 decididas por
+el usuario. Con esta definición, una recomendación que nadie abre cuenta como útil a los 7 días, así
+que la métrica es **pasiva**: mide que el Recomendador genera, no que sirva. Si la ventana se
+repite, conviene exigir alguna señal humana (aceptar, o al menos abrir) antes de contarla — decisión
+pendiente, ver doc 07.
 
 ## 11. Riesgos y no-objetivos
 

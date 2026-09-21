@@ -7,7 +7,7 @@ esquema (doc 10 §9); estas Table son la referencia para leer/escribir.
 from __future__ import annotations
 
 import uuid as uuid_lib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pgvector.sqlalchemy import Vector
@@ -1382,6 +1382,81 @@ async def plan_metrics(
             for row in agent_latency_rows
         ],
         "insights": insights,
+    }
+
+
+# Ventanas de las métricas de negocio de `/metrics` (doc 09 §6). Se calculan en
+# cada scrape desde Postgres — no son contadores en memoria — para que
+# sobrevivan a reinicios y al modelo cron de Railway (ADR-0009: la API duerme y
+# el worker sale al drenar), donde un contador de proceso se perdería.
+BUSINESS_PLAN_WINDOWS: dict[str, timedelta] = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
+BUSINESS_RECOMMENDATION_WINDOWS: dict[str, timedelta] = {
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+async def business_metrics_snapshot(
+    engine: AsyncEngine, *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Foto de las métricas de negocio del Planner, los agentes y el Recomendador.
+
+    Reusa las agregaciones de `plan_metrics` (`_plan_window_*`) sobre ventanas
+    fijas y suma las de `recommendations`. Devuelve tipos simples (sin schemas de
+    Prometheus): `kos_core.observability.record_business_snapshot` la vuelca a
+    los gauges. `last_recommendation_at` es `None` si nunca hubo ninguna."""
+    now = now or datetime.now(UTC)
+    plans: dict[str, dict[str, Any]] = {}
+    async with engine.connect() as conn:
+        for label, span in BUSINESS_PLAN_WINDOWS.items():
+            start = now - span
+            plans[label] = {
+                "summary": await _plan_window_summary(conn, start=start, end=now),
+                "degradation": await _plan_window_degradation(conn, start=start, end=now),
+                "agents": await _plan_window_agents(conn, start=start, end=now),
+                "agent_latency": await _plan_window_agent_latency(conn, start=start, end=now),
+            }
+        by_group = (
+            (
+                await conn.execute(
+                    select(
+                        recommendations_table.c.type,
+                        recommendations_table.c.status,
+                        func.count().label("count"),
+                    ).group_by(recommendations_table.c.type, recommendations_table.c.status)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        created_columns = [
+            func.count()
+            .filter(recommendations_table.c.created_at >= now - span)
+            .label(f"created_{label}")
+            for label, span in BUSINESS_RECOMMENDATION_WINDOWS.items()
+        ]
+        created_row = (
+            (
+                await conn.execute(
+                    select(
+                        *created_columns,
+                        func.max(recommendations_table.c.created_at).label("last_created_at"),
+                    )
+                )
+            )
+            .mappings()
+            .one()
+        )
+    return {
+        "plans": plans,
+        "recommendations": {
+            "by_group": [dict(row) for row in by_group],
+            "created": {
+                label: int(created_row[f"created_{label}"])
+                for label in BUSINESS_RECOMMENDATION_WINDOWS
+            },
+            "last_created_at": created_row["last_created_at"],
+        },
     }
 
 

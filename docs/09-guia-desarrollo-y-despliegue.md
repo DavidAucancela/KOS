@@ -91,13 +91,37 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
 - **Trazas**: OpenTelemetry en API, workers y llamadas a LLM (latencia y tokens por etapa).
 - **Métricas**: Prometheus (`make obs-up` levanta Prometheus + Grafana). Métricas de negocio desde el inicio: documentos ingeridos, latencia de pipeline, coste de tokens por consulta, tamaño del grafo.
 
-  > **Estado real (2026-08-20):** la cobertura de métricas se quedó en lo que Sprint 5/5-addendum
-  > construyó (ingesta/búsqueda). El Planner (Sprint 18), los agentes (Sprint 17-21) y el
-  > Recomendador (Sprint 22-26) no sumaron métricas propias — sin tasa de degradación por
-  > `degraded_reason`, sin distribución de agentes elegidos por el LLM, sin latencia por paso de
-  > plan, sin el ritmo de recomendaciones útiles expuesto en `/metrics` (hoy solo vía
-  > `scripts/recommendations_report.py`, a demanda). Ver `docs/deuda-tecnica.md`, sección
-  > "Monitoreo" — es uno de los tres frentes activos tras el cierre de construcción de v1.0.
+  > **Estado real (2026-09-19):** la cobertura original (ingesta/búsqueda, Sprint 5) se extendió a
+  > lo que faltaba — Planner, agentes y Recomendador — como **gauges calculados en cada scrape
+  > desde Postgres** (`kos_core.storage.postgres.business_metrics_snapshot` →
+  > `kos_core.observability.record_business_snapshot`), servidos por la API en `GET /metrics`
+  > desde un registry aparte (`BUSINESS_REGISTRY`):
+  >
+  > | Métrica | Etiquetas | Responde |
+  > |---|---|---|
+  > | `kos_plans` | `window` (24h, 7d) | ¿cuántos planes genera el Planner? |
+  > | `kos_plans_degraded` | `window`, `reason` | tasa de degradación por `degraded_reason` |
+  > | `kos_plan_latency_avg_ms` | `window` | latencia promedio de un plan |
+  > | `kos_plan_agent_steps` | `window`, `agent` | distribución de agentes elegidos por el LLM |
+  > | `kos_plan_agent_latency_avg_ms` | `window`, `agent` | cuello de botella por agente |
+  > | `kos_recommendations` | `type`, `status` | recomendaciones existentes y cuántas se decidieron |
+  > | `kos_recommendations_created` | `window` (7d, 30d) | el ritmo del criterio de salida de v1.0 |
+  > | `kos_recommendation_last_created_timestamp_seconds` | — | alerta "sin recomendaciones en N días" (0 = nunca) |
+  > | `kos_business_metrics_up` | — | 1 si el scrape leyó Postgres, 0 si falló |
+  >
+  > **Por qué gauges desde Postgres y no contadores en memoria:** en el despliegue gestionado la API
+  > duerme y el worker es un cron que sale al drenar (ADR-0009); un contador de proceso se perdería
+  > en cada reinicio. La fuente de verdad ya es Postgres (`plans`, `recommendations`), así que la
+  > métrica es correcta aunque el proceso que escribió el dato ya no exista. El scrape **nunca
+  > devuelve 500**: si Postgres falla o tarda más de 5 s, sirve las métricas de proceso y baja
+  > `kos_business_metrics_up` a 0 (vaciando los gauges de negocio, para no mostrar datos viejos
+  > como vigentes). Consecuencia en Railway: cada scrape despierta a Postgres, así que no conviene
+  > un scrape de alta frecuencia contra un despliegue que debe dormir.
+  >
+  > **Sigue sin cubrirse:** una señal de que el Recomendador *corrió* (contador de pasadas /
+  > disparos recibidos). Hoy `kos_recommendations_created{window="7d"} = 0` no distingue "no hubo
+  > nada que recomendar" de "el disparo nunca llegó" — ver `docs/deuda-tecnica.md`, "Monitoreo".
+  > Tampoco el path local de LLM (Ollama) ni el coste en tokens del Planner por consulta.
 
 ## 7. Despliegue
 
