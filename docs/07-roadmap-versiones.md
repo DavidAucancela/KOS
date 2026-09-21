@@ -119,6 +119,32 @@ el usuario) no solicitada por semana durante un mes de uso real.
 > el cierre de construcción (`docs/sprints/sprint-26.md`): el veredicto de contradicción es
 > conservador con el modelo local — el ritmo real puede depender casi enteramente de lagunas.
 
+> **Medición de la primera ventana, 2026-09-19 — criterio NO cumplido, v1.0 sigue abierta.**
+> Corrida real de `scripts/recommendations_report.py` contra la API y Postgres locales
+> (2026-08-18 → 2026-09-18, ver `docs/eval/recomendaciones.md`):
+>
+> - **21 recomendaciones, todas `gap`; 0 `contradiction`; 0 aceptadas, 0 descartadas, 21 `pending`.**
+> - **2 de 5 semanas** tuvieron alguna recomendación: la del 17-ago (1, "Hashcat", 22-ago) y la del
+>   14-sep (20, todas en una ráfaga de 03:40 a 03:59 del 14-sep). Las semanas del 24-ago, 31-ago
+>   y 7-sep quedaron en cero. La del 31-ago tampoco tuvo ingesta (0 documentos) ni uso (1 plan);
+>   las del 24-ago y 7-sep sí ingirieron (10 y 33 documentos) y aun así no generaron nada.
+> - El criterio pedía ≥1 por semana durante un mes; se cumplió como mucho la mitad.
+>
+> Dos hallazgos sobre la propia medición, ambos anotados en
+> [deuda técnica](deuda-tecnica.md) (sección "Monitoreo"):
+>
+> 1. **La definición de "útil" es vacía si nadie revisa.** "`pending` sin `dismissed` en 7 días"
+>    cuenta como útil por omisión: el único ítem que hoy figura como 1/1 útil ("Hashcat") es una
+>    recomendación que nadie abrió, no una señal humana. Con 0 decisiones en 21, la ventana no midió
+>    utilidad, midió generación.
+> 2. **Calidad de las lagunas.** Por título, buena parte de la ráfaga del 14-sep parece ruido de
+>    extracción (`PRIMERO`, `install`, `check-env`, `init-db`, `npm run lint`, `corte`,
+>    `conclusiones`), no conocimiento faltante. No se inspeccionó el contenido de cada una todavía.
+>
+> Decisión pendiente (no tomada en esta medición): extender la ventana con revisión real de las 21
+> recomendaciones, o corregir primero la definición de "útil" y el filtro de ruido. Promover el
+> doc 11 a 🟢 y arrancar v1.1 siguen bloqueados hasta que el criterio se cumpla.
+
 ## v1.1 — Plataforma (Fase 6, parcial) · sin estimar todavía
 
 **Meta:** *un tercero puede extender KOS sin tocar el núcleo.*

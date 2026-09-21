@@ -3,9 +3,9 @@
 **Estado:** 🟡 Borrador · **Última actualización:** 2026-08-18
 
 Sprints de **2 semanas**. Cada sprint termina con algo demostrable ("demo o no pasó"). Este plan
-detalla v0.1 → v1.0: construcción completa hasta Sprint 26 (2026-08-18); el criterio de salida de
-v1.0 sigue en ventana de medición real hasta 2026-09-18 (doc 07). v1.1 se planifica al cerrar v1.0,
-con lo aprendido — sin documento propio todavía.
+detalla v0.1 → v1.0: construcción completa hasta Sprint 26 (2026-08-18); la primera ventana de
+medición de v1.0 cerró el 2026-09-18 y se midió el 2026-09-19 con el criterio **no cumplido** (doc 07).
+v1.1 se planifica al cerrar v1.0, con lo aprendido — sin documento propio todavía.
 
 ## Cadencia y reglas
 

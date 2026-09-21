@@ -216,6 +216,28 @@ Una sola vez, con el sistema local como origen de verdad:
 5. **Verificación de humo**: `alembic current` coincide; conteos de nodos/relaciones/chunks
    coinciden origen↔destino; un `POST /v1/query` devuelve `evidence[]` (regla 4 del proyecto).
 
+**Correcciones a este procedimiento, verificadas el 2026-09-19** contra la base local y Supabase:
+
+- **`pg_dump --data-only`, no un dump completo.** El esquema ya existe en Supabase (lo creó el
+  `releaseCommand` en `0016`, igual que local); un dump completo chocaría con las tablas
+  existentes. Con `--data-only` y `--disable-triggers`, en orden de FKs. `alembic_version` no se copia.
+- **Las fuentes no se copian tal cual.** La tabla `sources` local tiene 3 filas: `mini-vault` (3 docs,
+  fixture de tests) y `vault-auto` (0 activos, un directorio temporal) son basura de pruebas y **no
+  se migran**; `vault-real` (756 activos, 48 tombstones) guarda `vault_path` =
+  `/Users/david/Documents/Obsidian Vault`, una ruta de macOS que en Railway no existe. Hay que
+  reescribirla a `/data/vault` (`VAULT_PATH`) y conservar `cloud_safe: true` (ADR-0008). Sin esto el
+  cron sincronizaría una ruta inexistente y fallaría en cada ciclo. Los `documents` de las fuentes
+  descartadas tampoco se copian (filtrar por `source_uuid`).
+- **Hoy `sources` está vacío en Supabase**, así que el cron actual drena una cola vacía: "drain ok"
+  no significa que se esté ingiriendo algo.
+- **Vault (paso 4): ya es un repo git** con `origin` en `kos-vault`; falta confirmar que el push
+  está al día antes de que el primer cron lo clone.
+- Los embeddings (`bge-m3`, 1024 dim) se copian tal cual: local y Railway usan el mismo modelo, no
+  hay que re-embeber (el cliente HTTP falla si el proveedor no devuelve 1024 dim).
+- **Neo4j (paso 2) sigue siendo lo incierto**: Aura Free no admite montar un dump arbitrario desde
+  línea de comandos; el import va por su consola o `neo4j-admin database upload`. La migración de
+  prueba que pide el paso 2 no se hizo.
+
 Desplegar limpio y re-ingerir desde cero queda descartado: cuesta el backfill completo de LLM
 cloud (§10) por nada, teniendo el estado local ya calculado.
 
@@ -311,8 +333,8 @@ Ninguno revierte ADR-0006 ni ADR-0007 para el modo local: los complementan para 
 | ~~0 — ADRs~~ | 0008, 0009, 0010 | ✅ Cerrada el 2026-09-12: los tres en estado Aceptado |
 | ~~A — código habilitante~~ | `DATABASE_URL` en config · cliente de embeddings HTTP (falla si el proveedor no devuelve 1024 dim) · claves nombradas + Basic + rate limit · cadena de proveedores cloud (`ChainLLMClient`) · pools que duermen (NullPool en Postgres, sin keepalive en Redis, vida corta en Neo4j) · `POST /v1/ops/sync-now` vía `serviceInstanceRedeploy` · tabla `cron_runs` + `GET /v1/ops/status` | ✅ Cerrada el 2026-09-12. Verificado: 505 tests, `mypy --strict` limpio en `core`, `lint-imports` sin contratos rotos. De paso se corrigió `alembic upgrade head` (0012 tenía dos migraciones con el mismo id — el release command de Railway habría fallado). |
 | ~~B — imágenes~~ | `Dockerfile` multi-stage (uv + build de `apps/web`) · `kos_workers/drain.py` (drena, consolida memoria si toca, timeout de 30 min con salida forzada si el worker no para) · `pending_vault_writes` + encolado de `obsidian.*` (decisión centralizada en `kos_core.notes.*_or_enqueue`) · `railway.json` | ✅ Cerrada el 2026-09-12. Verificado con la imagen real contra la infra local: 401 sin credencial, `/health` 200 abierto, HTML servido con credencial, `python -m kos_workers.drain` saliendo con código 0, y `POST /v1/notes` encolando de verdad (sin crear el archivo) contra Postgres real. |
-| **C — infra gestionada** | Proyecto Railway (api + workers-cron `0 0,12 * * *` + Redis + volumen) · Supabase · Aura · R2 · repo privado del vault · variables (§7) | Deploy verde; `/health` responde sin credencial y `/` la pide; el cron ejecuta y termina |
-| **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]` |
+| ~~C — infra gestionada~~ | Proyecto Railway (api + workers-cron `0 0,12 * * *` + Redis + volumen) · Supabase · Aura · R2 · repo privado del vault · variables (§7) | ✅ Cerrada y verificada el 2026-09-19. Proyecto `KOS` con 3 servicios en vivo (`redis`, `api`, `workers-cron` con volumen `vault` de 5 GB en `/data/vault`), último deploy `SUCCESS` (commit `1315434`). Contra la URL pública: `/health` 200 **sin** credencial con Postgres, Neo4j, Redis y R2 en `ok` (es la primera vez que este código corre contra Supabase/Aura/R2 reales); `/`, `/metrics` y `/v1/ops/status` responden 401. El cron corrió a las 00:00 UTC del 20-sep: `cola vacía: se para el worker` → `drain ok: 3 tareas` y salió. Supabase en `alembic 0016` (igual que local). Costó tres correcciones que solo aparecieron contra infra real (PRs #30–#32): el cliente de R2 forzaba HTTP (`MINIO_SECURE`), el drain no clonaba el vault en un volumen vacío, y faltaba `releaseCommand` — **las migraciones nunca habían corrido en Railway**. Lección: un *redeploy* reusa el build y **no** corre el pre-deploy command; hace falta un deploy nuevo de verdad. |
+| **D — migración** | §8 sobre datos reales + verificación de humo | Conteos coinciden; `/v1/query` devuelve `evidence[]`. **Estado 2026-09-19: no iniciada** — Supabase tiene el esquema pero 0 documentos, 0 chunks, 0 fuentes (los 4 planes y 2 conversaciones son de probar la app vacía). Ver correcciones a §8 abajo |
 | **E — corte y medición** | Obsidian Git empujando al repo; uso normal 7 días | **Factura Railway proyectada < $3/mes**; las 2 ejecuciones diarias del cron aparecen en `/v1/ops/status` sin intervención; la API llega a dormir (gráfica de uso a cero entre sesiones) |
 
 El criterio de salida de la fase E es el que decide si este modo se queda. Si no baja de $3, la

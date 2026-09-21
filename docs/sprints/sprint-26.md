@@ -125,3 +125,13 @@ construcción y revisa lo acumulado (ver tabla arriba). El fix de CI cierra deud
   del diff. Los checks de CI de la propia PR de Sprint 25 (#10) ya mostraban `tsc -b` en rojo antes
   de mergear — la lección más simple era la que no se aplicó: revisar los checks de la PR antes de
   darla por cerrada, no solo correr la suite local.
+
+## Addendum 2026-09-19 — resultado de la ventana de medición
+
+La ventana (2026-08-18 → 2026-09-18) se midió con `scripts/recommendations_report.py` contra la API
+y Postgres reales: **21 recomendaciones, todas `gap`, 0 contradicciones, 0 decididas; 2 de 5
+semanas con alguna. Criterio de salida no cumplido, v1.0 sigue abierta.** El riesgo que esta retro
+anticipaba se confirmó y se quedó corto: no solo el ritmo dependió por completo de lagunas, sino que
+la definición de "útil" (`pending` sin `dismissed` a los 7 días) es pasiva y no midió utilidad.
+Detalle y decisión pendiente en [doc 07](../07-roadmap-versiones.md) (v1.0) y en
+[deuda técnica](../deuda-tecnica.md) (Monitoreo).

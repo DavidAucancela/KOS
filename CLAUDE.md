@@ -7,20 +7,25 @@ Motor de conocimiento independiente de fuentes; Obsidian es solo un conector. El
 **v1.0 construcción completa** (2026-08-18, Sprints 22–26): `RecommenderAgent` se dispara ante
 `graph.updated` real (sync automático o corrección manual) y detecta lagunas de conocimiento y
 contradicciones, con feedback loop (`PATCH /v1/recommendations/{id}`) y deduplicación por firma.
-**El criterio de salida (≥1 recomendación útil/semana) está en ventana de medición real hasta
-2026-09-18** — no declarar v1.0 cerrado hasta verificarlo con `scripts/recommendations_report.py`,
-código terminado no es lo mismo que versión cerrada (ver doc 07, regla del roadmap).
+**El criterio de salida (≥1 recomendación útil/semana) se midió el 2026-09-19 y NO se cumplió**
+(21 recomendaciones, todas `gap`, ninguna revisada; 2 de 5 semanas con alguna — doc 07). v1.0 sigue
+abierta: no declararla cerrada hasta decidir si se extiende la ventana o se corrige la definición de
+"útil" (hoy pasiva: una recomendación que nadie abre cuenta como útil a los 7 días). Código terminado
+no es lo mismo que versión cerrada (ver doc 07, regla del roadmap).
 
 Se construye sobre **v0.5 — Orquestación de agentes** (cerrado 2026-08-16): Planner real (LLM
 genera planes dinámicos), 6 agentes (Retrieval/Graph/Research/Memory/Writing/Learning) sobre 13
 herramientas MCP reales, planes auditables (`GET /v1/plans/{id}`).
 
-**Próximo paso**: no hay sprint numerado en curso. Tres frentes en paralelo sobre
-`docs/deuda-tecnica.md` — deuda técnica pendiente (evaluando riesgo real antes de cerrar cada
-ítem, no todo lo que parece deuda debe resolverse a ciegas), mejoras de calidad (desambiguación
-léxica, clasificación de entidades, umbrales sin tuning), y monitoreo (sin métricas del
-Planner/agentes/Recomendador todavía — ver doc 09 §6). v1.1 (Plataforma) no se planifica hasta
-cerrar el criterio de salida de v1.0.
+**Próximo paso**: no hay sprint numerado en curso. Orden vigente desde 2026-09-19: **monitoreo**
+(las métricas del Planner/agentes/Recomendador ya están en `/metrics`, doc 09 §6; falta una señal de
+que el Recomendador corrió) y **Railway fase D** (doc 14: migrar los datos locales — la infra real de
+la fase C está viva y verificada desde 2026-09-19, pero Supabase tiene 0 documentos y `sources` vacío,
+así que el cron drena una cola vacía). **Diferidos a propósito**: el diseño de UI de
+doc 13 §8–§11 y el backfill del grafo. Siguen abiertos en `docs/deuda-tecnica.md` la deuda técnica
+y las mejoras de calidad (desambiguación léxica, clasificación de entidades, umbrales sin tuning,
+y ahora el ruido de las lagunas). v1.1 (Plataforma) no se planifica hasta cerrar el criterio de
+salida de v1.0.
 
 ## Dónde está todo
 
