@@ -138,6 +138,23 @@ La CI corre sobre stubs hasta que exista código; el workflow ya está en `.gith
   > (hoy "el disparo no llegó" se infiere por ausencia), el path local de LLM (Ollama) y el coste en
   > tokens del Planner por consulta.
 
+- **Dashboard (local)**: `make obs-up` ya provisiona un datasource de Prometheus y un dashboard
+  ("KOS Overview") en Grafana (`infra/grafana/provisioning/`, `infra/grafana/dashboards/`) con
+  paneles agrupados por salud, Planner, Recomendador y proceso — las mismas métricas de la tabla
+  de arriba. `http://localhost:3001`, usuario `admin`, clave `GRAFANA_PASSWORD` (default
+  `kos_dev_password`). Solo sirve para el entorno local: doc 14 §2 deja Prometheus/Grafana fuera
+  del despliegue gestionado.
+
+- **Alertas (producción)**: como Railway no corre Prometheus/Grafana, `scripts/check_production_health.py`
+  consulta `GET /metrics` en producción (con `X-API-Key`) y evalúa umbrales fijos sobre las mismas
+  métricas de negocio (Postgres inalcanzable, Recomendador atrasado o con errores en 7 días, sin
+  recomendaciones nuevas). Si algo se dispara, postea un mensaje a un webhook de Discord propio de
+  KOS (no el de `llm-observatory`, que es un proyecto externo distinto). Corre por cron en
+  `.github/workflows/monitor-production.yml` cada 30 min, con `KOS_MONITOR_API_URL`,
+  `KOS_MONITOR_API_KEY` y `DISCORD_WEBHOOK_URL` como GitHub Secrets — las credenciales nunca pasan
+  por Claude, mismo criterio que la fase D de doc 14. Ajustar umbrales: `RECOMMENDER_STALE_DAYS` y
+  `NO_RECOMMENDATIONS_STALE_DAYS` en el propio script.
+
 ## 7. Despliegue
 
 | Etapa | Estrategia |

@@ -59,10 +59,11 @@ alguna — doc 07). v1.0 sigue abierta hasta decidir si se extiende la ventana o
 definición de "útil". Mientras tanto, el trabajo activo son tres frentes sobre
 [`docs/deuda-tecnica.md`](deuda-tecnica.md), en este orden:
 
-> **Orden vigente desde 2026-09-19:** **monitoreo** (frente 3: métricas de negocio ya en `/metrics`,
-> falta el contador de pasadas del Recomendador) y **Railway fase D** (doc 14: migrar los datos; la
-> infra de la fase C ya está viva y verificada). Quedan **diferidos a propósito** el diseño de UI de
-> doc 13 §8–§11 y el backfill del grafo.
+> **Orden vigente desde 2026-09-19:** **monitoreo** (frente 3: métricas de negocio ya en `/metrics`;
+> dashboard de Grafana local y alertas de producción por Discord con código listo desde 2026-09-29,
+> pendiente de que el usuario configure el webhook/secrets y verifique una corrida real) y
+> **Railway fase D** (doc 14: migrar los datos; la infra de la fase C ya está viva y verificada).
+> Quedan **diferidos a propósito** el diseño de UI de doc 13 §8–§11 y el backfill del grafo.
 
 1. **Deuda técnica** — ítems "sin sprint asignado" y "UI/UX baja prioridad". Evaluar el riesgo real
    de cada ítem antes de implementarlo, no asumir que "cerrar deuda" siempre es la acción correcta
@@ -70,9 +71,11 @@ definición de "útil". Mientras tanto, el trabajo activo son tres frentes sobre
    `memory.store` en el catálogo del Planner).
 2. **Mejoras de calidad** — sección "Calidad / ajuste fino": desambiguación léxica, clasificación
    de entidades, umbrales sin tuning, precisión conservadora del veredicto de contradicción.
-3. **Monitoreo** — doc 09 §6: desde 2026-09-19 `/metrics` cubre también el Planner, los agentes y
-   el Recomendador (gauges desde Postgres). Sigue faltando una señal de que el Recomendador *corrió*,
-   y alertas/dashboard. Revisar doc 09 §6 antes de sumar instrumentación nueva.
+3. **Monitoreo** — doc 09 §6: `/metrics` cubre el Planner, los agentes y el Recomendador (gauges
+   desde Postgres), incluida la señal de que el Recomendador *corrió* (`kos_recommender_runs`,
+   2026-09-21). Dashboard de Grafana local y alertas de producción por Discord con código listo
+   desde 2026-09-29 (`scripts/check_production_health.py`); falta verificar una corrida real contra
+   Railway. Revisar doc 09 §6 antes de sumar instrumentación nueva.
 
 v1.1 (Plataforma) no se planifica en sprints hasta cerrar el criterio de salida de v1.0 — regla 1
 del roadmap (doc 07).
