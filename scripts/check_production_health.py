@@ -6,6 +6,7 @@ de "alerta" sin necesitar infraestructura ahí).
 Reglas evaluadas, todas sobre métricas de negocio que ya existen en
 `BUSINESS_REGISTRY` (`packages/core/src/kos_core/observability.py`):
 
+- `/metrics` inalcanzable (red, timeout, status 4xx/5xx) → Railway caído o despertando.
 - `kos_business_metrics_up == 0` → Postgres inalcanzable desde `/metrics`.
 - El Recomendador no corre hace más de `RECOMMENDER_STALE_DAYS` días (o nunca).
 - Alguna pasada del Recomendador falló en la ventana de 7 días.
@@ -46,12 +47,12 @@ class Alert:
 
 
 def _fetch_metrics(base_url: str, api_key: str) -> str:
+    """Puede lanzar `httpx.HTTPError` (red, timeout, status 4xx/5xx) — a propósito:
+    que `/metrics` sea inalcanzable es en sí mismo una condición a alertar (ver
+    `main`), no un error fatal del script."""
     url = f"{base_url.rstrip('/')}/metrics"
-    try:
-        response = httpx.get(url, headers={"X-API-Key": api_key}, timeout=10.0)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise SystemExit(f"no se pudo consultar {url} ({exc})") from exc
+    response = httpx.get(url, headers={"X-API-Key": api_key}, timeout=10.0)
+    response.raise_for_status()
     return response.text
 
 
@@ -101,8 +102,12 @@ def evaluate(text: str, *, now_seconds: float) -> list[Alert]:
                 )
             )
 
+    # `None` = la serie {status="error"} no existe porque no hubo ninguna pasada
+    # fallida en la ventana (el gauge solo emite combinaciones que ocurrieron de
+    # verdad, observability.py:200-203) — ausencia equivale a cero, no a un dato
+    # faltante.
     errors_7d = _sample_value(text, "kos_recommender_runs", {"window": "7d", "status": "error"})
-    if errors_7d and errors_7d > 0:
+    if (errors_7d or 0.0) > 0:
         alerts.append(
             Alert(
                 "kos_recommender_runs",
@@ -158,7 +163,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    text = _fetch_metrics(base_url, api_key)
+    try:
+        text = _fetch_metrics(base_url, api_key)
+    except httpx.HTTPError as exc:
+        alert = Alert("metrics_unreachable", f"no se pudo consultar /metrics en producción: {exc}")
+        print(f"✗ {alert.rule}: {alert.detail}", file=sys.stderr)
+        _notify_discord(webhook_url, [alert])
+        return 1
+
     alerts = evaluate(text, now_seconds=time.time())
 
     if not alerts:
