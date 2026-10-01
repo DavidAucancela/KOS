@@ -73,7 +73,7 @@ cambian el diseño, no detalles de operación:
 | **Object storage** (hoy MinIO) | **Cloudflare R2** (fuera de Railway) | 10 GB gratis, sin egress. El vault son ~200 MB. S3-compatible → solo cambia `endpoint_url` + credenciales. |
 | **Vault Obsidian** | repo git privado, clonado en un **volumen** del servicio cron | §5. |
 | **Ollama** | **eliminado** | Reemplazado por §10. |
-| **Prometheus/Grafana** | fuera de alcance | Perfil `observability` del compose; no se despliega. Railway da métricas básicas por servicio. |
+| **Prometheus/Grafana** | fuera de alcance | Perfil `observability` del compose; no se despliega. Railway da métricas básicas por servicio. Producción se vigila sin infra ahí: `scripts/check_production_health.py` (GitHub Actions, cron cada 30 min) consulta `GET /metrics` y avisa a Discord si algo se sale de umbral (doc 09 §6). |
 
 `api` y `workers` comparten imagen (mismo Dockerfile, mismo repo) y se despliegan como **dos
 servicios Railway** con start command distinto.

@@ -1,0 +1,27 @@
+name: Monitoreo de producción
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Chequear /metrics de Railway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        run: uv sync --all-packages
+
+      - name: Chequear salud de producción
+        env:
+          KOS_MONITOR_API_URL: ${{ secrets.KOS_MONITOR_API_URL }}
+          KOS_MONITOR_API_KEY: ${{ secrets.KOS_MONITOR_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: uv run python scripts/check_production_health.py check
